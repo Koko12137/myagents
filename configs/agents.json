@@ -1,0 +1,50 @@
+{
+    "name": "react",
+    "agent": {
+        "name": "react_agent",
+        "llm": {
+            "provider": "openai",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "model": "qwen3-235b-a22b",
+            "temperature": 0.8, 
+            "api_key_field": "OPENAI_KEY", 
+            "extra_body": {
+                "enable_thinking": false
+            }
+        }
+    }, 
+    "workflows": [
+        {
+            "name": "plan", 
+            "agent": {
+                "name": "plan_agent",
+                "llm": {
+                    "provider": "openai",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "model": "qwen3-235b-a22b",
+                    "temperature": 1.0, 
+                    "api_key_field": "OPENAI_KEY", 
+                    "extra_body": {
+                        "enable_thinking": false
+                    }
+                }
+            }
+        },
+        {
+            "name": "action",
+            "agent": {  
+                "name": "action_agent",
+                "llm": {
+                    "provider": "openai",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "model": "qwen3-235b-a22b",
+                    "temperature": 0.1, 
+                    "api_key_field": "OPENAI_KEY", 
+                    "extra_body": {
+                        "enable_thinking": false
+                    }
+                }
+            }
+        }
+    ]
+}

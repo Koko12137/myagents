@@ -1,0 +1,18 @@
+[project]
+name = "myagents"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dashscope>=1.23.2",
+    "fastapi>=0.115.12",
+    "fastapi-mcp>=0.3.3",
+    "fastmcp>=2.3.3",
+    "langchain-openai>=0.3.16",
+    "loguru>=0.7.3",
+    "mcp>=1.8.0",
+    "openai>=1.78.0",
+    "pydantic>=2.11.4",
+    "uvicorn>=0.34.2",
+]
