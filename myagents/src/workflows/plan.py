@@ -1,3 +1,4 @@
+import re
 from typing import Callable
 from traceback import format_exc
 
@@ -8,7 +9,7 @@ from myagents.src.message import CompletionMessage, MessageRole, StopReason, Too
 from myagents.src.interface import Agent, Task, TaskStatus, TaskStrategy, Logger
 from myagents.src.workflows.base import BaseWorkflow
 from myagents.src.envs.task import BaseTask
-from myagents.prompts.workflows.plan import PLAN_REASON_PROMPT, EXEC_PLAN_PROMPT
+from myagents.prompts.workflows.plan import REASON_PROMPT, PLAN_ATTENTION_PROMPT, EXEC_PLAN_PROMPT
 
 
 class PlanFlow(BaseWorkflow):
@@ -51,7 +52,7 @@ class PlanFlow(BaseWorkflow):
         async def create_task(question: str, description: str, is_leaf: bool) -> Task:
             """
             Create a task. You should only focus on the question and description parameters without concerning any other parameters. 
-            You can modify other parameters when you planning that task.
+            You can modify other parameters when you planning that task. This task will be added to the current task as a sub-task. 
             
             Args:
                 question (str): 
@@ -75,7 +76,8 @@ class PlanFlow(BaseWorkflow):
         @self.register_tool("set_strategy")
         async def set_strategy(strategy: str) -> TaskStrategy:
             """
-            Set the strategy of the task. If the strategy of the task is not correct, you can change it to a better strategy.
+            Set the strategy of the parent task. If the strategy of the parent task is not correct, you can modify it.
+            Otherwise, you can leave it as it is. 
             
             Args:
                 strategy (str):
@@ -97,12 +99,20 @@ class PlanFlow(BaseWorkflow):
                 self.custom_logger.error(f"No tools registered for the plan flow. {format_exc()}")
                 raise RuntimeError("No tools registered for the plan flow.")
             
-    async def run(self, task: Task) -> Task:
-        """Run the PlanFlow workflow.
+        @self.register_tool("finish_planning")
+        async def finish_planning() -> bool:
+            """
+            Finish the planning of the parent task. This will set the status of the parent task to running and the loop 
+            of the workflow will be finished. 
+            """
+            return 
+            
+    async def __layer_create(self, task: Task) -> Task:
+        """Create the sub-tasks for the task.
 
         Args:
             task (Task):
-                The task to be executed.
+                The task to create the sub-tasks.
 
         Raises:
             ValueError:
@@ -111,7 +121,7 @@ class PlanFlow(BaseWorkflow):
 
         Returns:
             Task:
-                The task after execution.
+                The task after created the sub-tasks.
         """
         # Set the task status to planning
         task.status = TaskStatus.PLANNING
@@ -119,13 +129,9 @@ class PlanFlow(BaseWorkflow):
         # 1. Observe the task
         history, current_observation = await self.agent.observe(task)
         # 2. Create a new message for the current observation
-        tools_str = "\n".join([tool.description for tool in self.tools.values()])
         message = CompletionMessage(
             role=MessageRole.USER, 
-            content=PLAN_REASON_PROMPT.format(
-                tools=tools_str, 
-                task_context=current_observation, 
-            ), 
+            content=PLAN_ATTENTION_PROMPT.format(task_context=current_observation), 
             stop_reason=StopReason.NONE, 
         )
         
@@ -140,6 +146,8 @@ class PlanFlow(BaseWorkflow):
         # 4. Record the completion message
         task.history.append(message)
         history.append(message)
+        
+        tools_str = "\n".join([tool.description for tool in self.tools.values()])
         
         # Modify the orchestration
         while True:
@@ -199,13 +207,112 @@ class PlanFlow(BaseWorkflow):
                 # Append for agent's completion
                 history.append(tool_result)
                     
-            else:
+            # 6. Check if the planning is finished
+            if task.status == TaskStatus.RUNNING:
                 # No more orchestration is required, break the loop
                 break
-            
-        # No more orchestration is required, so we update the task status to running
-        task.status = TaskStatus.RUNNING
         
+        return task
+        
+    async def __reason(self, task: Task) -> Task:
+        """Reason about the task and give a general orchestration plan.
+        
+        Args:
+            task (Task): The task to reason about.
+
+        Returns:
+            Task: The task with the orchestration plan.
+        """
+        # 1. Observe the task
+        history, current_observation = await self.agent.observe(task)
+        # 2. Create a new message for the current observation
+        message = CompletionMessage(
+            role=MessageRole.USER, 
+            content=REASON_PROMPT.format(task_context=current_observation), 
+            stop_reason=StopReason.NONE, 
+        )
+        # Log the reason prompt
+        self.custom_logger.info(f"Reason For General Orchestration and Action Plan: \n{message.content}")
+        
+        # 3. Append Reason Prompt and Call for Completion
+        # Append for current task recording
+        task.history.append(message)
+        # Append for agent's completion
+        history.append(message)
+        # Call for completion
+        message: CompletionMessage = await self.agent.think(history, allow_tools=False)
+        
+        # 4. Record the completion message
+        # Append for current task recording
+        task.history.append(message)
+        # Append for agent's completion
+        history.append(message)
+        
+        return task
+    
+    async def run(self, task: Task) -> Task:
+        """Run the PlanFlow workflow. This workflow will create the sub-tasks for the task layer by layer. 
+        
+        Args:
+            task (Task):
+                The task to be executed.
+
+        Returns:
+            Task:
+                The task after execution.
+        """
+        # Reason about the task 
+        task = await self.__reason(task)
+        
+        # Check if the task is a leaf task
+        if task.is_leaf:
+            # Set the task status to running
+            task.status = TaskStatus.RUNNING
+            return task
+        
+        # Layer by layer traverse the task and create the sub-tasks
+        queue: list[Task] = [task]
+        
+        while queue:
+            # Create a new queue
+            new_queue = []
+            
+            # Traverse the queue
+            for task in queue:
+                # Get the first task from the queue
+                current_task = queue.pop(0)
+                
+                # Check if the current task is pending or failed
+                if current_task.status == TaskStatus.CREATED: 
+                    if len(current_task.sub_tasks) == 0:
+                        # Log the current task
+                        self.custom_logger.info(f"Planning current task: \n{current_task.observe()}")
+                        
+                        # Call the plan flow to plan the task
+                        current_task = await self.__layer_create(current_task)
+                    
+                    # Check if all the sub-tasks are cancelled
+                    if all(sub_task.status == TaskStatus.CANCELLED for sub_task in current_task.sub_tasks.values()):
+                        # Log the current task
+                        self.custom_logger.info(f"Planning current task: \n{current_task.observe()}")
+                        
+                        # Call the plan flow to plan the task
+                        current_task = await self.__layer_create(current_task)
+            
+                # Check if there is any pending sub-task
+                if current_task.sub_tasks:
+                    # Add the sub-task to the new queue
+                    for sub_task in current_task.sub_tasks.values():
+                        if sub_task.status == TaskStatus.CREATED and not sub_task.is_leaf:
+                            new_queue.append(sub_task)
+                            # Log the new sub-task
+                            self.custom_logger.info(f"Add sub-task to the queue: \n{sub_task.observe()}")
+            
+            # Update the queue
+            queue = new_queue
+            # Log the new queue
+            self.custom_logger.info(f"Update queue with {len(queue)} tasks")
+                
         return task
     
     async def call_tool(self, task: Task, tool_call: ToolCallRequest) -> ToolCallResult:
@@ -264,6 +371,19 @@ class PlanFlow(BaseWorkflow):
                 tool_call_id=tool_call.id, 
                 is_error=False, 
                 content=f"Strategy {strategy.value} set. Current Task Context: \n{task.observe()}",
+            )
+            # Log the tool call result
+            self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
+            
+        elif tool_call.name == "finish_planning":
+            # No more orchestration is required, so we update the task status to running
+            task.status = TaskStatus.RUNNING
+            
+            # Create ToolCallResult
+            tool_result = ToolCallResult(
+                tool_call_id=tool_call.id, 
+                is_error=False, 
+                content=f"Planning finished. Current Task Context: \n{task.observe()}",
             )
             # Log the tool call result
             self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")

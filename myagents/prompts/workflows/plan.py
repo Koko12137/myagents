@@ -1,109 +1,226 @@
-PLAN_REASON_PROMPT = """
-## Stage Description
-You are now in the planning stage. You should decide the action to be taken in this task, and You can orchestrate sub 
-tasks according to the available tools. 
+REASON_PROMPT = """
+# 🔄 阶段规范：任务分解规划阶段
+**当前关键阶段**：`分层任务编排设计阶段`  
+**阶段核心使命**：  
+▢ 创建完整的任务层级结构蓝图  
+▢ 定义每个子任务的信息需求  
+▢ 标记叶子节点任务（最终执行层）  
 
-## Task Description
-Now you should decide the action to be taken in this task, and You can orchestrate sub tasks according to the available 
-tools, but you will not be provided with the accessability to the tools, so you don't need to provide the tool calls but 
-only the task orchestration and your reason. 
-    1. If you think one sub task can be finished directly without any sub-tasks, you should mark this sub task as 
-        a leaf task.
-    2. If you think this task cannot be finished directly and it needs to be split into sub-tasks, you should 
-        mark this task as a non-leaf task and it will be orchestrated by the next planning. 
-        
-## Attention
-You should not call any tools in the sub-tasks, but only the task orchestration and your reason. And you should only 
-take care of the next one level of sub-tasks without considering the higher level of sub-tasks. In your sub tasks, you 
-should provide the task dependencies and the task correct condition. You can decide your choice according the tools that 
-are available.
+## ⚠ 阶段专属约束（强制遵守）
+1. **全局规划责任**  
+   ⛔ 本阶段必须完成**整个任务树**的顶层设计  
+   ✓ 需预见所有潜在子任务层级  
 
-## Tools 
-All the available tools are listed below:
-{tools}
+2. **叶子节点标识规则**  
+   ▢ `Is Leaf=True` 仅当任务**不再可分**且**可直接执行**  
+   ▢ 非叶子任务必须包含`Sub-Tasks`属性  
 
-## Format Constraints
-You must follow the following format, otherwise you will be penalized. 
-<think> 
-your thinking if this part is needed
+3. **上下文锚定原则**  
+   ⛔ 禁止虚构超出观察到的上下文范围的任务  
+   ✓ 所有描述必须基于上下文需求  
+
+<!-- 符号说明 -->  
+(▢ = 选择框 | ✓ = 允许动作 | ⛔ = 禁止动作)
+
+## ▣ 阶段专属输出格式
+<think>
+# 规划思考（阶段核心推理）
+分析任务分解逻辑和层级设计依据
 </think>
-<reason>
-1. reason 1
-2. reason 2
-3. ...
-</reason>
-<task_finish_condition>
-All of the sub-tasks should be finished or any one of them is finished. 
-</task_finish_condition>
-<task>
-- [ ] create task 1
-- [ ] create task 2
-    - Description:
-        The description of the sub-task. 
-    - Dependencies:
-        task 1
-    - Is Leaf:
-        True or False (Whether the task is a leaf task)
-    - Correct Condition:
-        The correct condition of the sub-task.
-- [ ] ...
-</task>
 
-## Task Context Observation
-You can observe the task context below, it including the task question, description, status, strategy, parent task information 
-and sub-tasks information that are already created.
+<orchestration>
+# 分层任务蓝图（阶段核心产出）
+- [ ] 任务名称
+    - 描述：**必须明确**本任务需要的信息
+    - 是否叶子：True/False（严格遵循叶子定义）
+    - 子任务：（仅当非叶子时存在）
+        - [ ] 子任务名称
+            - 描述：... 
+            - 是否叶子：...
+            - 子任务：...（可多层嵌套）
 
+## 阶段验证清单
+▢ 每个任务必须含`描述`和`是否叶子`属性  
+▢ 非叶子任务必须有`子任务`且至少2项  
+▢ 叶子任务禁止包含`子任务`属性
+</orchestration>
+
+## 🌰 阶段标准示例（必须遵守格式）
+假设当前需要规划拆解的任务为：竞品分析总任务
+
+<orchestration>
+# 分层任务蓝图：产品竞品分析
+
+- [ ] 竞品分析总任务
+    - 描述：需要完整竞品分析报告  
+    - 是否叶子：False  // 非叶子任务，需要继续拆解
+    - 子任务：
+        - [ ] 确定竞品范围
+            - 描述：需要行业TOP5企业名单  
+            - 是否叶子：False  // 非叶子任务，需要继续拆解
+            - 子任务：
+                - [ ] 收集市场占有率数据
+                    - 描述：获取权威机构最新市场报告  
+                    - 是否叶子：True
+                - [ ] 提取用户关注品牌
+                    - 描述：爬取社交媒体热门话题  
+                    - 是否叶子：True
+        
+        - [ ] 产品功能对比
+            - 描述：需要竞品核心功能清单  
+            - 是否叶子：False  // 非叶子任务，需要继续拆解
+            - 子任务：
+                - [ ] 收集产品规格参数
+                    - 描述：访问竞品官网技术文档  
+                    - 是否叶子：True
+                - [ ] 测试核心功能点
+                    - 描述：实际使用竞品记录体验  
+                    - 是否叶子：True
+        
+        - [ ] 价格策略分析
+            - 描述：需要全球定价数据  
+            - 是否叶子：False  // 非叶子任务，需要继续拆解
+            - 子任务：
+                - [ ] 采集官方定价
+                    - 描述：抓取官网商店价格  
+                    - 是否叶子：True
+                - [ ] 监测促销活动
+                    - 描述：追踪30天价格波动  
+                    - 是否叶子：True
+        
+        - [ ] 用户反馈分析
+            - 描述：需要多平台用户评价  
+            - 是否叶子：False  // 非叶子任务，需要继续拆解
+            - 子任务：
+                - [ ] 收集应用商店评论
+                    - 描述：爬取App Store/Google Play数据  
+                    - 是否叶子：True
+                - [ ] 分析社交媒体舆情
+                    - 描述：监测Twitter/微博话题情感倾向  
+                    - 是否叶子：True
+        
+        - [ ] 生成分析报告
+            - 描述：整合所有分析数据  
+            - 是否叶子：False  // 非叶子任务，需要继续拆解
+            - 子任务：
+                - [ ] 制作对比图表
+                    - 描述：功能/价格/满意度可视化  
+                    - 是否叶子：True // 最终叶子任务
+                - [ ] 编写SWOT分析
+                    - 描述：基于数据生成战略建议  
+                    - 是否叶子：True // 最终叶子任务
+
+## 🌐 任务上下文信息（动态注入）
+你当前观察到的父任务信息为：
+{task_context}
+"""
+
+
+PLAN_ATTENTION_PROMPT = """
+# 🔄 阶段规范：任务分解 - 创建子任务阶段
+**当前层级定位**：`任务分解 - 创建子任务阶段`  
+**核心职责**：  
+▢ 仅规划父任务的**直接子任务**  
+⛔ 禁止设计孙任务（第三层）细节  
+
+## ⚠ 层级专属约束（强制聚焦）
+1. **层级边界锁**  
+   ✓ 只需定义父任务的直属子任务  
+   ⛔ 禁止描述任何第三层任务内容  
+
+2. **信息粒度控制**  
+   ✓ 子任务描述只需**当前层需求**  
+   ⛔ 禁止包含执行细节（属于下层规划）  
+
+3. **叶子节点简化**  
+   ▢ `是否叶子`仅标识**当前层是否可执行**  
+   ▢ 若为False，只需标注`需下层分解`  
+
+<!-- 符号说明 -->  
+(▢ = 选择框 | ✓ = 允许动作 | ⛔ = 禁止动作)
+
+## ▣ 当前层输出格式
+```markdown
+- [ ] 二级子任务名称
+    - 描述：【本层规划所需信息】
+    - 是否叶子：【True/False】
+    # 注意：若为False，不包含子任务属性
+```
+
+## 🌰 阶段标准示例（必须遵守格式）
+假设当前任务的父任务为：竞品分析总任务
+根据历史的规划可以观察到，所需创建的子任务为：
+
+- [ ] 确定竞品范围
+    - 描述：需要目标市场TOP5竞品名单
+    - 是否叶子：False  // 需下层分解
+
+- [ ] 产品功能对比
+    - 描述：需要核心功能对比维度框架
+    - 是否叶子：False
+
+- [ ] 价格策略分析
+    - 描述：需要定价分析模型框架
+    - 是否叶子：False
+
+- [ ] 用户反馈分析
+    - 描述：需要多平台评价采集范围
+    - 是否叶子：False
+
+- [ ] 生成分析报告
+    - 描述：需要报告模板框架
+    - 是否叶子：False
+
+## 🌐 任务上下文信息（动态注入）
+你当前观察到的父任务信息为：
 {task_context}
 """
 
 
 EXEC_PLAN_PROMPT = """
-## Task Description
-Now you will be provided with some tools that can modify the orchestration of sub-tasks, and you should decide the 
-tool call and its arguments according to the history messages or you can reply that this task can be finished directly. 
-The following is your choice:
-1. You can reply that this task can be finished directly without calling any tools, and this task is a leaf task. 
-2. You can reply the tool call and its arguments. 
-3. All the task orchestration are finished. End the loop of planning.
+# 🔄 阶段规范：任务规划阶段
+**当前关键阶段**：`子任务编排执行阶段`  
+**阶段核心任务**：  
+▢ 基于历史消息中确定的任务编排策略，调用工具创建子任务  
+▢ 修改当前任务的完成策略，如要求全部子任务都完成或者任一子任务完成即可  
+▢ 判断是否完成当前层的全部子任务创建  
 
-## Attention
-You SHOULD ONLY orchestrate one sub layer of sub-tasks for the current task. You do not need to consider the higher 
-level of sub-tasks. All the rest of the sub-tasks will be orchestrated by the next planning. 
+## ⚠ 阶段专属约束（强制遵守）
+1. **单层规划限制**  
+   ⛔ 仅允许编排**当前层**子任务  
+   ⛔ 禁止考虑高层/全局规划  
 
-## Tools
-All the available tools are listed below:
+2. **终局判定规则**  
+   ✓ `finish_flag=True` 仅当所有子任务创建完成且当前任务的完成策略正确设置时
+   ⛔ 调用工具时必须设置 `finish_flag=False`  
+
+3. **上下文锚定原则**  
+   ⛔ 禁止虚构修改任务上下文  
+   ✓ 必须严格基于观察到的任务上下文信息  
+
+<!-- 符号说明 -->  
+(▢ = 选择框 | ✓ = 允许动作 | ⛔ = 禁止动作)
+
+## 🛠 可用工具（子任务编排执行阶段）
 {tools}
 
-## Format Constraints
-You must follow the following format, otherwise you will be penalized. 
-<think> 
-your thinking if this part is needed
+## 📜 格式约束（阶段通用）
+<think>
+判断当前步骤是否需要执行
 </think>
 <reason>
-1. reason 1
-2. reason 2
-3. ...
+1. 原因分析1  
+2. 原因分析2  
+3. ...  // 必须列出决策依据
 </reason>
-<task>
-- [x] task 1 created
-- [ ] now working on task 2 creating 
-    - Dependencies:
-        task 1
-    - Description:
-        The description of the sub-task.  
-    - Is Leaf:
-        True or False (Whether the task is a leaf task)
-    - Correct Condition:
-        The correct condition of the sub-task. 
-- [ ] ...
-</task>
-<description>
-The description of the task. In this task, whether or not you need a utility, and what information you want to get if you do. 
-</description>
+<action>
+⚠️ 单次任务仅允许执行一个动作
+</action>
+<finish_flag>
+False  // 仅当所有子任务创建完成并且当前任务的完成策略正确设置时，应被设置为 True 否则设置为 False
+</finish_flag>
 
-## Task Context Observation
-You can observe the task context below, it including the task question, description, status, strategy, parent task information 
-and sub-tasks information that are already created.
-
+## 🌐 任务上下文信息（动态注入）
+你当前观察到的父任务信息为：
 {task_context}
 """

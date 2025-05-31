@@ -103,14 +103,12 @@ class StepCounter(Protocol):
         """
         pass
     
-    def step(self, *args, **kwargs) -> None:
+    def step(self, step: int | float) -> None:
         """Increment the current step of the step counter.
         
         Args:
-            *args:
-                The additional arguments to pass to the step method.
-            **kwargs:
-                The additional keyword arguments to pass to the step method.
+            step (int | float):
+                The step to increment. 
         
         Returns:
             None 
@@ -179,15 +177,12 @@ class Agent(Protocol):
     async def observe(
         self, 
         env: 'Task', 
-        **kwargs: dict, 
     ) -> tuple[list[CompletionMessage | ToolCallRequest | ToolCallResult], str]:
         """Observe the task.
         
         Args:
             env (Task):
                 The task to observe. 
-            **kwargs (dict, optional):
-                The keyword arguments to pass to the task observe method.
 
         Returns:
             list[CompletionMessage | ToolCallRequest | ToolCallResult]:
@@ -202,7 +197,6 @@ class Agent(Protocol):
         observe: list[CompletionMessage | ToolCallRequest | ToolCallResult], 
         allow_tools: bool,  
         external_tools: dict[str, FastMcpTool | MCPTool] = {}, 
-        **kwargs: dict, 
     ) -> CompletionMessage:
         """Think about the environment.
         
@@ -210,11 +204,10 @@ class Agent(Protocol):
             observe (list[CompletionMessage | ToolCallRequest | ToolCallResult]):
                 The messages observed from the environment. 
             allow_tools (bool):
-                Whether to allow tools to be used.  
+                Whether to allow the tools provided by the agent to be used. This do not affect the 
+                external tools provided by the workflow. 
             external_tools (dict[str, FastMcpTool | MCPTool], optional):
                 The external tools to use for the agent. 
-            **kwargs (dict, optional):
-                The additional keyword arguments for thinking about the observed messages. 
                 
         Returns:
             CompletionMessage:
@@ -256,7 +249,7 @@ class Environment(Protocol):
     history: list[CompletionMessage | ToolCallResult | ToolCallRequest]
     
     @abstractmethod
-    def observe(self, *args, **kwargs) -> str:
+    def observe(self) -> str:
         """Observe the environment.
 
         Returns:
@@ -360,6 +353,12 @@ class RunnableEnvironment(Environment):
     async def run(self, *args, **kwargs) -> Any:
         """Run the environment entrypoint. This should override the run method of the OrchestratedFlows. The `run` method of the 
         OrchestratedFlows can be called by `self.workflows["flow_name"].run(...)`.
+        
+        Args:
+            *args:
+                The additional arguments to pass to the run method of the OrchestratedFlows.
+            **kwargs:
+                The additional keyword arguments to pass to the run method of the OrchestratedFlows.
         """
         pass
 
@@ -450,7 +449,7 @@ class Task(Protocol):
     history: list[CompletionMessage | ToolCallRequest | ToolCallResult]
     
     # Observe the task
-    def observe(self, *args, **kwargs) -> str:
+    def observe(self) -> str:
         """Observe the task according to the current status.
         
         - CREATED:
@@ -483,18 +482,15 @@ class TaskView(Protocol):
     """
     model: Task
     
-    def format(self, **kwargs) -> str:
+    def format(self) -> str:
         """Format the task view to a string.
         
-        Args:
-            **kwargs:
-                The additional arguments to be formatted.
-                
         Returns: 
             str:
                 The formatted task view. 
         """
-
+        pass
+    
 
 @runtime_checkable
 class Workflow(Protocol):

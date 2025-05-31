@@ -35,16 +35,12 @@ class BaseStepCounter(StepCounter):
         self.limit = limit
         self.current = 0
         
-    def step(self, step: int | float = 1, *args, **kwargs) -> None:
+    def step(self, step: int | float = 1) -> None:
         """Increment the current step of the step counter.
         
         Args:
             step (int | float, optional, defaults to 1):
                 The step to increment. 
-            *args:
-                The additional arguments to pass to the step method.
-            **kwargs:
-                The additional keyword arguments to pass to the step method.
                 
         Returns:
             None 
@@ -55,7 +51,7 @@ class BaseStepCounter(StepCounter):
         """
         self.current += step
         # Check if the current step is greater than the max auto steps
-        if self.current > self.limit:
+        if self.current >= self.limit:
             raise MaxStepsError("Max auto steps reached.", self.current, self.limit)
     
     def reset(self) -> None:
@@ -149,15 +145,12 @@ class BaseAgent(Agent):
     async def observe(
         self, 
         env: Environment, 
-        **kwargs: dict, 
     ) -> tuple[list[CompletionMessage | ToolCallRequest | ToolCallResult], str]:
         """Observe the environment.
         
         Args:
             env (Environment): 
                 The environment to observe. 
-            **kwargs (dict): 
-                The keyword arguments to pass to the environment observe method. 
                 
         Returns:
             list[CompletionMessage | ToolCallRequest | ToolCallResult]:
@@ -171,15 +164,12 @@ class BaseAgent(Agent):
     async def observe(
         self, 
         env: Task, 
-        **kwargs: dict, 
     ) -> tuple[list[CompletionMessage | ToolCallRequest | ToolCallResult], str]:
         """Observe the Task.    
         
         Args:
             env (Task): 
                 The task to observe. 
-            **kwargs (dict): 
-                The keyword arguments to pass to the environment observe method. 
 
         Returns:
             list[CompletionMessage | ToolCallRequest | ToolCallResult]:
@@ -192,15 +182,12 @@ class BaseAgent(Agent):
     async def observe(
         self, 
         env: Environment | Task, 
-        **kwargs: dict, 
     ) -> tuple[list[CompletionMessage | ToolCallRequest | ToolCallResult], str]:
         """Observe the Task.    
         
         Args:
             env (Environment | Task): 
                 The environment or task to observe. 
-            **kwargs (dict): 
-                The keyword arguments to pass to the environment observe method. 
 
         Returns:
             list[CompletionMessage | ToolCallRequest | ToolCallResult]:
@@ -214,9 +201,9 @@ class BaseAgent(Agent):
         elif isinstance(env, Task):
             observation = env.observe()
             
-            # Observe the parent of the task recursively
-            if env.parent:
-                p_history, _ = await self.observe(env.parent, **kwargs)
+            if env.parent is not None:
+                # Observe the parent of the task recursively
+                p_history, _ = await self.observe(env.parent)
                 history.extend(p_history)
         else:
             raise ValueError(f"Unsupported environment type: {type(env)}")
@@ -239,7 +226,8 @@ class BaseAgent(Agent):
             observe (list[CompletionMessage | ToolCallRequest | ToolCallResult]):
                 The messages observed from the environment. 
             allow_tools (bool):
-                Whether to allow tools to be used. 
+                Whether to allow the tools provided by the agent to be used. This do not affect the 
+                external tools provided by the workflow. 
             external_tools (dict[str, FastMcpTool | MCPTool]):
                 The external tools to use for the agent.  
             **kwargs (dict): 
@@ -249,19 +237,31 @@ class BaseAgent(Agent):
             CompletionMessage:
                 The completion message thought about by the LLM. 
         """
+        try:
+            # Increment the current step
+            self.step_counter.step()
+        except MaxStepsError as e:
+            # The max steps error is raised, then update the task status to cancelled
+            self.custom_logger.error(f"Max steps error: {e}")
+            # Request the user to reset the step counter
+            reset = input(f"The limit of auto steps is reached. Do you want to reset the step counter with limit {e.limit} steps? (y/n)")
+            if reset == "y":
+                # Reset the step counter and continue the loop
+                self.step_counter.reset()
+            else:
+                # Stop the loop
+                raise e
+        
         # Get the available tools
         external_tools_list = list(external_tools.values())
         external_tools_list = [tool_schema(tool, self.llm.provider) for tool in external_tools_list]
-        available_tools = self.tools + external_tools_list
+        if allow_tools:
+            available_tools = self.tools + external_tools_list
+        else:
+            available_tools = external_tools_list
         
         # Call for completion from the LLM
-        if allow_tools:
-            message = await self.llm.completion(observe, available_tools=available_tools, **kwargs)
-        else:
-            message = await self.llm.completion(observe, **kwargs)
-            
-        # Increment the current step
-        self.step_counter.step()
+        message = await self.llm.completion(observe, available_tools=available_tools, **kwargs)
         
         # Return the response
         return message

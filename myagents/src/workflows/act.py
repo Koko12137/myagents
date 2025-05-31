@@ -6,10 +6,20 @@ from loguru import logger
 from fastmcp.tools import Tool as FastMCPTool
 
 from myagents.src.message import CompletionMessage, StopReason, MessageRole, ToolCallRequest, ToolCallResult
-from myagents.src.interface import Agent, Task, TaskStatus, Logger
+from myagents.src.interface import Agent, Task, TaskStatus, TaskStrategy, Logger
 from myagents.src.workflows.base import BaseWorkflow
-from myagents.prompts.workflows.act import ACTION_PROMPT
-from myagents.prompts.workflows.reflect import REFLECT_PROMPT
+from myagents.prompts.workflows.act import ACTION_PROMPT, REFLECT_PROMPT
+
+
+class TaskCancelledError(Exception):
+    """This is the error that is raised when the task is cancelled."""
+    def __init__(self, message: str, task: Task) -> None:
+        self.message = message
+        self.task: Task = task
+        super().__init__(self.message)
+    
+    def __str__(self) -> str:
+        return f"TaskCancelledError: {self.message}, task: {self.task.observe()}"
 
 
 class ActionFlow(BaseWorkflow):
@@ -73,8 +83,8 @@ class ActionFlow(BaseWorkflow):
             self.custom_logger.error(f"No tools registered for the act flow. {traceback.format_exc()}")
             raise RuntimeError("No tools registered for the act flow.")
 
-    async def run(self, task: Task) -> Task:
-        """Run the ActionFlow workflow. In this workflow, the agent will decide to call a tool or not. 
+    async def __act(self, task: Task) -> Task:
+        """Take action the task. The agent will decide to call a tool or not. 
         - If the agent decides to call a tool, the tool will be called and the result will be observed. If there is any error, 
             the task status will be set to failed and the error will be logged. 
         - If the agent decides not to call a tool, the task will be answer directly by the agent.
@@ -194,8 +204,146 @@ class ActionFlow(BaseWorkflow):
         # 11. Fill the answer
         task.answer = message.content
         # 12. Update the task status
-        task.status = TaskStatus.FINISHED
+        if task.status != TaskStatus.FAILED:
+            task.status = TaskStatus.FINISHED
         return task
+    
+    async def __act_retry(self, task: Task, max_retry_count: int = 3) -> Task:
+        """Act the task with retry.
+        
+        Args:
+            task (Task): 
+                The task to act.
+            max_retry_count (int, optional): 
+                The maximum number of retries. Defaults to 3.
+                
+        Returns:
+            Task: The task after the retry.
+        """
+        for _ in range(max_retry_count):
+            # Act the task
+            task = await self.__act(task)
+            
+            # Check the task status
+            if task.status == TaskStatus.FAILED:
+                # The task is still failed, then continue the retry with the next retry count
+                self.custom_logger.error(f"The task is still failed and the retry count is not reached the limit: {task.observe()}")
+                continue
+            else:
+                # The task is finished, then return the task
+                return task
+        
+        # The task is still failed and the retry count is reached the limit
+        # Cancel the task
+        self.custom_logger.error(f"The task is still failed and the retry count is reached the limit: {task.observe()}")
+        return task
+    
+    async def run(self, task: Task) -> Task:
+        """Deep traverse the task and act the task.
+
+        Args:
+            task (Task): The task to act.
+
+        Returns:
+            Task: The acted task.
+        """
+        # Update the current task
+        self.current_task = task
+        
+        # Record the sub-tasks is finished
+        sub_tasks_finished = []
+        # Unfinished sub-tasks
+        unfinished_sub_tasks = iter(task.sub_tasks.values())
+        # Get the first unfinished sub-task
+        sub_task = next(unfinished_sub_tasks, None)
+        
+        # Traverse all the sub-tasks
+        while sub_task is not None:
+            
+            # Check if the sub-task is created, if True, then raise an error to call for re-planning
+            if sub_task.status == TaskStatus.CREATED:
+                # Set the current task to the parent task
+                self.current_task = task
+                # Raise an error to call for re-planning
+                raise TaskCancelledError("The task is roll back to created status due to the cancelled sub-task.", task)
+                
+            # Check if the sub-task is running, if True, then act the sub-task
+            elif sub_task.status == TaskStatus.RUNNING:
+                try:
+                    # Log the sub-task
+                    self.custom_logger.info(f"Acting sub-task: \n{sub_task.observe()}")
+                    # Act the sub-task
+                    sub_task = await self.run(sub_task)
+                    # Resume the current task
+                    self.current_task = task
+                except TaskCancelledError as e:
+                    # The re-planning is needed, then raise the error
+                    raise e
+            
+            # Check if the sub-task is failed, if True, then retry the sub-task
+            elif sub_task.status == TaskStatus.FAILED:
+                # Retry the sub-task
+                sub_task = await self.__act_retry(sub_task)
+                # Check if the sub-task is still failed
+                if sub_task.status == TaskStatus.FAILED:
+                    # The sub-task is still failed, then cancel the task
+                    task.status = TaskStatus.CANCELLED
+            
+            # Check if the sub-task is cancelled, if True, set the parent task status to created and stop the traverse
+            elif sub_task.status == TaskStatus.CANCELLED:
+                # Check the strategy
+                if task.strategy == TaskStrategy.ANY:
+                    # The strategy is ANY, then continue the traverse
+                    sub_task = next(unfinished_sub_tasks, None)
+                else:
+                    # Cancel all the sub-tasks of the parent task
+                    for sub_task in task.sub_tasks.values():
+                        sub_task.status = TaskStatus.CANCELLED
+                    # Log the cancelled sub-task
+                    self.custom_logger.info(f"All the sub-tasks are cancelled: \n{task.observe()}")
+                    
+                    # The strategy is ALL, but one of the sub-tasks is cancelled
+                    task.status = TaskStatus.CREATED
+                    # Log the cancelled sub-task
+                    self.custom_logger.info(f"The task roll back to created status due to the cancelled sub-task: \n{sub_task.observe()}")
+                    return task
+            
+            # Check if the sub-task is finished, if True, then summarize the result of the sub-task
+            elif sub_task.status == TaskStatus.FINISHED:
+                # The sub-task is finished, then add the sub-task to the finished list
+                sub_tasks_finished.append(sub_task)
+                # Log the finished sub-task
+                self.custom_logger.info(f"Finished sub-task: \n{sub_task.observe()}")
+                # Get the next unfinished sub-task
+                sub_task = next(unfinished_sub_tasks, None)
+            
+            # ELSE, the sub-task is not created, running, failed, cancelled, or finished, it is a critical error
+            else:
+                # The sub-task is not created, running, failed, cancelled, or finished, then raise an error
+                raise ValueError(f"The sub-task is not created, running, failed, cancelled, or finished: {sub_task.observe()}")
+            
+            # Check if continue the traverse
+            if task.strategy == TaskStrategy.ANY:
+                # Check if the sub-task is finished
+                if len(sub_tasks_finished) > 0: 
+                    # There is at least one sub-task is finished
+                    self.custom_logger.info(f"There is at least one sub-task is finished: \n{task.observe()}")
+                    break
+        
+        # There are some errors in the sub-tasks, then raise an error to call for re-planning
+        if len(sub_tasks_finished) == 0:
+            # No sub-tasks are finished, roll back the task status to created
+            task.status = TaskStatus.CREATED
+            # Log the roll back
+            self.custom_logger.info(f"The task roll back to created status due to the errors in the sub-tasks: \n{task.observe()}")
+            # Raise an error to call for re-planning
+            raise TaskCancelledError("There are some errors in the sub-tasks.", task)
+            
+        # Post traverse the task
+        # All the sub-tasks are finished, then call the action flow to act the task
+        task = await self.__act(task)
+        
+        return task 
 
     async def call_tool(self, task: Task, tool_call: ToolCallRequest) -> ToolCallResult:
         """Call a tool to control the workflow.

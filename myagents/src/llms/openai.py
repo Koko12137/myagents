@@ -71,8 +71,28 @@ class OpenAiLLM(LLM):
     async def completion(
         self, 
         messages: list[CompletionMessage], 
-        available_tools: list[dict[str, str]] | None = None
+        available_tools: list[dict[str, str]] | None = None, 
     ) -> CompletionMessage:
+        """Completion the messages.
+
+        Args:
+            messages (list[CompletionMessage]): 
+                The messages to complete.
+            available_tools (list[dict[str, str]] | None, optional): 
+                The available tools. Defaults to None.
+
+        Raises:
+            ValueError: 
+                The value error raised by the unsupported message type.
+
+        Returns:
+            CompletionMessage: 
+                The completed message.
+        """
+        # Check tools are provided
+        if available_tools is not None and len(available_tools) == 0:
+            available_tools = None
+        
         # Create the generation history
         history = []
         for message in messages: 

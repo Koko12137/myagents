@@ -6,9 +6,6 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from myagents.src.message import CompletionMessage, ToolCallRequest, ToolCallResult
 from myagents.src.interface import TaskStatus, TaskStrategy, TaskView, Task
-from myagents.prompts.envs.task import (
-    TASK_PLAN_PROMPT, TASK_RUNNING_PROMPT, TASK_FINISHED_PROMPT, TASK_FAILED_PROMPT, TASK_CANCELLED_PROMPT, TASK_CREATED_PROMPT
-)
 
 
 class BaseTask(BaseModel):
@@ -63,7 +60,7 @@ class BaseTask(BaseModel):
     )
     
     # Observe the task
-    def observe(self, *args, **kwargs) -> str:
+    def observe(self) -> str:
         """Observe the task according to the current status.
         
         - PENDING:
@@ -87,7 +84,7 @@ class BaseTask(BaseModel):
             str: 
                 The observed information of the task.
         """
-        return TaskContextView(self).format(*args, **kwargs)
+        return TaskContextView(self).format()
 
 
 class TaskContextView(TaskView):
@@ -131,14 +128,17 @@ class TaskContextView(TaskView):
         self.parent = model.parent
         self.sub_tasks = model.sub_tasks
         
-    def format(self, *args, **kwargs) -> str:
+    def format(self) -> str:
         """Format the task context to a string.
+        
+        Returns:
+            str:
+                The formatted task context.
         """
         question = f"- Question: \n\t{self.question}\n"
         description = f"- Description: \n\t{self.description}\n"
         status = f"- Status: \n\t{self.status}\n"
-        strategy = f"- Strategy: \n\t{self.strategy}"
-        strategy += "\n\tATTENTION: This may be a default strategy, you can change it to a better strategy."
+        strategy = f"- Strategy: \n\t{self.strategy}\n"
         
         # Process the parent task
         parent_task_information_with_status = []
@@ -149,9 +149,9 @@ class TaskContextView(TaskView):
                 f"\t- Strategy: \n\t\t{self.parent.strategy}\n"
             parent_task_information_with_status.append(info)
         else:
-            parent_task_information_with_status.append("Parent task is None.")
+            parent_task_information_with_status.append("\tParent task is None.")
         parent_task_information_with_status = "\n".join(parent_task_information_with_status)
-        parent = f"- Parent: \n{parent_task_information_with_status}"
+        parent = f"- Parent: \n{parent_task_information_with_status}\n"
         
         # Process the sub-tasks
         sub_tasks_information_with_status = []

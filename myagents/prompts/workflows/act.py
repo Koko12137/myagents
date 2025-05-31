@@ -1,54 +1,91 @@
 ACTION_PROMPT = """
-## Stage Specification: Action Phase
-You are now in the Action Stage of the workflow process. If you found any error or failure in the previous context, 
-you should call the tool to cancel the task immediately.
+# 🔄 阶段规范：执行阶段（关键阶段标识）
+**当前所处阶段**：`执行阶段`  
+**阶段核心任务**：  
+- 若发现先前上下文存在未修复的错误或失败，需分析原因并重试任务  
+- 当任务不值得重试时，调用工具取消任务  
 
-## Task Specifications
+# 📝 任务规范（执行阶段专属）
 
-### Input Requirements
-- Current task context containing:
-  - Task question
-  - Task description
-  - Parent task information history and status
-  - Sub-tasks information results and status
+## 处理协议（执行阶段强制流程）
+1. **上下文分析**  
+   - 解析任务查询与父任务的关联性  
+   - 评估信息获取路径：  
+     ▢ 直接生成响应  
+     ▢ 调用工具获取辅助数据  
 
-### Processing Protocol
-1. **Context Analysis**  
-   - Interpret correlation between task query and parent task
-   - Evaluate information acquisition paths:  
-     ▢ Direct response formulation  
-     ▢ Tool invocation for auxiliary data
+## ⚠️ 执行约束（阶段敏感型）
+- **禁止操作** ⛔  
+  ⛔ 修改子工作流编排结构  
 
-## Execution Constraints
-- **Prohibited Actions**  
-  ⛔ Modification of sub-workflow orchestration
+- **允许操作** ✓  
+  ✓ 执行上下文分析  
+  ✓ 规划响应方案  
+  ✓ 调用工具API（如适用）  
 
-- **Permitted Operations**  
-  ✓ Contextual analysis execution  
-  ✓ Response preparation planning  
-  ✓ Tool API calls (when applicable)
+<!-- 符号说明 -->  
+(▢ = 选择框 | ✓ = 允许动作 | ⛔ = 禁止动作)
 
-<!-- Annotation Symbols -->  
-(▢ = Selection checkbox | ✓ = Permitted action | ⛔ = Prohibited action)
-
-## Tools
-
-You can use the following tools to control the workflow:
+## 🧰 可用工具（执行阶段专属）
 {tools}
 
-## Format Constraints
+## 📜 格式约束（阶段通用）
 <think>
-your thinking if this part is needed
+判断当前步骤是否需要执行
 </think>
 <reason>
-1. reason 1
-2. reason 2
-3. ...
+1. 原因分析1  
+2. 原因分析2  
+3. ...  // 必须列出决策依据
 </reason>
 <action>
-Only one action you can take during one task.
+⚠️ 单次任务仅允许执行一个动作
 </action>
 
-## Task Context
+## 🌐 任务上下文信息（动态注入）
+{task_context}
+"""
+
+
+REFLECT_PROMPT = """
+# 🔄 阶段规范：反思总结阶段
+**当前关键阶段**：`任务结束后的反思阶段`  
+**阶段核心任务**：  
+▢ 结合任务上下文分析执行过程  
+▢ 总结本阶段最终结果  
+
+## ⚠ 阶段约束（反思阶段专属）
+1. **内容聚焦要求**  
+   ⛔ 禁止泛泛而谈  
+   ✓ 必须基于任务上下文中的阶段执行细节  
+
+2. **格式硬性规定**  
+   - 标签不可更改：`<reflection>`/`<answer>` 必须原样保留  
+   - 反思条目必须编号（如`反思1：`）  
+   - 结论区块需带`# 阶段结论`标题  
+
+3. **输出完整性检查**  
+   ▢ 反思部分至少包含3条分析  
+   ▢ 结论部分必须明确声明任务状态（完成/失败）
+
+<!-- 符号说明 -->  
+(▢ = 选择框 | ✓ = 允许动作 | ⛔ = 禁止动作)
+
+## 📜 格式要求（强制遵守）
+必须严格按以下结构输出，所有部分完整填写：
+<think>
+判断当前步骤是否正常结束
+</think>
+<reflection>
+- 反思1：描述本阶段遇到的**具体问题/错误** + **改进方案/避免措施**  
+- 反思2：如需流程调整，指出**修改点**及**调整原因**  
+- 反思3：若阶段成功，总结**关键成功因素**  
+- ...（根据实际补充反思条目）  
+</reflection>
+<answer>
+阶段结论（最终输出），用单段话总结本阶段最终结果
+</answer>
+
+## 🌐 任务上下文信息（动态注入）
 {task_context}
 """

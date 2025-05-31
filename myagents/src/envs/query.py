@@ -74,7 +74,7 @@ class Query(BaseWorkflow, RunnableEnvironment):
         # Return the answer
         return task.answer
     
-    async def observe(self, *args, **kwargs) -> str:
+    async def observe(self) -> str:
         """Observe the environment.
         """
         history = []

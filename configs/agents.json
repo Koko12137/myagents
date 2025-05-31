@@ -5,7 +5,7 @@
         "llm": {
             "provider": "openai",
             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "model": "qwen3-235b-a22b",
+            "model": "qwen3-30b-a3b",
             "temperature": 0.8, 
             "api_key_field": "OPENAI_KEY", 
             "extra_body": {
@@ -21,7 +21,7 @@
                 "llm": {
                     "provider": "openai",
                     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    "model": "qwen3-235b-a22b",
+                    "model": "qwen-turbo-2025-04-28",
                     "temperature": 1.0, 
                     "api_key_field": "OPENAI_KEY", 
                     "extra_body": {
@@ -37,8 +37,8 @@
                 "llm": {
                     "provider": "openai",
                     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    "model": "qwen3-235b-a22b",
-                    "temperature": 0.1, 
+                    "model": "qwen3-32b",
+                    "temperature": 0.8, 
                     "api_key_field": "OPENAI_KEY", 
                     "extra_body": {
                         "enable_thinking": false
