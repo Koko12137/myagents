@@ -113,7 +113,7 @@ class OpenAiLLM(LLM):
                     
                     for tool_call in message.tool_calls:
                         message_dict["tool_calls"].append({
-                            "tool_call_id": tool_call.id,
+                            "id": tool_call.id,
                             "type": "function",
                             "function": {
                                 "name": tool_call.name, 
@@ -139,14 +139,18 @@ class OpenAiLLM(LLM):
         # Extract tool calls from response
         tool_calls = []
         if response.choices[0].message.tool_calls is not None:
-            for tool_call in response.choices[0].message.tool_calls:
+            # Traverse all the tool calls and log the tool call
+            for i, tool_call in enumerate(response.choices[0].message.tool_calls):
+                # Log the tool call
+                self.custom_logger.info(f"Tool call {i + 1}: {tool_call}")
+                
+                # Create the tool call request
                 tool_calls.append(ToolCallRequest(
                     id=tool_call.id,
                     name=tool_call.function.name,
+                    type="function", 
                     args=json.loads(tool_call.function.arguments)
                 ))
-                # Log the tool call
-                self.custom_logger.info(f"Tool call: {tool_call}")
         
         # Extract Finish reason
         if response.choices[0].finish_reason == "tool_calls":

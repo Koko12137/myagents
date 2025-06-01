@@ -12,7 +12,23 @@ from myagents.src.workflows.react import ReActFlow
 
 
 class Query(BaseWorkflow, RunnableEnvironment):
-    """Query is the environment for the query.
+    """Query is the environment for the query and answer the question.
+    
+    Attributes:
+        history (list[CompletionMessage | ToolCallRequest | ToolCallResult]):
+            The history of the environment.
+        agent (Agent):
+            The agent that will be used to answer the question.
+        debug (bool):
+            The debug flag.
+        custom_logger (Logger):
+            The custom logger.
+        tools (dict[str, FastMcpTool | MCPTool]):
+            The tools of the environment.
+        tool_functions (dict[str, Callable]):
+            The functions of the tools.
+        workflows (dict[str, Workflow]):
+            The workflows of the environment. 
     """
     history: list[CompletionMessage | ToolCallRequest | ToolCallResult]
     agent: Agent

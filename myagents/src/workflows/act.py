@@ -368,5 +368,5 @@ class ActionFlow(BaseWorkflow):
             return ToolCallResult(
                 tool_call_id=tool_call.id, 
                 is_error=False, 
-                content=f"The task is cancelled. Current Task Context: \n{task.observe()}",
+                content="The task is cancelled.",
             )

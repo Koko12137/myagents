@@ -1,4 +1,3 @@
-import re
 from typing import Callable
 from traceback import format_exc
 
@@ -103,7 +102,8 @@ class PlanFlow(BaseWorkflow):
         async def finish_planning() -> bool:
             """
             Finish the planning of the parent task. This will set the status of the parent task to running and the loop 
-            of the workflow will be finished. 
+            of the workflow will be finished. Do not call this tool until you have finished all your needs correctly. 
+            Once you call this tool, the loop of the workflow will be finished and you cannot modify your error.
             """
             return 
             
@@ -146,8 +146,13 @@ class PlanFlow(BaseWorkflow):
         # 4. Record the completion message
         task.history.append(message)
         history.append(message)
-        
+        # Additional tools information for tool calling
         tools_str = "\n".join([tool.description for tool in self.tools.values()])
+        
+        # This is used for no tool calling thinking limit.
+        # If the agent is thinking more than max_thinking times, the loop will be finished.
+        max_thinking = 3
+        current_thinking = 0
         
         # Modify the orchestration
         while True:
@@ -169,7 +174,7 @@ class PlanFlow(BaseWorkflow):
             # Append for agent's completion
             history.append(message)
             # Call for completion
-            message: CompletionMessage = await self.agent.think(history, allow_tools=True, external_tools=self.tools)
+            message: CompletionMessage = await self.agent.think(history, allow_tools=False, external_tools=self.tools)
             
             # 4. Record the completion message
             # Append for current task recording
@@ -179,35 +184,39 @@ class PlanFlow(BaseWorkflow):
 
             # 5. Check the stop reason
             if message.stop_reason == StopReason.TOOL_CALL:
-                # 6. Check if there is more than one tool calling
-                if len(message.tool_calls) > 1:
-                    # BUG: Handle the case of more than one tool calling. An unexpected error should not be raised. 
-                    raise ValueError("More than one tool calling is not allowed.")
+                # Reset the current thinking
+                current_thinking = 0
                 
-                # 7. Get the tool call
-                tool_call = message.tool_calls[0]
-                
-                try:
-                    # 8. Call the tool
-                    tool_result = await self.call_tool(task, tool_call)
-                except Exception as e:
-                    # 9. Handle the error
-                    tool_result = ToolCallResult(
-                        tool_call_id=tool_call.id, 
-                        is_error=True, 
-                        content=e, 
-                    )
+                # 6. Traverse all the tool calls
+                for tool_call in message.tool_calls:
+                    try:
+                        # 7. Call the tool
+                        tool_result = await self.call_tool(task, tool_call)
+                    except Exception as e:
+                        # 8. Handle the error
+                        tool_result = ToolCallResult(
+                            tool_call_id=tool_call.id, 
+                            is_error=True, 
+                            content=e, 
+                        )
+                        
+                        # Handle the error and update the task status
+                        self.custom_logger.error(f"Tool call {tool_call.name} failed with information: {e}")
+                        
+                    # 9. Update the messages
+                    # Append for current task recording
+                    task.history.append(tool_result)
+                    # Append for agent's completion
+                    history.append(tool_result)
+            else:
+                # Update the current thinking
+                current_thinking += 1
+                # Check if the current thinking is greater than the max thinking
+                if current_thinking > max_thinking:
+                    # No more tool calling is allowed, break the loop
+                    break
                     
-                    # Handle the error and update the task status
-                    self.custom_logger.error(f"Tool call {tool_call.name} failed with information: {e}")
-                    
-                # 10. Update the messages
-                # Append for current task recording
-                task.history.append(tool_result)
-                # Append for agent's completion
-                history.append(tool_result)
-                    
-            # 6. Check if the planning is finished
+            # 10. Check if the planning is finished
             if task.status == TaskStatus.RUNNING:
                 # No more orchestration is required, break the loop
                 break
@@ -278,7 +287,7 @@ class PlanFlow(BaseWorkflow):
             new_queue = []
             
             # Traverse the queue
-            for task in queue:
+            while queue:
                 # Get the first task from the queue
                 current_task = queue.pop(0)
                 
@@ -292,7 +301,7 @@ class PlanFlow(BaseWorkflow):
                         current_task = await self.__layer_create(current_task)
                     
                     # Check if all the sub-tasks are cancelled
-                    if all(sub_task.status == TaskStatus.CANCELLED for sub_task in current_task.sub_tasks.values()):
+                    elif all(sub_task.status == TaskStatus.CANCELLED for sub_task in current_task.sub_tasks.values()):
                         # Log the current task
                         self.custom_logger.info(f"Planning current task: \n{current_task.observe()}")
                         
@@ -356,7 +365,7 @@ class PlanFlow(BaseWorkflow):
             tool_result = ToolCallResult(
                 tool_call_id=tool_call.id, 
                 is_error=False, 
-                content=new_task.observe(),
+                content=f"Task {new_task.question} created.",
             )
             # Log the tool call result
             self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
@@ -370,7 +379,7 @@ class PlanFlow(BaseWorkflow):
             tool_result = ToolCallResult(
                 tool_call_id=tool_call.id, 
                 is_error=False, 
-                content=f"Strategy {strategy.value} set. Current Task Context: \n{task.observe()}",
+                content=f"Strategy {strategy.value} set.",
             )
             # Log the tool call result
             self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
@@ -383,7 +392,7 @@ class PlanFlow(BaseWorkflow):
             tool_result = ToolCallResult(
                 tool_call_id=tool_call.id, 
                 is_error=False, 
-                content=f"Planning finished. Current Task Context: \n{task.observe()}",
+                content="Planning finished.",
             )
             # Log the tool call result
             self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
