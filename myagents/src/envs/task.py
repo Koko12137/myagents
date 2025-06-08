@@ -1,6 +1,7 @@
 import re
 from uuid import uuid4
 from collections import OrderedDict
+from typing import Union
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -19,7 +20,7 @@ class BaseTask(BaseModel):
             The question to be answered. 
         description (str):
             The description of the task. 
-        parent (Task | None):
+        parent (Task, optional):
             The parent task of the current task. If the task does not have a parent task, the parent is None.
         sub_tasks (OrderedDict[str, Task]):
             The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
@@ -30,10 +31,10 @@ class BaseTask(BaseModel):
             The strategy of the current task.
         is_leaf (bool):
             Whether the current task is a leaf task. If the task is a leaf task, the task will not be orchestrated by the workflow. 
-        answer (str | None):
+        answer (str, optional):
             The answer to the question. If the task is not finished, the answer is None.
             
-        history (list[CompletionMessage | ToolCallRequest | ToolCallResult]):
+        history (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]):
             The history messages of the current task. 
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -55,120 +56,230 @@ class BaseTask(BaseModel):
     answer: str = Field(description="The answer to the question.", default=None)
     
     # History Messages
-    history: list[CompletionMessage | ToolCallRequest | ToolCallResult] = Field(
-        description="The messages of the current task.", default=[], 
+    history: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]] = Field(
+        default_factory=list,
+        description="The messages of the current task.", 
     )
-    
-    # Observe the task
-    def observe(self) -> str:
-        """Observe the task according to the current status.
-        
-        - PENDING:
-            This task needs to be orchestrated by the workflow. 
-            Question, parent information, dependencies information, and sub-tasks information are needed.
-        - PLANNING:
-            This task is planning. 
-            Question, parent information, dependencies information, and sub-tasks information are needed.
-        - RUNNING:
-            This task is running. 
-            Question, parent information, dependencies information, and sub-tasks information are needed.
-        - FINISHED:
-            This task is finished. 
-            Question, parent information, dependencies information, and sub-tasks information are needed.
-        - FAILED:
-            This task is failed. Both question, status and error message are needed.
-        - CANCELLED:
-            This task is cancelled. Both question and status are needed. 
-
-        Returns:
-            str: 
-                The observed information of the task.
-        """
-        return TaskContextView(self).format()
 
 
-class TaskContextView(TaskView):
+class TaskContextView:
     """TaskContextView is the view of the task context. This view is used to format the task context to a string.
     
     Attributes:
         model (Task):
             The task to be viewed.
-            
-        question (str):
-            The question to be answered.
-        description (str):
-            The description of the task.
-        status (TaskStatus):
-            The status of the current task.
-        strategy (TaskStrategy):
-            The strategy of the current task.
-        parent (Task | None):
-            The parent task of the current task.
-        sub_tasks (OrderedDict[str, Task]):
-            The sub-tasks of the current task.
     """
     model: Task
-    
-    # View fields
-    question: str
-    description: str
-    status: TaskStatus
-    strategy: TaskStrategy
-    parent: 'Task'
-    sub_tasks: OrderedDict[str, 'Task']
     
     def __init__(self, model: Task) -> None:
         self.model = model
         
-        # View fields
-        self.question = model.question
-        self.description = model.description
-        self.status = model.status
-        self.strategy = model.strategy
-        self.parent = model.parent
-        self.sub_tasks = model.sub_tasks
-        
-    def format(self) -> str:
+    def format(self, layer: int = 3) -> str:
         """Format the task context to a string.
+        
+        Args:
+            layer (int):
+                The recursive layer of the task. 
         
         Returns:
             str:
                 The formatted task context.
         """
-        question = f"- Question: \n\t{self.question}\n"
-        description = f"- Description: \n\t{self.description}\n"
-        status = f"- Status: \n\t{self.status}\n"
-        strategy = f"- Strategy: \n\t{self.strategy}\n"
+        sub_tasks = []
         
-        # Process the parent task
-        parent_task_information_with_status = []
-        if self.parent is not None:
-            info = f"\t- Question: \n\t\t{self.parent.question}\n" + \
-                f"\t- Description: \n\t\t{self.parent.description}\n" + \
-                f"\t- Status: \n\t\t{self.parent.status}\n" + \
-                f"\t- Strategy: \n\t\t{self.parent.strategy}\n"
-            parent_task_information_with_status.append(info)
+        # Check if the status is not finished, failed, or cancelled
+        if self.model.status == TaskStatus.CREATED:
+            # Return a created task view
+            view = CreatedTaskView(self.model).format()
+        elif self.model.status == TaskStatus.PLANNING:
+            # Return a planning task view
+            view = PlanningTaskView(self.model).format()
+            # Process the sub-tasks
+            for sub_task in self.model.sub_tasks.values():
+                sub_task_info = TaskContextView(sub_task).format(layer=layer-1)
+                # Update the indentation 
+                sub_task_info = re.sub(r'^', f"\t" * (layer-1), sub_task_info, flags=re.MULTILINE)
+                sub_tasks.append(sub_task_info)
+        elif self.model.status == TaskStatus.RUNNING:
+            # Return a running task view
+            view = RunningTaskView(self.model).format()
+            # Process the sub-tasks
+            for sub_task in self.model.sub_tasks.values():
+                sub_task_info = TaskContextView(sub_task).format(layer=layer-1)
+                # Update the indentation 
+                sub_task_info = re.sub(r'^', f"\t" * (layer-1), sub_task_info, flags=re.MULTILINE)
+                sub_tasks.append(sub_task_info)
+        elif self.model.status == TaskStatus.FINISHED:
+            # Return a finished task view
+            view = FinishedTaskView(self.model).format()
+        elif self.model.status == TaskStatus.FAILED:
+            # Return a failed task view
+            view = FailedTaskView(self.model).format()
+        elif self.model.status == TaskStatus.CANCELLED:
+            # Return a cancelled task view
+            view = CancelledTaskView(self.model).format()
+            
+        # Check if the sub-tasks is not empty
+        if len(sub_tasks) > 0:
+            sub_tasks = f"\t - Sub-Tasks: \n{"\n".join(sub_tasks)}"
         else:
-            parent_task_information_with_status.append("\tParent task is None.")
-        parent_task_information_with_status = "\n".join(parent_task_information_with_status)
-        parent = f"- Parent: \n{parent_task_information_with_status}\n"
-        
-        # Process the sub-tasks
-        sub_tasks_information_with_status = []
-        if len(self.sub_tasks) > 0:
-            for i, sub_task in enumerate(self.sub_tasks.values()):
-                observe = f"\t\t- Question: \n\t\t\t{sub_task.question}\n" + \
-                    f"\t\t- Description: \n\t\t\t{sub_task.description}\n" + \
-                    f"\t\t- Status: \n\t\t\t{sub_task.status}\n" + \
-                    f"\t\t- Is Leaf: \n\t\t\t{sub_task.is_leaf}\n" + \
-                    f"\t\t- Answer: \n\t\t\t{sub_task.answer}"
-                info = f"\t- Sub-Task {i+1}: \n{observe}"
-                sub_tasks_information_with_status.append(info)
-        else:
-            sub_tasks_information_with_status.append("The sub-tasks are None.")
-        
-        sub_tasks_information_with_status = "\n".join(sub_tasks_information_with_status)
-        sub_tasks = f"- Sub-Tasks: \n\t{sub_tasks_information_with_status}\n"
-        
-        return f"=== TASK CONTEXT ===\n{question}\n{description}\n{status}\n{strategy}\n{parent}\n{sub_tasks}"
+            sub_tasks = f"\t - Sub-Tasks: \n\t\t No sub-tasks now"
+        view = f"{view}\n{sub_tasks}"
+            
+        return view
     
+
+class CreatedTaskView(TaskView):
+    """CreatedTaskView is the view of the created task. This view is used to format the created task to a string.
+    This view is used to show the task information when the task is created. 
+    
+    Attributes:
+        model (Task):
+            The task to be viewed.
+        template (str):
+            The template of the task view.
+    """
+    model: Task
+    template: str = """ - [ ] {question}\n\t - Description: {description}\n\t - Status: {status}\n\t - Is Leaf: {is_leaf}\n\t - Strategy: {strategy}"""
+    
+    def __init__(self, model: Task) -> None:
+        self.model = model
+        
+    def format(self) -> str:
+        return self.template.format(
+            question=self.model.question, 
+            description=self.model.description, 
+            status=self.model.status, 
+            is_leaf=self.model.is_leaf, 
+            strategy=self.model.strategy, 
+        )
+
+
+class PlanningTaskView(TaskView):
+    """PlanningTaskView is the view of the planning task. This view is used to format the planning task to a string.
+    This view is used to show the task information when the task is planning. 
+    
+    Attributes:
+        model (Task):
+            The task to be viewed.
+        template (str):
+            The template of the task view.
+    """
+    model: Task
+    template: str = """ - [p] {question}\n\t - Description: {description}\n\t - Status: {status}\n\t - Is Leaf: {is_leaf}\n\t - Strategy: {strategy}"""
+    
+    def __init__(self, model: Task) -> None:
+        self.model = model
+        
+    def format(self) -> str:
+        return self.template.format(
+            question=self.model.question, 
+            description=self.model.description, 
+            status=self.model.status, 
+            is_leaf=self.model.is_leaf, 
+            strategy=self.model.strategy, 
+        )
+    
+    
+class RunningTaskView(TaskView):
+    """RunningTaskView is the view of the running task. This view is used to format the running task to a string.
+    This view is used to show the task information when the task is running. 
+    
+    Attributes:
+        model (Task):
+            The task to be viewed.
+        template (str):
+            The template of the task view.
+    """
+    model: Task
+    template: str = """ - [r] {question}\n\t - Description: {description}\n\t - Status: {status}\n\t - Is Leaf: {is_leaf}\n\t - Strategy: {strategy}"""
+    
+    def __init__(self, model: Task) -> None:
+        self.model = model
+        
+    def format(self) -> str:
+        return self.template.format(
+            question=self.model.question, 
+            description=self.model.description, 
+            status=self.model.status, 
+            is_leaf=self.model.is_leaf, 
+            strategy=self.model.strategy, 
+        )
+
+
+class FinishedTaskView(TaskView):
+    """FinishedTaskView is the view of the finished task. This view is used to format the finished task to a string.
+    This view is used to show the task information when the task is finished. 
+    Attributes:
+        model (Task):
+            The task to be viewed.
+        template (str):
+            The template of the task view.
+    """
+    model: Task
+    template: str = """ - [x] {question}\n\t - Description: {description}\n\t - Status: {status}\n\t - Is Leaf: {is_leaf}\n\t - Strategy: {strategy}\n\t - Answer: {answer}"""
+    
+    def __init__(self, model: Task) -> None:
+        self.model = model
+        
+    def format(self) -> str:
+        return self.template.format(
+            question=self.model.question, 
+            description=self.model.description, 
+            status=self.model.status, 
+            is_leaf=self.model.is_leaf, 
+            strategy=self.model.strategy, 
+            answer=self.model.answer, 
+        )
+
+    
+class FailedTaskView(TaskView):
+    """FailedTaskView is the view of the failed task. This view is used to format the failed task to a string.
+    
+    Attributes:
+        model (Task):
+            The task to be viewed.
+        template (str):
+            The template of the task view.
+    """
+    model: Task
+    template: str = """ - [f] {question}\n\t - Description: {description}\n\t - Status: {status}\n\t - Is Leaf: {is_leaf}\n\t - Strategy: {strategy}\n\t - Failed Reason: {failed_reason}"""
+    
+    def __init__(self, model: Task) -> None:
+        self.model = model
+        
+    def format(self) -> str:
+        return self.template.format(
+            question=self.model.question, 
+            description=self.model.description, 
+            status=self.model.status, 
+            is_leaf=self.model.is_leaf, 
+            strategy=self.model.strategy, 
+            failed_reason=self.model.answer, 
+        )
+
+
+class CancelledTaskView(TaskView):
+    """CancelledTaskView is the view of the cancelled task. This view is used to format the cancelled task to a string.
+    
+    Attributes:
+        model (Task):
+            The task to be viewed.
+        template (str):
+            The template of the task view.
+    """
+    model: Task
+    template: str = """ - [c] {question}\n\t - Description: {description}\n\t - Status: {status}\n\t - Is Leaf: {is_leaf}\n\t - Strategy: {strategy}\n\t - Cancelled Reason: {cancelled_reason}"""
+    
+    def __init__(self, model: Task) -> None:
+        self.model = model
+        
+    def format(self) -> str:
+        return self.template.format(
+            question=self.model.question, 
+            description=self.model.description, 
+            status=self.model.status, 
+            is_leaf=self.model.is_leaf, 
+            strategy=self.model.strategy, 
+            cancelled_reason=self.model.answer, 
+        )

@@ -1,21 +1,21 @@
-from typing import Callable
+from typing import Callable, Union
 
 from loguru import logger
 from mcp import Tool as MCPTool
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.src.message import CompletionMessage, ToolCallRequest, ToolCallResult, MessageRole
-from myagents.src.interface import Agent, RunnableEnvironment, Workflow, Logger
+from myagents.src.interface import Agent, Workflow, Logger, Task, Environment, Context
 from myagents.src.envs.task import BaseTask
 from myagents.src.workflows.base import BaseWorkflow
 from myagents.src.workflows.react import ReActFlow
 
 
-class Query(BaseWorkflow, RunnableEnvironment):
+class Query(BaseWorkflow, Environment):
     """Query is the environment for the query and answer the question.
     
     Attributes:
-        history (list[CompletionMessage | ToolCallRequest | ToolCallResult]):
+        history (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]):
             The history of the environment.
         agent (Agent):
             The agent that will be used to answer the question.
@@ -23,18 +23,21 @@ class Query(BaseWorkflow, RunnableEnvironment):
             The debug flag.
         custom_logger (Logger):
             The custom logger.
-        tools (dict[str, FastMcpTool | MCPTool]):
+        tools (dict[str, Union[FastMcpTool, MCPTool]]):
             The tools of the environment.
         tool_functions (dict[str, Callable]):
             The functions of the tools.
         workflows (dict[str, Workflow]):
             The workflows of the environment. 
     """
-    history: list[CompletionMessage | ToolCallRequest | ToolCallResult]
+    history: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]
+    
     agent: Agent
     debug: bool
     custom_logger: Logger
-    tools: dict[str, FastMcpTool | MCPTool]
+    context: Context
+    
+    tools: dict[str, Union[FastMcpTool, MCPTool]]
     tool_functions: dict[str, Callable]
     workflows: dict[str, Workflow]
     
@@ -78,30 +81,27 @@ class Query(BaseWorkflow, RunnableEnvironment):
         # Record the question
         self.history.append(CompletionMessage(role=MessageRole.USER, content=question))
         # Create a new Task
-        task = BaseTask(question=question, description=description)
+        task = BaseTask(create_doc="This is the root task.", question=question, description=description)
         # Log the task
-        self.custom_logger.info(f"Task created: \n{task.observe()}")
+        self.custom_logger.info(f"Task created: \n{task.question}")
         # Run the react flow
         task = await self.workflows["react"].run(task)
         # Record the task answer
         self.history.append(CompletionMessage(role=MessageRole.ASSISTANT, content=task.answer))
         # Log the task answer
-        self.custom_logger.info(f"Task answered: \n{task.observe()}")
+        self.custom_logger.info(f"Task answered: \n{task.answer}")
         # Return the answer
         return task.answer
     
-    async def observe(self) -> str:
-        """Observe the environment.
-        """
-        history = []
-        for message in self.history:
-            # Format the message
-            history.append(f"{message.role}: {message.content}")
-        # Return the history
-        return "\n".join(history)
-    
-    async def call_tool(self, tool_call: ToolCallRequest) -> ToolCallResult:
+    async def call_tool(self, ctx: Union[Task, Environment], tool_call: ToolCallRequest, **kwargs: dict) -> ToolCallResult:
         """Call a tool to modify the environment.
         """
+        # Create a new context
+        self.context = self.context.create_next(ctx=ctx, **kwargs)
+        
+        # Done the current context
+        self.context = self.context.done()
+        
+        # Return the result
         return ToolCallResult(tool_call_id=tool_call.id, content="No tool is available.", is_error=True)
     

@@ -1,10 +1,10 @@
-import json 
+from typing import Union
 
 from loguru import logger
 from pydantic import BaseModel, Field
 from fastmcp.client import Client as MCPClient
 
-from myagents.src.interface import LLM, StepCounter, Agent, RunnableEnvironment, Workflow, OrchestratedFlows, Logger
+from myagents.src.interface import LLM, StepCounter, Agent, Workflow, Logger
 from myagents.src.llms.openai import OpenAiLLM
 from myagents.src.agents.base import BaseAgent, BaseStepCounter
 from myagents.src.workflows.act import ActionFlow
@@ -12,9 +12,8 @@ from myagents.src.workflows.plan import PlanFlow
 from myagents.src.workflows.react import ReActFlow
 
 
-
 class CounterConfig(BaseModel):
-    limit: int | float = Field(description="The limit of the step counter.")
+    limit: Union[int, float] = Field(description="The limit of the step counter.")
 
 
 class LLMConfig(BaseModel):
@@ -48,12 +47,10 @@ class AgentConfig(BaseModel):
 class WorkflowConfig(BaseModel):
     name: str = Field(description="The name of the workflow.")
     agent: AgentConfig = Field(description="The configuration for the agent.")
-    
-    
-class OrchestratedFlowsConfig(BaseModel):
-    name: str = Field(description="The name of the orchestrated workflow.")
-    agent: AgentConfig = Field(description="The configuration for the agent.")
-    workflows: list[WorkflowConfig] = Field(description="The configurations for the workflows.")
+    workflows: list['WorkflowConfig'] = Field(
+        description="The configurations for the workflows.", 
+        default=[]
+    )
     
     
 class AutoAgent:
@@ -146,60 +143,29 @@ class AutoAgent:
             debug (bool, optional):
                 Whether to enable the debug mode for the workflow. Defaults to False.
         """
+        flows: dict[str, Workflow] = {}
+        # Build workflows recursively
+        if len(config.workflows) > 0:
+            for workflow in config.workflows:
+                flows[workflow.name] = self.build_workflow(workflow, step_counter, custom_logger, debug)
+        
         # Build agents for action flow
         agent = self.build_agent(config.agent, step_counter)
         
         match config.name:
-            case "act":
+            case "action":
                 # Build the workflow
-                return ActionFlow(agent=agent, custom_logger=custom_logger, step_counter=step_counter, debug=debug) 
+                return ActionFlow(agent=agent, custom_logger=custom_logger, debug=debug) 
             case "plan":
                 # Build the workflow
-                return PlanFlow(agent=agent, custom_logger=custom_logger, step_counter=step_counter, debug=debug)
-            case _:
-                raise ValueError(f"Invalid workflow name: {config.name}")
-
-    def build_orchestrated_workflows(
-        self, 
-        config: OrchestratedFlowsConfig, 
-        step_counter: StepCounter,
-        custom_logger: Logger = logger, 
-        debug: bool = False,
-    ) -> OrchestratedFlows:
-        """Build an orchestrated workflow.
-        
-        Args:
-            config (OrchestratedWorkflowConfig):
-                The configuration for the orchestrated workflow.
-            step_counter (StepCounter):
-                The step counter for the orchestrated workflow.
-            custom_logger (Logger, optional):
-                The custom logger for the orchestrated workflow. Defaults to loguru logger.
-            debug (bool, optional):
-                Whether to enable the debug mode for the orchestrated workflow. Defaults to False.
-        """
-        # Build agents for orchestrated workflows
-        agent = self.build_agent(config.agent, step_counter)
-        
-        match config.name:
+                return PlanFlow(agent=agent, custom_logger=custom_logger, debug=debug)
             case "react":
-                # Build agents for orchestrated workflows
-                agents = {}
-                for workflow in config.workflows:
-                    agents[workflow.agent.name] = self.build_agent(workflow.agent, step_counter)
                 # Build the workflow
                 return ReActFlow(
                     agent=agent, 
-                    plan_agent=agents["plan_agent"], 
-                    action_agent=agents["action_agent"], 
                     custom_logger=custom_logger, 
                     debug=debug, 
+                    **flows,
                 )
             case _:
-                raise ValueError(f"Invalid orchestrated workflow name: {config.name}")
-        
-        
-def build_runnable_environment() -> RunnableEnvironment:
-    """Build a runnable environment.
-    """
-    raise NotImplementedError("Runnable environment is not implemented yet.")
+                raise ValueError(f"Invalid workflow name: {config.name}")

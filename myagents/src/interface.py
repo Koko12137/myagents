@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from enum import Enum
-from typing import Protocol, runtime_checkable, overload, Any, OrderedDict, Callable
+from typing import Protocol, runtime_checkable, overload, Any, OrderedDict, Callable, Union, Optional
 
 from fastmcp import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
@@ -25,9 +25,9 @@ class LLM(Protocol):
             The model of the LLM. 
         base_url (str) :
             The base URL of the LLM. 
-        custom_logger (Logger, defaults to logger):
+        custom_logger (Logger):
             The custom logger. If not provided, the default loguru logger will be used. 
-        debug (bool, defaults to False):
+        debug (bool):
             The debug flag. 
     """
     provider: Provider
@@ -39,326 +39,63 @@ class LLM(Protocol):
     @abstractmethod
     async def completion(
         self, 
-        messages: list[CompletionMessage | ToolCallRequest | ToolCallResult], 
-        available_tools: list[dict[str, str]] | None = None, 
+        messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
+        available_tools: Optional[list[dict[str, str]]] = None, 
         **kwargs: dict, 
     ) -> CompletionMessage:
         """Completion the messages.
         
         Args:
-            messages (list[Message | ToolCallRequest | ToolCallResult]) :
+            messages (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]) :
                 The messages to complete. 
-            available_tools (list[dict[str, str]] | None) :
+            available_tools (list[dict[str, str]], optional) :
                 The available tools.
             **kwargs (dict) :
                 The additional keyword arguments.
 
         Returns:
-            Message:
+            CompletionMessage:
                 The completed message.
         """
         pass
+    
 
-
-class MaxStepsError(Exception):
-    """MaxStepsError is an exception for the max steps error.
-    """
-    def __init__(self, message: str, current: int | float, limit: int | float) -> None:
-        self.message = message
-        self.current = current
-        self.limit = limit
-        super().__init__(self.message)
-        
-    def __str__(self) -> str:
-        return f"MaxStepsError: {self.message}, current: {self.current}, limit: {self.limit}"
-
-
-class StepCounter(Protocol):
-    """StepCounter is a protocol for the step counter. The limit can be max auto steps or max balance cost. It is better to use 
-    the same step counter for all agents. 
+class Context(Protocol):
+    """Context records the runtime information for the tool call. It is used to pass the information between the tool call and the workflow. 
     
     Attributes:
-        limit (int | float):
-            The limit of the step counter. 
-        current (int | float):
-            The current step of the step counter. 
+        prev (Context):
+            The previous tool call context.
+        next (Context):
+            The next tool call context.
+        key_values (dict[str, Any]):
+            The key values of the context.
     """
-    limit: int | float
-    current: int | float
-    
-    def reset(self) -> None:
-        """Reset the current step of the step counter.
-        
-        Returns:
-            None
-        """
-        pass
-    
-    def update_limit(self, limit: int | float) -> None:
-        """Update the limit of the step counter.
-        
-        Args:
-            limit (int | float):
-                The limit of the step counter. 
-        """
-        pass
-    
-    def step(self, step: int | float) -> None:
-        """Increment the current step of the step counter.
-        
-        Args:
-            step (int | float):
-                The step to increment. 
-        
-        Returns:
-            None 
-        
-        Raises:
-            MaxStepsError:
-                The max steps error raised by the step counter. 
-        """
-        pass
-
-
-@runtime_checkable
-class Agent(Protocol):
-    """Agent is a protocol for all the agents.
-    
-    Attributes:
-        llm (LLM):
-            The LLM to use for the agent. 
-        debug (bool):
-            The debug flag to use for the agent. 
-        custom_logger (Logger):
-            The custom logger to use for the agent.
-            
-        mcp_client (MCPClient):
-            The MCP client to use for the agent.
-        tools (list[dict[str, str]]):
-            The tools can be used for the agent. 
-            
-        step_counter (StepCounter):
-            The step counter to use for the agent. 
-    """
-    llm: LLM
-    debug: bool
-    custom_logger: 'Logger'
-    
-    # Stateless tools
-    mcp_client: MCPClient
-    tools: list[dict[str, str]]
-    
-    # Max auto steps
-    step_counter: StepCounter
-    
-    @overload
-    async def observe(
-        self, 
-        env: 'Environment',  
-        **kwargs: dict, 
-    ) -> tuple[list[CompletionMessage | ToolCallRequest | ToolCallResult], str]:
-        """Observe the environment.
-        
-        Args:
-            env (Environment):
-                The environment to observe. 
-            **kwargs (dict, optional):
-                The keyword arguments to pass to the environment observe method. 
-
-        Returns:
-            list[CompletionMessage | ToolCallRequest | ToolCallResult]:
-                The observed history messages of the environment. 
-            str:
-                The up to date information observed from the environment.  
-        """
-        pass
-
-    @overload
-    async def observe(
-        self, 
-        env: 'Task', 
-    ) -> tuple[list[CompletionMessage | ToolCallRequest | ToolCallResult], str]:
-        """Observe the task.
-        
-        Args:
-            env (Task):
-                The task to observe. 
-
-        Returns:
-            list[CompletionMessage | ToolCallRequest | ToolCallResult]:
-                The observed history messages of the task from the root task to the current task. 
-            str:
-                The up to date information observed from the task.  
-        """
-        pass
-    
-    async def think(
-        self, 
-        observe: list[CompletionMessage | ToolCallRequest | ToolCallResult], 
-        allow_tools: bool,  
-        external_tools: dict[str, FastMcpTool | MCPTool] = {}, 
-    ) -> CompletionMessage:
-        """Think about the environment.
-        
-        Args:
-            observe (list[CompletionMessage | ToolCallRequest | ToolCallResult]):
-                The messages observed from the environment. 
-            allow_tools (bool):
-                Whether to allow the tools provided by the agent to be used. This do not affect the 
-                external tools provided by the workflow. 
-            external_tools (dict[str, FastMcpTool | MCPTool], optional):
-                The external tools to use for the agent. 
-                
-        Returns:
-            CompletionMessage:
-                The completion message thought about by the LLM. 
-        """
-        pass
-    
-    async def call_tool(self, tool_call: ToolCallRequest) -> ToolCallResult:
-        """Call a tool. 
-        If there is any error caused by the tool call, the flag `is_error` will be set to True. 
-        However, if there is any error caused by the MCP client connection, this should raise a RuntimeError.  
-        
-        Args:
-            tool_call (ToolCallRequest): 
-                The tool call request including the tool call id and the tool call arguments.
-
-        Returns:
-            ToolCallResult: 
-                The result of the tool call. 
-                
-        Raises:
-            RuntimeError:
-                The runtime error raised by the MCP client connection. 
-        """
-        pass
-
-
-@runtime_checkable
-class Environment(Protocol):
-    """Environment is a protocol for all the environments.
-    
-    Attributes:
-        tools (dict[str, FastMcpTool]):
-            The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
-        history (list[CompletionMessage | ToolCallResult | ToolCallRequest]):
-            The history of the environment. 
-    """
-    tools: dict[str, FastMcpTool]
-    history: list[CompletionMessage | ToolCallResult | ToolCallRequest]
+    prev: Optional['Context']
+    next: Optional['Context']
+    key_values: dict[str, Any]
     
     @abstractmethod
-    def observe(self) -> str:
-        """Observe the environment.
-
-        Returns:
-            str: 
-                The observed information of the environment.
-        """
-        pass
-
-    @abstractmethod
-    def call_tool(self, tool_call: ToolCallRequest) -> ToolCallResult:
-        """Call a tool to modify the environment.
+    def create_next(self, **kwargs: dict) -> 'Context':
+        """Create the next context.
         
         Args:
-            tool_call (ToolCallRequest):
-                The tool call request.
+            **kwargs (dict):
+                The keyword arguments to create the next context.
                 
         Returns:
-            ToolCallResult:
-                The tool call result.
-        """
-        pass
-
-
-class RunnableEnvironment(Environment):
-    """RunnableEnvironment is a protocol for all the runnable environments.
-    
-    Attributes:
-        history (list[CompletionMessage | ToolCallResult | ToolCallRequest]):
-            The history of the environment. 
-            
-        agent (Agent):
-            The agent. 
-        debug (bool, defaults to False):
-            The debug flag. 
-        custom_logger (Logger, defaults to None):
-            The custom logger.
-        tools (dict[str, FastMCPTool]):
-            The tools provided by the workflow. These tools can be used to control the workflow. 
-        tool_functions (dict[str, Callable]):
-            The functions of the tools provided by the workflow. These functions can be used to control the workflow or the environment. 
-        workflows (dict[str, Workflow]):
-            The workflows that will be orchestrated to process the task.
-    """
-    
-    agent: Agent
-    debug: bool
-    custom_logger: 'Logger'
-    tools: dict[str, FastMcpTool]
-    tool_functions: dict[str, Callable]
-    workflows: dict[str, 'Workflow']
-    
-    @abstractmethod
-    def post_init(self) -> None:
-        """Post initialize the tools for the workflow.
-        This method should be called after the initialization of the workflow. And you should register the tools in this method. 
-        
-        Example:
-        ```python
-        def post_init(self) -> None:
-            
-            @self.register_tool("tool_name")
-            def tool_function(self, *args, **kwargs) -> Any:
-                pass
-        ```
+            Context:
+                The next context.
         """
         pass
     
     @abstractmethod
-    def register_tool(self, name: str) -> Callable:
-        """This is a FastAPI like decorator to register a tool to the workflow.
+    def done(self) -> 'Context':
+        """Done the context and return the previous context.
         
-        Args:
-            name (str):
-                The name of the tool.
-                
         Returns:
-            Callable:
-                The function register.
-        """
-        pass
-
-    @abstractmethod
-    async def call_tool(self, tool_call: ToolCallRequest) -> ToolCallResult:
-        """Call a tool to control the workflow.
-        
-        Args:
-            tool_call (ToolCallRequest):
-                The tool call request.
-                
-        Returns:
-            ToolCallResult:
-                The tool call result. 
-                
-        Raises:
-            ValueError:
-                If the tool call name is not registered. 
-        """
-        pass
-    
-    @abstractmethod
-    async def run(self, *args, **kwargs) -> Any:
-        """Run the environment entrypoint. This should override the run method of the OrchestratedFlows. The `run` method of the 
-        OrchestratedFlows can be called by `self.workflows["flow_name"].run(...)`.
-        
-        Args:
-            *args:
-                The additional arguments to pass to the run method of the OrchestratedFlows.
-            **kwargs:
-                The additional keyword arguments to pass to the run method of the OrchestratedFlows.
+            Context:
+                The previous context.
         """
         pass
 
@@ -376,9 +113,9 @@ class TaskStatus(Enum):
             The task is running. This is the status of the task in the current workflow.
         FINISHED (int):
             The task is finished. This means the task is finished and the answer is not None.
-        FAILED (str):
+        FAILED (int):
             The task is failed. This means the task is failed.
-        CANCELLED (str):
+        CANCELLED (int):
             The task is cancelled. This means the task is cancelled.
     """
     CREATED = 0
@@ -414,7 +151,7 @@ class Task(Protocol):
             The question to be answered. 
         description (str):
             The description of the task. 
-        parent (Task | None):
+        parent (Task):
             The parent task of the current task. If the task does not have a parent task, the parent is None.
         sub_tasks (OrderedDict[str, Task]):
             The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
@@ -425,10 +162,10 @@ class Task(Protocol):
             The strategy of the current task. 
         is_leaf (bool):
             Whether the current task is a leaf task. If the task is a leaf task, the task will not be orchestrated by the workflow.
-        answer (str | None):
+        answer (str):
             The answer to the question. If the task is not finished, the answer is None.
             
-        history (list[CompletionMessage | ToolCallRequest | ToolCallResult]):
+        history (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]):
             The history messages of the current task. 
     """
     uid: str
@@ -437,82 +174,82 @@ class Task(Protocol):
     question: str
     description: str
     parent: 'Task'
+    # NOTE: The key should be the question of the sub-task, the value should be the sub-task instance. 
     sub_tasks: OrderedDict[str, 'Task']
     
     # Status
     status: TaskStatus
     is_leaf: bool
     strategy: TaskStrategy
-    answer: str
+    answer: Optional[str]
     
     # History Messages
-    history: list[CompletionMessage | ToolCallRequest | ToolCallResult]
-    
-    # Observe the task
-    def observe(self) -> str:
-        """Observe the task according to the current status.
-        
-        - CREATED:
-            This task needs to be orchestrated by the workflow. 
-            Question, parent information, dependencies information, and sub-tasks information are needed.
-        - PLANNING:
-            This task is planning. 
-            Question, parent information, dependencies information, and sub-tasks information are needed.
-        - RUNNING:
-            This task is running. 
-            Question, parent information, dependencies information, and sub-tasks information are needed.
-        - FINISHED:
-            This task is finished. 
-            Question, parent information, dependencies information, and sub-tasks information are needed.
-        - FAILED:
-            This task is failed. Both question, status and error message are needed.
-        - CANCELLED:
-            This task is cancelled. Both question and status are needed. 
-
-        Returns:
-            str: 
-                The observed information of the task.
-        """
-        pass
+    history: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]
 
 
 @runtime_checkable
 class TaskView(Protocol):
     """TaskView is the view of the task. This view is used to format the task for the running task. 
+    
+    Attributes:
+        model (Task):
+            The task to be viewed.
+        template (str):
+            The template of the task view.
     """
     model: Task
+    template: str
     
-    def format(self) -> str:
-        """Format the task view to a string.
+    def format(self, *args, **kwargs) -> str:
+        """Format the task view to a string. 
+        
+        Args:
+            *args:
+                The additional arguments to pass to the format method.
+            **kwargs:
+                The additional keyword arguments to pass to the format method.
         
         Returns: 
             str:
                 The formatted task view. 
         """
         pass
-    
+
 
 @runtime_checkable
 class Workflow(Protocol):
-    """Workflow is the protocol for all the workflows.
+    """Workflow is stateless, it does not store any information about the state, it is only used to orchestrate the task or environment. 
+    The workflow is not responsible for the state of the task or environment. 
     
     Attributes:
+        system_prompt (str):
+            The system prompt of the workflow. This is used to set the system prompt of the workflow. 
         agent (Agent):
             The agent. 
-        debug (bool, defaults to False):
+        debug (bool):
             The debug flag. 
-        custom_logger (Logger, defaults to None):
+        custom_logger (Logger):
             The custom logger. 
+        context (Context):
+            The context of the workflow.
+        
         tools (dict[str, FastMCPTool]):
             The tools provided by the workflow. These tools can be used to control the workflow. 
         tool_functions (dict[str, Callable]):
             The functions of the tools provided by the workflow. These functions can be used to control the workflow. 
+        workflows (dict[str, Workflow]):
+            The workflows that will be orchestrated to process the task.
     """
-    agent: Agent
+    system_prompt: str
+    
+    agent: 'Agent'
     debug: bool
     custom_logger: 'Logger'
+    context: Context
+    
     tools: dict[str, FastMcpTool]
     tool_functions: dict[str, Callable]
+    workflows: dict[str, 'Workflow']
     
     @abstractmethod
     def post_init(self) -> None:
@@ -531,6 +268,18 @@ class Workflow(Protocol):
         pass
     
     @abstractmethod
+    def add_tool(self, name: str, tool: Callable[[Any], Union[Task, 'Environment']]) -> None:
+        """Add a tool to the workflow.
+        
+        Args:
+            name (str):
+                The name of the tool.
+            tool (Callable[[Any], Union[Task, 'Environment']]):
+                The tool to add. This tool should return a task or environment. 
+        """
+        pass
+    
+    @abstractmethod
     def register_tool(self, name: str) -> Callable:
         """This is a FastAPI like decorator to register a tool to the workflow.
         
@@ -543,17 +292,44 @@ class Workflow(Protocol):
                 The function register.
         """
         pass
+
+    @abstractmethod
+    async def call_tool(
+        self, 
+        ctx: Union['Task', 'Environment'], 
+        tool_call: ToolCallRequest, 
+        **kwargs: dict, 
+    ) -> ToolCallResult:
+        """Call a tool to control the workflow.
+        
+        Args:
+            ctx (Union[Task, Environment]):
+                The task or environment to call the tool.
+            tool_call (ToolCallRequest):
+                The tool call request.
+            **kwargs (dict):
+                The additional keyword arguments for calling the tool.
+                
+        Returns:
+            ToolCallResult:
+                The tool call result. 
+                
+        Raises:
+            ValueError:
+                If the tool call name is not registered. 
+        """
+        pass
     
     @abstractmethod
-    async def run(self, env: Environment | Task) -> Environment | Task:
+    async def run(self, env: Union['Environment', Task]) -> Union['Environment', Task]:
         """Run the workflow from the environment or task.
 
         Args:
-            env (Environment | Task): 
+            env (Union[Environment, Task]): 
                 The environment or task to run the workflow.
 
         Returns:
-            Environment | Task: 
+            Union[Environment, Task]: 
                 The environment or task after running the workflow.
         """
         
@@ -573,13 +349,102 @@ class Workflow(Protocol):
         # Your return code here
         pass
 
+
+class Environment(Workflow):
+    """Environment is a stateful workflow. It can record the state of the environment. 
+    
+    Attributes:
+        system_prompt (str):
+            The system prompt of the environment. This is used to set the system prompt of the environment. 
+        history (list[Union[CompletionMessage, ToolCallResult, ToolCallRequest]]):
+            The history state information of the environment. 
+            
+        agent (Agent):
+            The agent. 
+        debug (bool):
+            The debug flag. 
+        custom_logger (Logger):
+            The custom logger.
+        context (Context):
+            The context of the environment.
+            
+        tools (dict[str, FastMCPTool]):
+            The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
+        tool_functions (dict[str, Callable]):
+            The functions of the tools provided by the environment. These functions can be used to modify the environment. 
+        workflows (dict[str, Workflow]):
+            The workflows that will be orchestrated to process the task.
+    """
+    system_prompt: str
+    history: list[Union[CompletionMessage, ToolCallResult, ToolCallRequest]]
+    
+    agent: 'Agent'
+    debug: bool
+    custom_logger: 'Logger'
+    context: Context
+    
+    tools: dict[str, FastMcpTool]
+    tool_functions: dict[str, Callable]
+    workflows: dict[str, 'Workflow']
+    
     @abstractmethod
-    async def call_tool(self, tool_call: ToolCallRequest) -> ToolCallResult:
+    def post_init(self) -> None:
+        """Post initialize the tools for the workflow.
+        This method should be called after the initialization of the workflow. And you should register the tools in this method. 
+        
+        Example:
+        ```python
+        def post_init(self) -> None:
+            
+            @self.register_tool("tool_name")
+            def tool_function(self, *args, **kwargs) -> Any:
+                pass
+        ```
+        """
+        pass
+    
+    @abstractmethod
+    def add_tool(self, name: str, tool: Callable[[Any], Union[Task, 'Environment']]) -> None:
+        """Add a tool to the workflow.
+        
+        Args:
+            name (str):
+                The name of the tool.
+            tool (Callable[[Any], Union[Task, 'Environment']]):
+                The tool to add. This tool should return a task or environment. 
+        """
+        pass
+    
+    @abstractmethod
+    def register_tool(self, name: str) -> Callable:
+        """This is a FastAPI like decorator to register a tool to the workflow.
+        
+        Args:
+            name (str):
+                The name of the tool.
+                
+        Returns:
+            Callable:
+                The function register.
+        """
+        pass
+
+    @abstractmethod
+    async def call_tool(
+        self, 
+        ctx: Union[Task, 'Environment'], 
+        tool_call: ToolCallRequest, 
+        **kwargs: dict, 
+    ) -> ToolCallResult:
         """Call a tool to control the workflow.
         
         Args:
+            ctx (Union[Task, Environment]):
+                The task or environment to call the tool.
             tool_call (ToolCallRequest):
                 The tool call request.
+            **kwargs (dict):
+                The additional keyword arguments for calling the tool.
                 
         Returns:
             ToolCallResult:
@@ -591,25 +456,18 @@ class Workflow(Protocol):
         """
         pass
     
-
-class OrchestratedFlows(Workflow):
-    """OrchestratedFlows is the protocol for all the orchestrated flows. Multiple flows can be orchestrated to process the task. 
-    
-    Attributes:
-        agent (Agent):
-            The agent. 
-        debug (bool, defaults to False):
-            The debug flag. 
-        custom_logger (Logger, defaults to None):
-            The custom logger.
-        tools (dict[str, FastMCPTool]):
-            The tools provided by the workflow. These tools can be used to control the workflow. 
-        tool_functions (dict[str, Callable]):
-            The functions of the tools provided by the workflow. These functions can be used to control the workflow.  
-        workflows (dict[str, Workflow]):
-            The workflows that will be orchestrated to process the task.
-    """
-    workflows: dict[str, Workflow]
+    @abstractmethod
+    async def run(self, *args, **kwargs) -> Any:
+        """Run the environment entrypoint. This should override the run method of the OrchestratedFlows. The `run` method of the 
+        OrchestratedFlows can be called by `self.workflows["flow_name"].run(...)`.
+        
+        Args:
+            *args:
+                The additional arguments to pass to the run method of the OrchestratedFlows.
+            **kwargs:
+                The additional keyword arguments to pass to the run method of the OrchestratedFlows.
+        """
+        pass
 
 
 @runtime_checkable
@@ -677,5 +535,208 @@ class Logger(Protocol):
         Args:
             message (str):
                 The message to critical.
+        """
+        pass
+
+
+class StepCounter(Protocol):
+    """StepCounter is a protocol for the step counter. The limit can be max auto steps or max balance cost. It is better to use 
+    the same step counter for all agents. 
+    
+    Attributes:
+        limit (int | float):
+            The limit of the step counter. 
+        current (int | float):
+            The current step of the step counter. 
+    """
+    limit: Union[int, float]
+    current: Union[int, float]
+    
+    def reset(self) -> None:
+        """Reset the current step of the step counter.
+        
+        Returns:
+            None
+        """
+        pass
+    
+    def update_limit(self, limit: Union[int, float]) -> None:
+        """Update the limit of the step counter.
+        
+        Args:
+            limit (Union[int, float]):
+                The limit of the step counter. 
+        """
+        pass
+    
+    def step(self, step: Union[int, float]) -> None:
+        """Increment the current step of the step counter.
+        
+        Args:
+            step (Union[int, float]):
+                The step to increment. 
+        
+        Returns:
+            None 
+        
+        Raises:
+            MaxStepsError:
+                The max steps error raised by the step counter. 
+        """
+        pass
+
+
+@runtime_checkable
+class Agent(Protocol):
+    """Agent is a protocol for all the agents.
+    
+    Attributes:
+        llm (LLM):
+            The LLM to use for the agent. 
+        debug (bool):
+            The debug flag to use for the agent. 
+        custom_logger (Logger):
+            The custom logger to use for the agent.
+            
+        mcp_client (MCPClient):
+            The MCP client to use for the agent.
+        tools (list[dict[str, str]]):
+            The tools can be used for the agent. 
+            
+        step_counter (StepCounter):
+            The step counter to use for the agent. 
+    """
+    llm: LLM
+    debug: bool
+    custom_logger: Logger
+    
+    # Stateless tools
+    mcp_client: MCPClient
+    tools: list[dict[str, str]]
+    
+    # Max auto steps
+    step_counter: StepCounter
+    
+    @overload
+    async def observe(
+        self, 
+        env: Environment,  
+        **kwargs: dict, 
+    ) -> tuple[list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], str]:
+        """Observe the environment.
+        
+        Args:
+            env (Environment):
+                The environment to observe. 
+            **kwargs (dict, optional):
+                The keyword arguments to pass to the environment observe method. 
+
+        Returns:
+            list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]:
+                The observed history messages of the environment. 
+            str:
+                The up to date information observed from the environment.  
+        """
+        pass
+
+    @overload
+    async def observe(self, env: Union[Task, Environment]) -> str:
+        """Observe the task.
+        
+        Args:
+            env (Union[Task, Environment]):
+                The task or environment to observe. 
+
+        Returns:
+            str:
+                The up to date information observed from the task or environment.  
+        """
+        pass
+    
+    async def think(
+        self, 
+        observe: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
+        allow_tools: bool,  
+        external_tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
+    ) -> CompletionMessage:
+        """Think about the environment.
+        
+        Args:
+            observe (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]):
+                The messages observed from the environment. 
+            allow_tools (bool):
+                Whether to allow the tools provided by the agent to be used. This do not affect the 
+                external tools provided by the workflow. 
+            external_tools (Optional[dict[str, Union[FastMcpTool, MCPTool]]], defaults to {}):
+                The external tools to use for the agent. 
+                
+        Returns:
+            CompletionMessage:
+                The completion message thought about by the LLM. 
+        """
+        pass
+    
+    async def call_tool(
+        self, 
+        ctx: Union[Task, Environment], 
+        tool_call: ToolCallRequest, 
+        **kwargs: dict, 
+    ) -> ToolCallResult:
+        """Call a tool. 
+        If there is any error caused by the tool call, the flag `is_error` will be set to True. 
+        However, if there is any error caused by the MCP client connection, this should raise a RuntimeError.  
+        
+        Args:
+            ctx (Union[Task, Environment]):
+                The task or environment to call the tool.
+            tool_call (ToolCallRequest): 
+                The tool call request including the tool call id and the tool call arguments.
+            **kwargs (dict):
+                The additional keyword arguments for calling the tool.
+                
+        Returns:
+            ToolCallResult: 
+                The result of the tool call. 
+                
+        Raises:
+            RuntimeError:
+                The runtime error raised by the MCP client connection. 
+        """
+        pass
+
+
+class GroupEnvironment(Environment):
+    """GroupEnvironment containing multiple agents. 
+    
+    Attributes:
+        agents (list[Agent]):
+            The agents to use for the group environment.
+    """
+    agents: list[Agent]
+    
+
+class Worker(Protocol):
+    """Worker is combined the Agent, the workflow and the environment. 
+    
+    Attributes:
+        agent (Agent):
+            The agent to use for the worker.
+        workflow (Workflow):
+            The workflow to execute.
+        environment (Environment):
+            The environment to execute.
+    """
+    agent: Agent
+    workflow: Workflow
+    environment: Environment
+    
+    def run(self, *args, **kwargs) -> Any:
+        """Run the worker.
+        
+        Args:
+            *args:
+                The additional arguments to pass to the run method of the workflow.
+            **kwargs:
+                The additional keyword arguments to pass to the run method of the workflow.
         """
         pass

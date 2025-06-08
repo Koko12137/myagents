@@ -1,3 +1,4 @@
+import re
 import sys
 import traceback
 from typing import Callable
@@ -7,6 +8,8 @@ from fastmcp.tools import Tool as FastMCPTool
 
 from myagents.src.message import CompletionMessage, StopReason, MessageRole, ToolCallRequest, ToolCallResult
 from myagents.src.interface import Agent, Task, TaskStatus, TaskStrategy, Logger
+from myagents.src.envs.task import TaskContextView
+from myagents.src.utils.tools import ToolView
 from myagents.src.workflows.base import BaseWorkflow
 from myagents.prompts.workflows.act import ACTION_PROMPT, REFLECT_PROMPT
 
@@ -19,7 +22,7 @@ class TaskCancelledError(Exception):
         super().__init__(self.message)
     
     def __str__(self) -> str:
-        return f"TaskCancelledError: {self.message}, task: {self.task.observe()}"
+        return f"TaskCancelledError: {self.message}, task: {TaskContextView(self.task).format()}"
 
 
 class ActionFlow(BaseWorkflow):
@@ -77,7 +80,8 @@ class ActionFlow(BaseWorkflow):
             return 
         
         # Check the tools
-        self.custom_logger.info(f"Tools: {self.tools}")
+        tools_str = "\n".join([ToolView(tool).format() for tool in self.tools.values()])
+        self.custom_logger.info(f"Tools: \n{tools_str}")
         # Check the registered tools count
         if len(self.tools) == 0:
             self.custom_logger.error(f"No tools registered for the act flow. {traceback.format_exc()}")
@@ -104,7 +108,7 @@ class ActionFlow(BaseWorkflow):
         # 1. Observe the task
         history, current_observation = await self.agent.observe(task)
         # 2. Create a new message for the current observation
-        tools_str = "\n".join([tool.description for tool in self.tools.values()])
+        tools_str = "\n".join([ToolView(tool).format() for tool in self.tools.values()])
         message = CompletionMessage(
             role=MessageRole.USER, 
             content=ACTION_PROMPT.format(
@@ -148,7 +152,7 @@ class ActionFlow(BaseWorkflow):
                     # Call from the agent. 
                     # If there is any error caused by the tool call, the flag `is_error` will be set to True. 
                     # However, if there is any error caused by the MCP client connection, this should raise a RuntimeError. 
-                    tool_result = await self.agent.call_tool(tool_call)
+                    tool_result = await self.agent.call_tool(task, tool_call)
                     
                 # Check the tool result
                 if tool_result.is_error:
@@ -227,7 +231,7 @@ class ActionFlow(BaseWorkflow):
             # Check the task status
             if task.status == TaskStatus.FAILED:
                 # The task is still failed, then continue the retry with the next retry count
-                self.custom_logger.error(f"The task is still failed and the retry count is not reached the limit: {task.observe()}")
+                self.custom_logger.error(f"The task is still failed and the retry count is not reached the limit: {TaskContextView(task).format()}")
                 continue
             else:
                 # The task is finished, then return the task
@@ -235,7 +239,7 @@ class ActionFlow(BaseWorkflow):
         
         # The task is still failed and the retry count is reached the limit
         # Cancel the task
-        self.custom_logger.error(f"The task is still failed and the retry count is reached the limit: {task.observe()}")
+        self.custom_logger.error(f"The task is still failed and the retry count is reached the limit: {TaskContextView(task).format()}")
         return task
     
     async def run(self, task: Task) -> Task:
@@ -247,9 +251,6 @@ class ActionFlow(BaseWorkflow):
         Returns:
             Task: The acted task.
         """
-        # Update the current task
-        self.current_task = task
-        
         # Record the sub-tasks is finished
         sub_tasks_finished = []
         # Unfinished sub-tasks
@@ -262,8 +263,8 @@ class ActionFlow(BaseWorkflow):
             
             # Check if the sub-task is created, if True, then raise an error to call for re-planning
             if sub_task.status == TaskStatus.CREATED:
-                # Set the current task to the parent task
-                self.current_task = task
+                # Update the context
+                self.context = self.context.create_next(task=task)
                 # Raise an error to call for re-planning
                 raise TaskCancelledError("The task is roll back to created status due to the cancelled sub-task.", task)
                 
@@ -271,11 +272,9 @@ class ActionFlow(BaseWorkflow):
             elif sub_task.status == TaskStatus.RUNNING:
                 try:
                     # Log the sub-task
-                    self.custom_logger.info(f"Acting sub-task: \n{sub_task.observe()}")
+                    self.custom_logger.info(f"Acting sub-task: \n{TaskContextView(sub_task).format()}")
                     # Act the sub-task
                     sub_task = await self.run(sub_task)
-                    # Resume the current task
-                    self.current_task = task
                 except TaskCancelledError as e:
                     # The re-planning is needed, then raise the error
                     raise e
@@ -286,8 +285,8 @@ class ActionFlow(BaseWorkflow):
                 sub_task = await self.__act_retry(sub_task)
                 # Check if the sub-task is still failed
                 if sub_task.status == TaskStatus.FAILED:
-                    # The sub-task is still failed, then cancel the task
-                    task.status = TaskStatus.CANCELLED
+                    # The sub-task is still failed, cancel it
+                    sub_task.status = TaskStatus.CANCELLED
             
             # Check if the sub-task is cancelled, if True, set the parent task status to created and stop the traverse
             elif sub_task.status == TaskStatus.CANCELLED:
@@ -300,12 +299,12 @@ class ActionFlow(BaseWorkflow):
                     for sub_task in task.sub_tasks.values():
                         sub_task.status = TaskStatus.CANCELLED
                     # Log the cancelled sub-task
-                    self.custom_logger.info(f"All the sub-tasks are cancelled: \n{task.observe()}")
+                    self.custom_logger.info(f"All the sub-tasks are cancelled: \n{TaskContextView(task).format()}")
                     
                     # The strategy is ALL, but one of the sub-tasks is cancelled
                     task.status = TaskStatus.CREATED
                     # Log the cancelled sub-task
-                    self.custom_logger.info(f"The task roll back to created status due to the cancelled sub-task: \n{sub_task.observe()}")
+                    self.custom_logger.info(f"The task roll back to created status due to the cancelled sub-task: \n{TaskContextView(sub_task).format()}")
                     return task
             
             # Check if the sub-task is finished, if True, then summarize the result of the sub-task
@@ -313,21 +312,21 @@ class ActionFlow(BaseWorkflow):
                 # The sub-task is finished, then add the sub-task to the finished list
                 sub_tasks_finished.append(sub_task)
                 # Log the finished sub-task
-                self.custom_logger.info(f"Finished sub-task: \n{sub_task.observe()}")
+                self.custom_logger.info(f"Finished sub-task: \n{TaskContextView(sub_task).format()}")
                 # Get the next unfinished sub-task
                 sub_task = next(unfinished_sub_tasks, None)
             
             # ELSE, the sub-task is not created, running, failed, cancelled, or finished, it is a critical error
             else:
                 # The sub-task is not created, running, failed, cancelled, or finished, then raise an error
-                raise ValueError(f"The sub-task is not created, running, failed, cancelled, or finished: {sub_task.observe()}")
+                raise ValueError(f"The sub-task is not created, running, failed, cancelled, or finished: {TaskContextView(sub_task).format()}")
             
             # Check if continue the traverse
             if task.strategy == TaskStrategy.ANY:
                 # Check if the sub-task is finished
                 if len(sub_tasks_finished) > 0: 
                     # There is at least one sub-task is finished
-                    self.custom_logger.info(f"There is at least one sub-task is finished: \n{task.observe()}")
+                    self.custom_logger.info(f"There is at least one sub-task is finished: \n{TaskContextView(task).format()}")
                     break
         
         # There are some errors in the sub-tasks, then raise an error to call for re-planning
@@ -335,7 +334,7 @@ class ActionFlow(BaseWorkflow):
             # No sub-tasks are finished, roll back the task status to created
             task.status = TaskStatus.CREATED
             # Log the roll back
-            self.custom_logger.info(f"The task roll back to created status due to the errors in the sub-tasks: \n{task.observe()}")
+            self.custom_logger.info(f"The task roll back to created status due to the errors in the sub-tasks: \n{TaskContextView(task).format()}")
             # Raise an error to call for re-planning
             raise TaskCancelledError("There are some errors in the sub-tasks.", task)
             
@@ -345,14 +344,16 @@ class ActionFlow(BaseWorkflow):
         
         return task 
 
-    async def call_tool(self, task: Task, tool_call: ToolCallRequest) -> ToolCallResult:
+    async def call_tool(self, ctx: Task, tool_call: ToolCallRequest, **kwargs: dict) -> ToolCallResult:
         """Call a tool to control the workflow.
 
         Args:
-            task (Task):
+            ctx (Task):
                 The task to be executed.
             tool_call (ToolCallRequest):
                 The tool call request.
+            **kwargs (dict):
+                The additional keyword arguments for calling the tool.
 
         Returns:
             ToolCallResult:
@@ -362,11 +363,21 @@ class ActionFlow(BaseWorkflow):
         if tool_call.name not in self.tools:
             raise ValueError(f"Unknown tool call name: {tool_call.name}, action flow allow only action tools.")
         
+        # Create a new context
+        self.context = self.context.create_next(task=ctx, **kwargs)
+        
         if tool_call.name == "cancel_task":
             # Cancel the task
-            task.status = TaskStatus.CANCELLED
-            return ToolCallResult(
+            ctx.status = TaskStatus.CANCELLED
+            # Create a new result
+            result = ToolCallResult(
                 tool_call_id=tool_call.id, 
                 is_error=False, 
                 content="The task is cancelled.",
             )
+            
+        # Done the current context
+        self.context = self.context.done()
+        
+        # Return the result
+        return result

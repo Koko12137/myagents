@@ -1,6 +1,5 @@
 import traceback
-from typing import overload
-
+from typing import overload, Union
 
 from loguru import logger
 from fastmcp import Client as MCPClient
@@ -9,8 +8,46 @@ from fastmcp.tools import Tool as FastMcpTool
 from mcp import Tool as MCPTool
 
 from myagents.src.message import CompletionMessage, ToolCallRequest, ToolCallResult
-from myagents.src.interface import LLM, Agent, StepCounter, MaxStepsError, Task, Environment, Logger
+from myagents.src.interface import LLM, Agent, StepCounter, Task, Environment, Logger
+from myagents.src.envs.task import TaskContextView
 from myagents.src.utils.tools import tool_schema
+from myagents.src.utils.context import BaseContext
+
+
+class MaxStepsError(Exception):
+    """MaxStepsError is the error raised when the max steps is reached.
+    
+    Attributes:
+        message (str):
+            The message of the error.
+    """
+    message: str
+    current: int
+    limit: int
+    
+    def __init__(self, message: str, current: int, limit: int) -> None:
+        """Initialize the MaxStepsError.
+        
+        Args:
+            message (str):
+                The message of the error.
+            current (int):
+                The current step of the step counter.
+            limit (int):
+                The limit of the step counter.
+        """
+        self.message = message
+        self.current = current
+        self.limit = limit
+        
+    def __str__(self) -> str:
+        """Return the string representation of the MaxStepsError.
+        
+        Returns:
+            str:
+                The string representation of the MaxStepsError.
+        """
+        return f"MaxStepsError: {self.message}, current: {self.current}, limit: {self.limit}"
 
 
 class BaseStepCounter(StepCounter):
@@ -51,9 +88,19 @@ class BaseStepCounter(StepCounter):
         """
         self.current += step
         # Check if the current step is greater than the max auto steps
-        if self.current >= self.limit:
-            raise MaxStepsError("Max auto steps reached.", self.current, self.limit)
-    
+        if self.current > self.limit:
+            # Request the user to reset the step counter
+            reset = input(f"The limit of auto steps is reached. Do you want to reset the step counter with limit {e.limit} steps? (y/n)")
+            
+            if reset == "y":
+                # Reset the step counter and continue the loop
+                self.step_counter.reset()
+            else:
+                e = MaxStepsError("Max auto steps reached.", self.current, self.limit)
+                # The max steps error is raised, then update the task status to cancelled
+                self.custom_logger.error(f"Max steps error: {e}")
+                raise e
+        
     def reset(self) -> None:
         """Reset the current step of the step counter.
         
@@ -82,6 +129,8 @@ class BaseAgent(Agent):
             The debug flag to use for the agent.
         custom_logger (Logger, defaults to None):
             The custom logger to use for the agent.
+        context (BaseContext):
+            The context of the tool call.
             
         mcp_client (MCPClient):
             The MCP client to use for the agent.
@@ -94,6 +143,7 @@ class BaseAgent(Agent):
     llm: LLM
     debug: bool
     custom_logger: Logger
+    context: BaseContext
     
     # Stateless tools
     mcp_client: MCPClient 
@@ -127,6 +177,11 @@ class BaseAgent(Agent):
         self.llm = llm
         self.debug = debug
         self.custom_logger = custom_logger
+        self.context = BaseContext(
+            prev=None,
+            next=None,
+            key_values={}
+        )
         
         # Initialize the MCP client
         self.mcp_client = mcp_client
@@ -142,10 +197,7 @@ class BaseAgent(Agent):
         self.step_counter = step_counter
         
     @overload
-    async def observe(
-        self, 
-        env: Environment, 
-    ) -> tuple[list[CompletionMessage | ToolCallRequest | ToolCallResult], str]:
+    async def observe(self, env: Environment) -> str:
         """Observe the environment.
         
         Args:
@@ -153,18 +205,13 @@ class BaseAgent(Agent):
                 The environment to observe. 
                 
         Returns:
-            list[CompletionMessage | ToolCallRequest | ToolCallResult]:
-                The observed history messages of the environment. 
             str:
                 The up to date information observed from the environment.  
         """
         pass
     
     @overload
-    async def observe(
-        self, 
-        env: Task, 
-    ) -> tuple[list[CompletionMessage | ToolCallRequest | ToolCallResult], str]:
+    async def observe(self, env: Task) -> str:
         """Observe the Task.    
         
         Args:
@@ -172,46 +219,31 @@ class BaseAgent(Agent):
                 The task to observe. 
 
         Returns:
-            list[CompletionMessage | ToolCallRequest | ToolCallResult]:
-                The observed history messages of the environment. 
             str:
                 The up to date information observed from the environment.  
         """
         pass
     
-    async def observe(
-        self, 
-        env: Environment | Task, 
-    ) -> tuple[list[CompletionMessage | ToolCallRequest | ToolCallResult], str]:
+    async def observe(self, env: Union[Environment, Task]) -> str:
         """Observe the Task.    
         
         Args:
-            env (Environment | Task): 
+            env (Union[Environment, Task]): 
                 The environment or task to observe. 
 
         Returns:
-            list[CompletionMessage | ToolCallRequest | ToolCallResult]:
-                The observed history messages of the environment. 
             str:
                 The up to date information observed from the environment.  
         """
-        history: list[CompletionMessage | ToolCallRequest | ToolCallResult] = []
+        
         if isinstance(env, Environment):
-            observation = env.observe()
+            raise NotImplementedError("Environment is not supported for observation.")
         elif isinstance(env, Task):
-            observation = env.observe()
-            
-            if env.parent is not None:
-                # Observe the parent of the task recursively
-                p_history, _ = await self.observe(env.parent)
-                history.extend(p_history)
+            observation = TaskContextView(env).format()
         else:
             raise ValueError(f"Unsupported environment type: {type(env)}")
-            
-        # Append the history of current task
-        history.extend(env.history)
         
-        return history, observation
+        return observation
         
     async def think(
         self, 
@@ -237,20 +269,8 @@ class BaseAgent(Agent):
             CompletionMessage:
                 The completion message thought about by the LLM. 
         """
-        try:
-            # Increment the current step
-            self.step_counter.step()
-        except MaxStepsError as e:
-            # The max steps error is raised, then update the task status to cancelled
-            self.custom_logger.error(f"Max steps error: {e}")
-            # Request the user to reset the step counter
-            reset = input(f"The limit of auto steps is reached. Do you want to reset the step counter with limit {e.limit} steps? (y/n)")
-            if reset == "y":
-                # Reset the step counter and continue the loop
-                self.step_counter.reset()
-            else:
-                # Stop the loop
-                raise e
+        # Increment the current step
+        self.step_counter.step()
         
         # Get the available tools
         external_tools_list = list(external_tools.values())
@@ -266,15 +286,23 @@ class BaseAgent(Agent):
         # Return the response
         return message
     
-    async def call_tool(self, tool_call: ToolCallRequest) -> ToolCallResult:
+    async def call_tool(
+        self, 
+        ctx: Union[Task, Environment], 
+        tool_call: ToolCallRequest, 
+        **kwargs: dict, 
+    ) -> ToolCallResult:
         """Call a tool. 
         If there is any error caused by the tool call, the flag `is_error` will be set to True. 
         However, if there is any error caused by the MCP client connection, this should raise a RuntimeError.  
         
         Args:
+            ctx (Union[Task, Environment]):
+                The task or environment to call the tool.
             tool_call (ToolCallRequest): 
                 The tool call request including the tool call id and the tool call arguments.
-
+            **kwargs (dict):
+                The additional keyword arguments for calling the tool.
         Returns:
             ToolCallResult: 
                 The result of the tool call. 
@@ -283,6 +311,9 @@ class BaseAgent(Agent):
             RuntimeError:
                 The runtime error raised by the MCP client connection. 
         """
+        # Create a new context
+        self.context = self.context.create_next(ctx=ctx, **kwargs)
+        
         # Get the tool call id and the tool call arguments
         tool_call_id = tool_call.id
         tool_call_name = tool_call.name
@@ -303,6 +334,9 @@ class BaseAgent(Agent):
             # Raise the error 
             self.custom_logger.error(f"{e}, traceback: {traceback.format_exc()}")
             raise e
+        
+        # Done the current context
+        self.context = self.context.done()
         
         # Return the result
         return ToolCallResult(

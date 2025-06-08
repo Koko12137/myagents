@@ -1,3 +1,4 @@
+import re
 from typing import Callable
 from traceback import format_exc
 
@@ -7,8 +8,10 @@ from fastmcp.tools import Tool as FastMCPTool
 from myagents.src.message import CompletionMessage, MessageRole, StopReason, ToolCallRequest, ToolCallResult
 from myagents.src.interface import Agent, Task, TaskStatus, TaskStrategy, Logger
 from myagents.src.workflows.base import BaseWorkflow
-from myagents.src.envs.task import BaseTask
-from myagents.prompts.workflows.plan import REASON_PROMPT, PLAN_ATTENTION_PROMPT, EXEC_PLAN_PROMPT
+from myagents.src.envs.task import BaseTask, TaskContextView
+from myagents.src.utils.context import BaseContext
+from myagents.src.utils.tools import ToolView
+from myagents.prompts.workflows.plan import REASON_PROMPT, PLAN_ATTENTION_PROMPT, EXEC_PLAN_PROMPT, PLAN_SYSTEM_PROMPT
 
 
 class PlanFlow(BaseWorkflow):
@@ -27,6 +30,8 @@ class PlanFlow(BaseWorkflow):
         tool_functions (dict[str, Callable]):
             The functions of the tools provided by the workflow. These functions can be used to control the workflow. 
     """
+    system_prompt: str = PLAN_SYSTEM_PROMPT
+    
     agent: Agent
     debug: bool
     custom_logger: Logger
@@ -40,9 +45,23 @@ class PlanFlow(BaseWorkflow):
         custom_logger: Logger = logger, 
     ) -> None:
         super().__init__(agent, custom_logger, debug)
-            
+        
+        # Create a new blueprint context
+        self.blueprint = BaseContext(key_values={})
+
         # Post initialize to initialize the tools
         self.post_init()
+        
+        # Additional tools information for tool calling
+        tools_str = "\n".join([ToolView(tool).format() for tool in self.tools.values()])
+        
+        if self.debug:
+            # Check the tools
+            self.custom_logger.info(f"Tools: \n{tools_str}")
+            # Check the registered tools count
+            if len(self.tools) == 0:
+                self.custom_logger.error(f"No tools registered for the plan flow. {format_exc()}")
+                raise RuntimeError("No tools registered for the plan flow.")
             
     def post_init(self) -> None:
         """Post init for the PlanFlow workflow.
@@ -50,8 +69,7 @@ class PlanFlow(BaseWorkflow):
         @self.register_tool("create_task")
         async def create_task(question: str, description: str, is_leaf: bool) -> Task:
             """
-            Create a task. You should only focus on the question and description parameters without concerning any other parameters. 
-            You can modify other parameters when you planning that task. This task will be added to the current task as a sub-task. 
+            Create a task. This task will be added to the current task as a sub-task. 
             
             Args:
                 question (str): 
@@ -59,7 +77,8 @@ class PlanFlow(BaseWorkflow):
                 description (str): 
                     The description of the task. 
                 is_leaf (bool):
-                    Whether the task is a leaf task. If the task is a leaf task, the task will not be orchestrated by the workflow.
+                    Whether the task is a leaf task. If the task is a leaf task, the task will be set as running status
+                    automatically. 
 
             Returns:
                 Task: 
@@ -90,13 +109,19 @@ class PlanFlow(BaseWorkflow):
             """
             return TaskStrategy(strategy)
         
-        if self.debug:
-            # Check the tools
-            self.custom_logger.info(f"Tools: {self.tools}")
-            # Check the registered tools count
-            if len(self.tools) == 0:
-                self.custom_logger.error(f"No tools registered for the plan flow. {format_exc()}")
-                raise RuntimeError("No tools registered for the plan flow.")
+        @self.register_tool("set_as_leaf")
+        async def set_as_leaf() -> None:
+            """
+            If you found that the current task is not a leaf task, but the task should be a leaf task in the blueprint, 
+            you can call this tool to set the task as a leaf task.
+            
+            Args:
+                None
+                
+            Returns:
+                None
+            """
+            return None
             
         @self.register_tool("finish_planning")
         async def finish_planning() -> bool:
@@ -123,31 +148,48 @@ class PlanFlow(BaseWorkflow):
             Task:
                 The task after created the sub-tasks.
         """
+        # Additional tools information for tool calling
+        tools_str = "\n".join([ToolView(tool).format() for tool in self.tools.values()])
+        
+        # Check the history of the task, if the history is empty, then we need to set the system prompt
+        if len(task.history) == 0:
+            # Set the system prompt
+            task.history.append(CompletionMessage(
+                role=MessageRole.SYSTEM, 
+                content=self.system_prompt.format(blueprint=self.blueprint.key_values["blueprint"]), 
+            ))
+        
         # Set the task status to planning
         task.status = TaskStatus.PLANNING
         
-        # 1. Observe the task
-        history, current_observation = await self.agent.observe(task)
-        # 2. Create a new message for the current observation
-        message = CompletionMessage(
-            role=MessageRole.USER, 
-            content=PLAN_ATTENTION_PROMPT.format(task_context=current_observation), 
-            stop_reason=StopReason.NONE, 
-        )
+        # Observe the task
+        observe = await self.agent.observe(task)
+        # Log the observation
+        self.custom_logger.info(f"Observation: \n{observe}")
         
-        # 3. Append Plan Prompt and Call for Completion
-        # Append for current task recording
-        task.history.append(message)
-        # Append for agent's completion
-        history.append(message)
+        # Check if the last message is a user message
+        if task.history[-1].role == MessageRole.USER:
+            # Append the observation to the last message
+            task.history[-1].content += f"\n\nCurrent Observation: {observe}"
+        else:
+            # Create a new message for the current observation
+            message = CompletionMessage(
+                role=MessageRole.USER, 
+                content=PLAN_ATTENTION_PROMPT.format(
+                    task_context=observe, 
+                    tools=tools_str, 
+                ), 
+                stop_reason=StopReason.NONE, 
+            )
+            # Append Plan Prompt and Call for Completion
+            # Append for current task recording
+            task.history.append(message)
+            
         # Call for completion
-        message: CompletionMessage = await self.agent.think(history, allow_tools=False)
+        message: CompletionMessage = await self.agent.think(task.history, allow_tools=False)
         
-        # 4. Record the completion message
+        # Record the completion message
         task.history.append(message)
-        history.append(message)
-        # Additional tools information for tool calling
-        tools_str = "\n".join([tool.description for tool in self.tools.values()])
         
         # This is used for no tool calling thinking limit.
         # If the agent is thinking more than max_thinking times, the loop will be finished.
@@ -156,58 +198,80 @@ class PlanFlow(BaseWorkflow):
         
         # Modify the orchestration
         while True:
-            # 1. Observe the task planning history
-            history, current_observation = await self.agent.observe(task)
-            # 2. Create a new message for the current observation
+            # Observe the task planning history
+            observe = await self.agent.observe(task)
+            # Log the observation
+            self.custom_logger.info(f"Observation: \n{observe}")
+            
+            # Create a new message for the current observation
             message = CompletionMessage(
                 role=MessageRole.USER, 
                 content=EXEC_PLAN_PROMPT.format(
-                    tools=tools_str, 
-                    task_context=current_observation, 
+                    task_context=observe, 
                 ), 
                 stop_reason=StopReason.NONE, 
             )
             
-            # 3. Append Plan Prompt and Call for Completion
+            # Append Plan Prompt and Call for Completion
             # Append for current task recording
             task.history.append(message)
-            # Append for agent's completion
-            history.append(message)
             # Call for completion
-            message: CompletionMessage = await self.agent.think(history, allow_tools=False, external_tools=self.tools)
+            message: CompletionMessage = await self.agent.think(
+                task.history, 
+                allow_tools=False, 
+                external_tools=self.tools,
+            )
             
-            # 4. Record the completion message
+            # Record the completion message
             # Append for current task recording
             task.history.append(message)
-            # Append for agent's completion
-            history.append(message)
+            
+            # Extract the finish flag from the message, this will not be used for tool calling.
+            finish_flag = re.search(r"<finish_flag>\n(.*)\n</finish_flag>", message.content, re.DOTALL)
+            if finish_flag:
+                # Extract the finish flag
+                finish_flag = finish_flag.group(1)
+                # Check if the finish flag is True
+                if finish_flag == "True":
+                    finish_flag = True
+                else:
+                    finish_flag = False
+            else:
+                finish_flag = False
 
-            # 5. Check the stop reason
+            # Check the stop reason
             if message.stop_reason == StopReason.TOOL_CALL:
                 # Reset the current thinking
                 current_thinking = 0
                 
-                # 6. Traverse all the tool calls
+                # Traverse all the tool calls
                 for tool_call in message.tool_calls:
                     try:
-                        # 7. Call the tool
+                        # Call the tool
                         tool_result = await self.call_tool(task, tool_call)
-                    except Exception as e:
-                        # 8. Handle the error
+                    except ValueError as e:
+                        # Handle the error
                         tool_result = ToolCallResult(
                             tool_call_id=tool_call.id, 
                             is_error=True, 
-                            content=e, 
+                            content=f"Tool call {tool_call.name} failed with information: {e}", 
                         )
                         
                         # Handle the error and update the task status
                         self.custom_logger.error(f"Tool call {tool_call.name} failed with information: {e}")
-                        
-                    # 9. Update the messages
+                    except Exception as e:
+                        # Handle the unexpected error
+                        self.custom_logger.error(f"Tool call {tool_call.name} failed with information: {e}")
+                        raise e
+                    
+                    # Update the messages
                     # Append for current task recording
                     task.history.append(tool_result)
-                    # Append for agent's completion
-                    history.append(tool_result)
+            elif finish_flag:
+                # Set the task status to running
+                task.status = TaskStatus.RUNNING
+                # Break the loop
+                break
             else:
                 # Update the current thinking
                 current_thinking += 1
@@ -216,7 +280,7 @@ class PlanFlow(BaseWorkflow):
                     # No more tool calling is allowed, break the loop
                     break
                     
-            # 10. Check if the planning is finished
+            # Check if the planning is finished
             if task.status == TaskStatus.RUNNING:
                 # No more orchestration is required, break the loop
                 break
@@ -232,30 +296,63 @@ class PlanFlow(BaseWorkflow):
         Returns:
             Task: The task with the orchestration plan.
         """
-        # 1. Observe the task
-        history, current_observation = await self.agent.observe(task)
-        # 2. Create a new message for the current observation
+        # Observe the task
+        observe = await self.agent.observe(task)
+        # Create a new message for the current observation
         message = CompletionMessage(
             role=MessageRole.USER, 
-            content=REASON_PROMPT.format(task_context=current_observation), 
+            content=REASON_PROMPT.format(task_context=observe), 
             stop_reason=StopReason.NONE, 
         )
         # Log the reason prompt
         self.custom_logger.info(f"Reason For General Orchestration and Action Plan: \n{message.content}")
         
-        # 3. Append Reason Prompt and Call for Completion
+        # Append Reason Prompt and Call for Completion
         # Append for current task recording
         task.history.append(message)
-        # Append for agent's completion
-        history.append(message)
-        # Call for completion
-        message: CompletionMessage = await self.agent.think(history, allow_tools=False)
         
-        # 4. Record the completion message
-        # Append for current task recording
-        task.history.append(message)
-        # Append for agent's completion
-        history.append(message)
+        # This is used for no blueprint found limit.
+        # If the agent is thinking more than max_thinking times, the loop will be finished.
+        max_thinking = 3
+        current_thinking = 0
+        
+        while True:
+            # Call for completion
+            message: CompletionMessage = await self.agent.think(task.history, allow_tools=False)
+            # Record the completion message
+            # Append for current task recording
+            task.history.append(message)
+            
+            # Extract the orchestration blueprint from the task by regular expression
+            blueprint = re.search(r"<orchestration>\n(.*)\n</orchestration>", message.content, re.DOTALL)
+            if blueprint:
+                # Extract the blueprint from the task
+                blueprint = blueprint.group(1)
+                # Log the blueprint
+                self.custom_logger.info(f"Orchestration Blueprint: \n{blueprint}")
+                # Update the blueprint to the task
+                self.blueprint = self.blueprint.create_next(blueprint=blueprint)
+                break
+            else:
+                # Update the current thinking
+                current_thinking += 1
+                # Check if the current thinking is greater than the max thinking
+                if current_thinking > max_thinking:
+                    # No more thinking is allowed, raise an error
+                    raise RuntimeError("No orchestration blueprint was found in <orchestration> tags for 3 times thinking.")
+                
+                # No blueprint is found, create an error message
+                message = CompletionMessage(
+                    role=MessageRole.USER, 
+                    content="No orchestration blueprint is found in <orchestration> tags. Please try again.", 
+                    stop_reason=StopReason.NONE, 
+                )
+                # Append the error message to the task history
+                task.history.append(message)
+                # Call for completion
+                message: CompletionMessage = await self.agent.think(task.history, allow_tools=False)
+                # Record the completion message
+                task.history.append(message)
         
         return task
     
@@ -270,7 +367,7 @@ class PlanFlow(BaseWorkflow):
             Task:
                 The task after execution.
         """
-        # Reason about the task 
+        # Reason about the task and create the blueprint
         task = await self.__reason(task)
         
         # Check if the task is a leaf task
@@ -295,7 +392,7 @@ class PlanFlow(BaseWorkflow):
                 if current_task.status == TaskStatus.CREATED: 
                     if len(current_task.sub_tasks) == 0:
                         # Log the current task
-                        self.custom_logger.info(f"Planning current task: \n{current_task.observe()}")
+                        self.custom_logger.info(f"Planning current task: \n{TaskContextView(current_task).format()}")
                         
                         # Call the plan flow to plan the task
                         current_task = await self.__layer_create(current_task)
@@ -303,7 +400,7 @@ class PlanFlow(BaseWorkflow):
                     # Check if all the sub-tasks are cancelled
                     elif all(sub_task.status == TaskStatus.CANCELLED for sub_task in current_task.sub_tasks.values()):
                         # Log the current task
-                        self.custom_logger.info(f"Planning current task: \n{current_task.observe()}")
+                        self.custom_logger.info(f"Planning current task: \n{TaskContextView(current_task).format()}")
                         
                         # Call the plan flow to plan the task
                         current_task = await self.__layer_create(current_task)
@@ -315,16 +412,19 @@ class PlanFlow(BaseWorkflow):
                         if sub_task.status == TaskStatus.CREATED and not sub_task.is_leaf:
                             new_queue.append(sub_task)
                             # Log the new sub-task
-                            self.custom_logger.info(f"Add sub-task to the queue: \n{sub_task.observe()}")
+                            self.custom_logger.info(f"Add sub-task to the queue: \n{TaskContextView(sub_task).format()}")
             
             # Update the queue
             queue = new_queue
             # Log the new queue
             self.custom_logger.info(f"Update queue with {len(queue)} tasks")
-                
+        
+        # Done the blueprint
+        self.blueprint = self.blueprint.done()
+        
         return task
     
-    async def call_tool(self, task: Task, tool_call: ToolCallRequest) -> ToolCallResult:
+    async def call_tool(self, ctx: Task, tool_call: ToolCallRequest, **kwargs: dict) -> ToolCallResult:
         """Call a tool to control the workflow.
 
         Args:
@@ -332,7 +432,9 @@ class PlanFlow(BaseWorkflow):
                 The task to be executed.
             tool_call (ToolCallRequest):
                 The tool call request.
-
+            **kwargs (dict):
+                The additional keyword arguments for calling the tool.
+                
         Returns:
             ToolCallResult:
                 The tool call result.
@@ -343,6 +445,9 @@ class PlanFlow(BaseWorkflow):
         """
         if tool_call.name not in self.tools:
             raise ValueError(f"Unknown tool call name: {tool_call.name}, plan flow allow only orchestration tools.")
+        
+        # Create a new context
+        self.context = self.context.create_next(task=ctx, **kwargs)
         
         if tool_call.name == "create_task":
             # Call from external tools
@@ -357,9 +462,9 @@ class PlanFlow(BaseWorkflow):
                 new_task.status = TaskStatus.RUNNING
                 
             # Add the new task to the task
-            task.sub_tasks[new_task.uid] = new_task
+            ctx.sub_tasks[new_task.question] = new_task
             # Add the parent task to the new task
-            new_task.parent = task
+            new_task.parent = ctx
             
             # Create ToolCallResult
             tool_result = ToolCallResult(
@@ -369,11 +474,12 @@ class PlanFlow(BaseWorkflow):
             )
             # Log the tool call result
             self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
+            
         elif tool_call.name == "set_strategy":
             # Call from external tools
             strategy: TaskStrategy = await self.tool_functions[tool_call.name](**tool_call.args)
             # Set the strategy of the new task
-            task.strategy = strategy
+            ctx.strategy = strategy
             
             # Create ToolCallResult
             tool_result = ToolCallResult(
@@ -384,9 +490,22 @@ class PlanFlow(BaseWorkflow):
             # Log the tool call result
             self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
             
+        elif tool_call.name == "set_as_leaf":
+            # Call from external tools
+            await self.tool_functions[tool_call.name]()
+            
+            # Create ToolCallResult
+            tool_result = ToolCallResult(
+                tool_call_id=tool_call.id, 
+                is_error=False, 
+                content="The task is set as leaf.",
+            )
+            # Log the tool call result
+            self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
+            
         elif tool_call.name == "finish_planning":
             # No more orchestration is required, so we update the task status to running
-            task.status = TaskStatus.RUNNING
+            ctx.status = TaskStatus.RUNNING
             
             # Create ToolCallResult
             tool_result = ToolCallResult(
@@ -396,7 +515,11 @@ class PlanFlow(BaseWorkflow):
             )
             # Log the tool call result
             self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
+            
         else:
             raise ValueError(f"Unknown tool call name: {tool_call.name}, plan flow allow only orchestration tools.")
+        
+        # Done the current context
+        self.context = self.context.done()
         
         return tool_result

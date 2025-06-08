@@ -1,5 +1,8 @@
+from typing import Any, Optional
+
 from mcp import Tool as MCPTool
 from fastmcp.tools import Tool as FastMcpTool
+from pydantic import BaseModel
 
 from myagents.src.interface import Provider
 
@@ -56,3 +59,28 @@ def tool_schema(
         raise ValueError(f"Unsupported provider: {provider}")
     
     return description
+
+
+class ToolView:
+    """This view is used to format the tool to a string.
+    
+    Attributes:
+        tool (MCPTool | FastMcpTool):
+            The tool to be viewed.
+        template (str):
+            The template of the tool view.
+    """
+    tool: MCPTool | FastMcpTool
+    template: str = """
+    ==== {name} ====
+    {description}
+    """
+    
+    def __init__(self, tool: MCPTool | FastMcpTool) -> None:
+        self.tool = tool
+        
+    def format(self) -> str:
+        return self.template.format(
+            name=self.tool.name,
+            description=self.tool.description,
+        )

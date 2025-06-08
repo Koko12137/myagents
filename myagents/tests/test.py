@@ -1,10 +1,10 @@
 import json
 import os
 
+from myagents.src.interface import Workflow
 from myagents.src.envs.query import Query
 from myagents.src.agents.base import BaseStepCounter
-from myagents.src.interface import OrchestratedFlows
-from myagents.src.factory import AutoAgent, OrchestratedFlowsConfig
+from myagents.src.factory import AutoAgent, WorkflowConfig
 from myagents.src.utils.logger import init_logger
 
 
@@ -21,7 +21,7 @@ async def test_async_query():
     # Create a list of agents according to the config file
     with open("configs/agents.json", "r") as f:
         json_data = json.load(f)
-    agents = OrchestratedFlowsConfig.model_validate(json_data)
+    agents = WorkflowConfig.model_validate(json_data)
     # Build a global step counter
     step_counter = BaseStepCounter(100)
     # Create a logger
@@ -32,7 +32,7 @@ async def test_async_query():
     # Create Factory
     factory = AutoAgent()
     # Build ReActFlow
-    react_flow: OrchestratedFlows = factory.build_orchestrated_workflows(
+    react_flow: Workflow = factory.build_workflow(
         config=agents, 
         step_counter=step_counter, 
         custom_logger=logger, 
