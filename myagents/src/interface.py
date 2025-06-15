@@ -1,17 +1,49 @@
 from abc import abstractmethod
+from asyncio import Lock
 from enum import Enum
-from typing import Protocol, runtime_checkable, overload, Any, OrderedDict, Callable, Union, Optional
+from typing import Protocol, runtime_checkable, Any, OrderedDict, Callable, Union, Optional, AsyncGenerator
 
 from fastmcp import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
 from mcp import Tool as MCPTool
     
-from myagents.src.message import CompletionMessage, ToolCallRequest, ToolCallResult
+from myagents.src.message import CompletionUsage, CompletionMessage, ToolCallRequest, ToolCallResult
+
+
+@runtime_checkable
+class Queue(Protocol):
+    """Queue is a protocol for the queue.
+    """
+    @abstractmethod
+    async def put(self, *args, **kwargs) -> None:
+        """Put an item into the queue.
+        
+        Args:
+            *args:
+                The additional arguments to pass to the put method.
+            **kwargs:
+                The additional keyword arguments to pass to the put method.
+        """
+        pass
+    
+    @abstractmethod
+    async def get(self, *args, **kwargs) -> Any:
+        """Get an item from the queue.
+        
+        Args:
+            *args:
+                The additional arguments to pass to the get method.
+            **kwargs:
+                The additional keyword arguments to pass to the get method.
+        """
+        pass
 
 
 class Provider(Enum):
+    DUMMY = "dummy"
     OPENAI = "openai"
     TONGYI = "tongyi"
+    QUEUE = "queue"     # This could be a adapter for the AReaL framework.
 
 
 @runtime_checkable
@@ -58,6 +90,44 @@ class LLM(Protocol):
                 The completed message.
         """
         pass
+
+    
+class StreamLLM(LLM):
+    """StreamLLM is a LLM that is used to stream the LLM calls.
+    
+    Attributes:
+        provider (Provider) :
+            The provider of the LLM.
+        model (str) :
+            The model of the LLM. 
+        base_url (str) :
+            The base URL of the LLM. 
+        custom_logger (Logger):
+            The custom logger. If not provided, the default loguru logger will be used. 
+        debug (bool):
+            The debug flag. 
+    """
+    provider: Provider
+    model: str
+    base_url: str
+    custom_logger: 'Logger'
+    debug: bool
+    
+    # Stream queue
+    queue: Queue
+    
+    @abstractmethod
+    async def stream(self, *args, **kwargs) -> AsyncGenerator[str, None]:
+        """Stream the LLM calls.
+        
+        Args:
+            *args:
+                The additional arguments to pass to the stream method.
+            **kwargs:
+                The additional keyword arguments to pass to the stream method.
+        """
+        pass
+    
     
 
 class Context(Protocol):
@@ -200,6 +270,7 @@ class TaskView(Protocol):
     model: Task
     template: str
     
+    @abstractmethod
     def format(self, *args, **kwargs) -> str:
         """Format the task view to a string. 
         
@@ -348,6 +419,16 @@ class Workflow(Protocol):
         """ If the stop reason is not tool call, return the environment or task """
         # Your return code here
         pass
+    
+    @abstractmethod
+    async def register_counter(self, counter: 'StepCounter') -> None:
+        """Register a step counter to all the agents in the workflow.
+        
+        Args:
+            counter (StepCounter):
+                The step counter to register.
+        """
+        pass
 
 
 class Environment(Workflow):
@@ -474,6 +555,7 @@ class Environment(Workflow):
 class Logger(Protocol):
     """Logger is the protocol for the logger.
     """
+    @abstractmethod
     def add(self, sink: str, format: str, level: str, colorize: bool, **kwargs) -> None:
         """Add a sink to the logger.
         
@@ -482,6 +564,7 @@ class Logger(Protocol):
                 The sink to add.
         """
     
+    @abstractmethod
     def enable(self, name: str) -> None:
         """Enable the logger. This is used to enable the logger for a specific name.
         
@@ -491,6 +574,7 @@ class Logger(Protocol):
         """
         pass
     
+    @abstractmethod
     def debug(self, message: str) -> None:
         """Debug the message. This is the lowest level of the logger.
         
@@ -500,6 +584,7 @@ class Logger(Protocol):
         """
         pass
     
+    @abstractmethod
     def info(self, message: str) -> None:
         """Info the message. This is the second lowest level of the logger.  
         
@@ -511,6 +596,7 @@ class Logger(Protocol):
         """
         pass
     
+    @abstractmethod
     def warning(self, message: str) -> None:
         """Warning the message. This is the third lowest level of the logger.  
         
@@ -520,6 +606,7 @@ class Logger(Protocol):
         """
         pass
     
+    @abstractmethod
     def error(self, message: str) -> None:
         """Error the message. This is the fourth lowest level of the logger.
         
@@ -529,6 +616,7 @@ class Logger(Protocol):
         """
         pass
     
+    @abstractmethod
     def critical(self, message: str) -> None:
         """Critical the message. This is the highest level of the logger.
         
@@ -544,15 +632,23 @@ class StepCounter(Protocol):
     the same step counter for all agents. 
     
     Attributes:
-        limit (int | float):
+        uid (str):
+            The unique identifier of the step counter. 
+        limit (Union[int, float]):
             The limit of the step counter. 
-        current (int | float):
+        current (Union[int, float]):
             The current step of the step counter. 
+        custom_logger (Logger):
+            The custom logger to use for the step counter. 
     """
+    uid: str
     limit: Union[int, float]
     current: Union[int, float]
+    lock: Lock
+    custom_logger: Logger
     
-    def reset(self) -> None:
+    @abstractmethod
+    async def reset(self) -> None:
         """Reset the current step of the step counter.
         
         Returns:
@@ -560,7 +656,8 @@ class StepCounter(Protocol):
         """
         pass
     
-    def update_limit(self, limit: Union[int, float]) -> None:
+    @abstractmethod
+    async def update_limit(self, limit: Union[int, float]) -> None:
         """Update the limit of the step counter.
         
         Args:
@@ -569,11 +666,26 @@ class StepCounter(Protocol):
         """
         pass
     
-    def step(self, step: Union[int, float]) -> None:
+    @abstractmethod
+    async def check_limit(self) -> bool:
+        """Check if the limit of the step counter is reached.
+        
+        Returns:
+            bool:
+                Whether the limit of the step counter is reached.
+        
+        Raises:
+            MaxStepsError:
+                The max steps error raised by the step counter. 
+        """
+        pass
+    
+    @abstractmethod
+    async def step(self, step: CompletionUsage) -> None:
         """Increment the current step of the step counter.
         
         Args:
-            step (Union[int, float]):
+            step (CompletionUsage):
                 The step to increment. 
         
         Returns:
@@ -582,6 +694,16 @@ class StepCounter(Protocol):
         Raises:
             MaxStepsError:
                 The max steps error raised by the step counter. 
+        """
+        pass
+    
+    @abstractmethod
+    async def recharge(self, limit: Union[int, float]) -> None:
+        """Recharge the limit of the step counter.
+        
+        Args:
+            limit (Union[int, float]):
+                The limit of the step counter. 
         """
         pass
 
@@ -603,8 +725,8 @@ class Agent(Protocol):
         tools (list[dict[str, str]]):
             The tools can be used for the agent. 
             
-        step_counter (StepCounter):
-            The step counter to use for the agent. 
+        step_counters (dict[str, StepCounter]):
+            The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
     """
     llm: LLM
     debug: bool
@@ -615,31 +737,9 @@ class Agent(Protocol):
     tools: list[dict[str, str]]
     
     # Max auto steps
-    step_counter: StepCounter
+    step_counters: dict[str, StepCounter]
     
-    @overload
-    async def observe(
-        self, 
-        env: Environment,  
-        **kwargs: dict, 
-    ) -> tuple[list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], str]:
-        """Observe the environment.
-        
-        Args:
-            env (Environment):
-                The environment to observe. 
-            **kwargs (dict, optional):
-                The keyword arguments to pass to the environment observe method. 
-
-        Returns:
-            list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]:
-                The observed history messages of the environment. 
-            str:
-                The up to date information observed from the environment.  
-        """
-        pass
-
-    @overload
+    @abstractmethod
     async def observe(self, env: Union[Task, Environment]) -> str:
         """Observe the task.
         
@@ -653,6 +753,7 @@ class Agent(Protocol):
         """
         pass
     
+    @abstractmethod
     async def think(
         self, 
         observe: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
@@ -676,6 +777,7 @@ class Agent(Protocol):
         """
         pass
     
+    @abstractmethod
     async def call_tool(
         self, 
         ctx: Union[Task, Environment], 
@@ -701,6 +803,16 @@ class Agent(Protocol):
         Raises:
             RuntimeError:
                 The runtime error raised by the MCP client connection. 
+        """
+        pass
+    
+    @abstractmethod
+    async def register_counter(self, counter: StepCounter) -> None:
+        """Register a step counter to the agent.
+        
+        Args:
+            counter (StepCounter):
+                The step counter to register.
         """
         pass
 

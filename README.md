@@ -1,104 +1,80 @@
-# My Agents
+# MyAgents
 
-## 项目简介
+My Agents 混合 Workflows 与 Agent 自主规划/拆解/观察/执行/反思的智能体框架
 
-My Agents 是一个强大且灵活的 AI 智能体开发框架，基于大语言模型（LLM），支持 ReAct 推理与行动范式，具备任务规划、执行与编排能力，并可无缝集成多种工具和 API。适用于复杂任务自动化、智能助手、AI 工具链等场景。
+## 📖  My Agents 简介
 
-### 基本假设
+还没时间写，以后再说
 
-1. 人都得处于环境中
-2. 人可以通过工具与环境进行交互
-3. 处于特定任务中的人应通过特定的工作流与环境进行交互
-4. 简单环境是有状态的，简单工具是无状态的，二者可以组合成有状态的工具环境
+## 📑 更新日志
 
-## 特点
+**[2025.06.15]** 增加训练数据采样脚本，允许并发workflow等注入全局计步器实现并发采样支持
 
-- 🤖 **LLM 驱动的智能体**: 利用大语言模型的力量创建智能代理
-- 🔄 **ReAct 框架**: 实现 ReAct（推理与行动）框架，用于解决复杂任务
-- 🛠️ **工具集成**: 通过 MCP（模型控制协议）无缝集成各种工具和 API
-- 📝 **任务管理**: 复杂的任务规划、执行和编排系统
-- 🔄 **异步支持**: 完整的异步支持，提供更好的性能和可扩展性
+**[很久很久以前]** 完成了核心组件的开发，但是现有模型需要超长提示词才能达到可用的效果，得看看怎么降低推理成本
 
-## 安装与使用方法
+## 📅 开发计划
 
-### 依赖安装
+### ✅ 已完成
 
-建议使用 Python 3.12+，并使用 uv 进行依赖管理：
+- 开发
+- [x] 框架核心组件开发开发
+  - [x] 问答场景下的核心组件开发
+    - [x] LLM/Agent/Task/Workflow/Environment
 
-```bash
-pip install uv 
+- [x] 计步器（防止赛博切糕惨案）
+  - [x] 增加对token计步器的支持（计数器不会预估接下来的一步需要多少token，只要当前没超下一步就可以继续执行）
+  - [x] 增加多个计步器同时计步，当任一个计步器达到步数上限都进入计步器错误处理（目前只会抛出一个计数器的错误信息）
 
-uv sync
-```
+- 训练
+- [x] 数据采样
+  - [x] 正样本采样脚本
 
-### 配置
+### 🔧 开发进行中
 
-1. **API Key 配置**：
-   - 在 `configs/api_keys.json` 中填写你的 OpenAI/Tavily 等 API Key。
-   - 示例：
-     ```json
-     {
-         "OPENAI_KEY": "sk-xxx",
-         "TAVILY_KEY": "tvly-xxx"
-     }
-     ```
-2. **Agent 配置**：
-   - 编辑 `configs/agents.json`，配置 LLM 参数（模型、温度、token 等）。
-   - 示例：
-     ```json
-     {
-         "plan_llm": {"provider": "openai", "model": "gpt-4o-mini", "temperature": 1.0},
-         "action_llm": {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0.1}
-     }
-     ```
+- 训练
+- [ ] 优化任务拆解规划模型性能
+  - [ ] 使用长提示词采样正样本数据，使用短提示词采样负样本数据
+  - [ ] 规划模型SFT/DPO/KTO结果对比
 
-### 启动与使用
+- 测试
+- [ ] 增加提示词自动优化智能体，面向不同任务进行不同不同的提示词改写
+  - [ ] 对比先[环境信息->动作提示词]与[动作提示词->环境信息]的效果差别
 
-#### 1. 启动服务（Gate/MCP）
+### 🕥 TODO
 
-如需以服务方式运行，可配置 `configs/gate_config.json` 和 `configs/mcp_config.json`，然后：
+- [ ] 把MCP改为服务发现机制
+- [ ] Demo App 测试用例
+- [ ] FastAPI提供服务
+- [ ] 增加有向无环图任务管理支持
+- [ ] 增加Agent2Agent支持，并以此作为multi-agents的交互基础
 
-```bash
-uv run run_mcp_gate.py
-```
+## 🧠 设计思想
 
-#### 2. 命令行交互
+- 关于 `Workflow` 和 `Environment`
+  - 在程序设计中，函数无状态，类有状态；在 **My Agents** 里，`Workflow` 是无状态函数，`Environment` 是有状态的类
+  - 还有一种叫做结构体的东西，光有状态没有任何方法，在 **My Agents** 里，`Task` 即是有状态但无方法的
+  - 任何有状态的对象都可以被观察，观察的结果取决于你怎么观察它
 
-直接运行 CLI，输入问题即可体验智能体推理与行动：
+- 关于 `Agent`
+  - 若人脱离环境存在，则人无法获得任何信息，**My Agents** 里 `Agent` 的信息来源和动作对象都必须是 `Environment`
+  - 在 `Agent` 使用的工具中，工具本身也可以带有状态
 
-```bash
-uv run cli.py --question "如何用Python实现快速排序？"
-```
+- 关于 ***工作流*** 和 ***自主智能***
+  - 人的自由总是有限的，做事情大概也得讲究方法论，所以 **My Agent** 将做事情的流程分为两大核心流程，即任务编排/执行
+  - 自由体现在 `Agent` 可以根据任务自主决定如何 **拆解** / **规划** / **执行** 任务，并自主 **检查** 是否达成目标
 
-## 项目结构
+- 关于 ***Multi-Agents*** 的实现
+  - `Agent` 可以通过本地函数调用的方式调用其他 `Agent`，也可以通过 **RPC** 的方式实现，除此之外，`Agent` 还可以决定是否调用其他 `Agent`，也可以由 `Workflow` 要求 `Agent` 在什么时候必须调用哪个 `Agent`
+  - 很多时候，我们只是关心任务是否能完成，而不关心任务具体是由谁执行，这时候 `Agent` 会调用其他 `Workflow` 而不是 `Agent`
 
-```plain text
-myagents/
-│   ├── prompts/          # Prompt 模板与环境
-│   │   ├── envs/         # 各类环境下的 prompt 模板
-│   │   └── workflows/    # 工作流相关 prompt
-│   ├── src/              # 核心源码
-│   │   ├── agents/       # 智能体基类与实现
-│   │   ├── envs/         # 任务、环境、接口定义
-│   │   ├── llms/         # LLM 抽象与实现
-│   │   ├── mcps/         # MCP 协议与工具集成
-│   │   ├── workflows/    # 任务规划、行动、编排流
-│   │   ├── factory.py    # Agent/LLM 工厂与配置加载
-│   │   ├── logger.py     # 日志工具
-│   │   ├── message.py    # 消息协议与格式
-│   │   └── utils.py      # 通用工具函数
-│   ├── tests/            # 测试用例
-│   └── DEV.md            # 开发者文档
-├── configs/              # 配置文件（API Key、Agent、MCP等）
-├── cli.py                # 命令行入口
-├── run_mcp_gate.py       # Gate/MCP 服务启动脚本
-├── README.md             # 项目说明
-├── pyproject.toml        # Python 项目依赖配置
-└── ...
-```
+- 关于 ***“甩手掌柜”***
+  - 我不认为一句话就可以让 `Agent` 达到你想要的目，即使是人，在团队合作或者复杂任务执行过程中，都免不了多次和任务需求方或者其他方面进行对齐
+  - 在数学角度上考虑，约束越少，则解空间越大，则结果越不稳定，增加约束，多次修正，这样才能达到想要的效果
 
----
+- 关于 ***Prompt Engineering*** 和 ***Post Train***
+  - 通过 **Prompt Engineering** 有几率可以榨干模型的最强性能，但结果总是不太稳定或者高资源需求的
+  - 我希望通过 **『Prompt Engineering』** ➕ **『Post Train』** 实现模型从 *『有提示可以稳定执行』* ➡️ *『不需要提示也知道怎么做』*
 
-如需自定义 prompt、扩展工具或集成新 LLM，可参考 `prompts/` 和 `src/llms/` 目录下的实现。
+## 🔍 开发者文档
 
-欢迎 Issue 与 PR！
+[DEV.mc](./myagents/DEV.md)

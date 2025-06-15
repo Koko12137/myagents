@@ -1,13 +1,60 @@
 import os
 import getpass
 import json
+from typing import Optional, Union
 
 from loguru import logger
 from openai import AsyncOpenAI
 
 from myagents.src.interface import LLM, Logger
-from myagents.src.message import CompletionMessage, MessageRole, StopReason, ToolCallRequest, ToolCallResult
+from myagents.src.message import CompletionMessage, MessageRole, StopReason, ToolCallRequest, ToolCallResult, CompletionUsage
 from myagents.src.utils.tools import Provider
+
+
+def to_openai_dict(messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]) -> list[dict]:
+    """Convert the message to the OpenAI dictionary.
+    
+    Args:
+        messages (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]): 
+            The messages to convert.
+            
+    Returns:
+        list[dict]: 
+            The OpenAI dictionary.
+    """
+    # Create the generation history
+    history = []
+    for message in messages: 
+        message_dict = {
+            "role": message.role.value,
+            "content": message.content
+        }
+        
+        # This is only for OpenAI. 
+        if isinstance(message, ToolCallResult):
+            if message_dict['role'] == "tool":
+                message_dict['tool_call_id'] = message.tool_call_id
+        
+        elif isinstance(message, CompletionMessage):
+            # If the message is a tool call, add the tool call to the history
+            if message.tool_calls != [] and message.tool_calls is not None:
+                message_dict["tool_calls"] = []
+                
+                for tool_call in message.tool_calls:
+                    message_dict["tool_calls"].append({
+                        "id": tool_call.id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_call.name, 
+                            "arguments": json.dumps(tool_call.args, ensure_ascii=False)
+                        }
+                    })
+        else:
+            raise ValueError(f"Unsupported message type: {type(message)}")
+            
+        history.append(message_dict)
+        
+    return history
 
 
 class OpenAiLLM(LLM):
@@ -20,7 +67,6 @@ class OpenAiLLM(LLM):
     
     def __init__(
         self, 
-        provider: str, 
         model: str, 
         base_url: str, 
         temperature: float = 1.0, 
@@ -31,8 +77,6 @@ class OpenAiLLM(LLM):
         """Initialize the OpenAiLLM.
         
         Args:
-            provider (str): 
-                The provider of the LLM.
             model (str): 
                 The model of the LLM.
             base_url (str): 
@@ -46,9 +90,7 @@ class OpenAiLLM(LLM):
             **kwargs: 
                 The additional keyword arguments.
         """
-        self.provider = Provider(provider)
-        # Assert the provider is OpenAI
-        assert self.provider == Provider.OPENAI, "OpenAI is the only supported provider for OpenAiLLM."
+        self.provider = Provider.OPENAI
         
         self.model = model
         self.base_url = base_url
@@ -56,7 +98,7 @@ class OpenAiLLM(LLM):
         self.custom_logger = custom_logger
         self.debug = debug
         if self.debug:
-            self.custom_logger.enable("myagents.llms.base")
+            self.custom_logger.enable("myagents.llms.openai")
         
         # Initialize the client
         api_key_field = kwargs.get("api_key_field", "OPENAI_KEY")
@@ -70,15 +112,15 @@ class OpenAiLLM(LLM):
     
     async def completion(
         self, 
-        messages: list[CompletionMessage], 
-        available_tools: list[dict[str, str]] | None = None, 
+        messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
+        available_tools: Optional[list[dict[str, str]]] = None, 
     ) -> CompletionMessage:
         """Completion the messages.
 
         Args:
-            messages (list[CompletionMessage]): 
+            messages (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]): 
                 The messages to complete.
-            available_tools (list[dict[str, str]] | None, optional): 
+            available_tools (Optional[list[dict[str, str]]], optional): 
                 The available tools. Defaults to None.
 
         Raises:
@@ -94,36 +136,7 @@ class OpenAiLLM(LLM):
             available_tools = None
         
         # Create the generation history
-        history = []
-        for message in messages: 
-            message_dict = {
-                "role": message.role.value,
-                "content": message.content
-            }
-            
-            # This is only for OpenAI. 
-            if isinstance(message, ToolCallResult):
-                if message_dict['role'] == "tool":
-                    message_dict['tool_call_id'] = message.tool_call_id
-            
-            elif isinstance(message, CompletionMessage):
-                # If the message is a tool call, add the tool call to the history
-                if message.tool_calls != [] and message.tool_calls is not None:
-                    message_dict["tool_calls"] = []
-                    
-                    for tool_call in message.tool_calls:
-                        message_dict["tool_calls"].append({
-                            "id": tool_call.id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_call.name, 
-                                "arguments": json.dumps(tool_call.args, ensure_ascii=False)
-                            }
-                        })
-            else:
-                raise ValueError(f"Unsupported message type: {type(message)}")
-                
-            history.append(message_dict)
+        history = to_openai_dict(messages)
             
         # Call for the completion
         response = await self.client.chat.completions.create(
@@ -135,6 +148,16 @@ class OpenAiLLM(LLM):
         )
         content = response.choices[0].message.content
         self.custom_logger.info(f"\n{content}")
+        # Get the usage
+        usage = response.usage
+        # Create the usage
+        usage = CompletionUsage(
+            prompt_tokens=usage.prompt_tokens or -100,
+            completion_tokens=usage.completion_tokens or -100,
+            total_tokens=usage.total_tokens or -100
+        )
+        # Log the usage
+        self.custom_logger.info(f"Usage: {usage}")
         
         # Extract tool calls from response
         tool_calls = []
@@ -166,4 +189,5 @@ class OpenAiLLM(LLM):
             content=content, 
             tool_calls=tool_calls, 
             stop_reason=stop_reason, 
+            usage=usage, 
         )

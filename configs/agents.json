@@ -1,50 +1,72 @@
 {
-    "name": "react",
-    "agent": {
-        "name": "react_agent",
-        "llm": {
-            "provider": "openai",
-            "base_url": "http://10.255.251.3:45519/v1",
-            "model": "Qwen/Qwen3-14B-AWQ",
-            "temperature": 0.8, 
-            "api_key_field": "OPENAI_KEY", 
-            "extra_body": {
-                "enable_thinking": false
-            }
-        }
-    }, 
-    "workflows": [
+    "step_counters": [
         {
-            "name": "plan", 
-            "agent": {
-                "name": "plan_agent",
-                "llm": {
-                    "provider": "openai",
-                    "base_url": "http://10.255.251.3:45519/v1",
-                    "model": "Qwen/Qwen3-14B-AWQ",
-                    "temperature": 1.0, 
-                    "api_key_field": "OPENAI_KEY", 
-                    "extra_body": {
-                        "enable_thinking": false
-                    }
-                }
+            "name": "max",
+            "limit": 1
+        }
+    ],
+    "environment": {
+        "name": "query", 
+        "agent": {
+            "name": "dummy",
+            "llm": {
+                "provider": "dummy",
+                "model": "dummy", 
+                "base_url": "dummy",
+                "temperature": 0.8
             }
         },
-        {
-            "name": "action",
-            "agent": {  
-                "name": "action_agent",
-                "llm": {
-                    "provider": "openai",
-                    "base_url": "http://10.255.251.3:45519/v1",
-                    "model": "Qwen/Qwen3-14B-AWQ",
-                    "temperature": 0.8, 
-                    "api_key_field": "OPENAI_KEY", 
-                    "extra_body": {
-                        "enable_thinking": false
+        "workflows": [
+            {
+                "name": "react",
+                "agent": {
+                    "name": "base", 
+                    "llm": {
+                        "provider": "openai",
+                        "base_url": "http://localhost:8889/v1",
+                        "model": "Qwen/Qwen3-14B-AWQ",
+                        "temperature": 0.8, 
+                        "api_key_field": "OPENAI_KEY", 
+                        "extra_body": {
+                            "enable_thinking": false
+                        }
                     }
-                }
+                }, 
+                "workflows": [
+                    {
+                        "name": "plan", 
+                        "agent": {
+                            "name": "base",
+                            "llm": {
+                                "provider": "openai",
+                                "base_url": "http://localhost:8889/v1",
+                                "model": "Qwen/Qwen3-14B-AWQ",
+                                "temperature": 1.0, 
+                                "api_key_field": "OPENAI_KEY", 
+                                "extra_body": {
+                                    "enable_thinking": false
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "name": "action",
+                        "agent": {  
+                            "name": "base",
+                            "llm": {
+                                "provider": "openai",
+                                "base_url": "http://localhost:8889/v1",
+                                "model": "Qwen/Qwen3-14B-AWQ",
+                                "temperature": 0.8, 
+                                "api_key_field": "OPENAI_KEY", 
+                                "extra_body": {
+                                    "enable_thinking": false
+                                }
+                            }
+                        }
+                    }
+                ] 
             }
-        }
-    ]
+        ]
+    }
 }

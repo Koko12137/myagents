@@ -4,7 +4,7 @@ from typing import Callable, Any, Union
 from loguru import logger
 from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.src.interface import Agent, Task, Workflow, Environment, Logger
+from myagents.src.interface import Agent, Task, Workflow, Environment, Logger, StepCounter
 from myagents.src.message import ToolCallRequest, ToolCallResult
 from myagents.src.utils.context import BaseContext
 
@@ -158,4 +158,16 @@ class BaseWorkflow(Workflow, metaclass=ABCMeta):
                 The environment or task after running the workflow.
         """
         pass
-    
+        
+    async def register_counter(self, counter: StepCounter) -> None:
+        """Register a step counter to the workflow.
+        
+        Args:
+            counter (StepCounter):
+                The step counter to register.
+        """
+        # Register the step counter to the agent
+        await self.agent.register_counter(counter)
+        # Register the step counter to the workflows
+        for workflow in self.workflows.values():
+            await workflow.register_counter(counter)

@@ -5,13 +5,26 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "accelerate>=1.7.0",
+    "colorama>=0.4.6",
     "dashscope>=1.23.2",
+    "datasets>=3.6.0",
     "fastapi>=0.115.12",
     "fastapi-mcp>=0.3.3",
     "fastmcp>=2.3.3",
+    "huggingface-hub>=0.33.0",
     "loguru>=0.7.3",
     "mcp>=1.8.0",
+    "omegaconf>=2.3.0",
     "openai>=1.78.0",
     "pydantic>=2.11.4",
+    "pynvml>=12.0.0",
+    "pytest>=8.4.0",
+    "pyzmq>=27.0.0",
+    "ray>=2.47.0",
+    "safetensors>=0.5.3",
+    "transformers>=4.52.4",
+    "triton>=3.3.1",
+    "trl>=0.18.1",
     "uvicorn>=0.34.2",
 ]
