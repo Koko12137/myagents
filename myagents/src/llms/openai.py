@@ -11,16 +11,18 @@ from myagents.src.message import CompletionMessage, MessageRole, StopReason, Too
 from myagents.src.utils.tools import Provider
 
 
-def to_openai_dict(messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]) -> list[dict]:
-    """Convert the message to the OpenAI dictionary.
+def to_openai_dict(
+    messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]
+) -> list[dict[str, Union[str, dict]]]:
+    """Convert the message to the OpenAI compatible messages dictionaries.
     
     Args:
         messages (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]): 
             The messages to convert.
             
     Returns:
-        list[dict]: 
-            The OpenAI dictionary.
+        list[dict[str, Union[str, dict]]]: 
+            The OpenAI compatible messages dictionaries.
     """
     # Create the generation history
     history = []

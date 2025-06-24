@@ -47,7 +47,7 @@ class PlanFlow(BaseWorkflow):
         super().__init__(agent, custom_logger, debug)
         
         # Create a new blueprint context
-        self.blueprint = BaseContext(key_values={})
+        self.context = BaseContext(key_values={})
 
         # Post initialize to initialize the tools
         self.post_init()
@@ -131,6 +131,26 @@ class PlanFlow(BaseWorkflow):
             Once you call this tool, the loop of the workflow will be finished and you cannot modify your error.
             """
             return 
+        
+        @self.register_tool("raise_conflict")
+        async def raise_conflict(reason: str) -> None:
+            """
+            Raise a conflict about the planning blueprint. This will set the task status to failed and call the planner for 
+            re-planning the blueprint. 
+            
+            Args:
+                reason (str):
+                    The reason of the conflict you want to raise.
+                
+            Returns:
+                None
+            """
+            self.custom_logger.error(f"Raise a conflict about the planning blueprint: {reason}")
+            # Get the current task
+            task = self.context.get("task")
+            # Set the task status to failed
+            task.status = TaskStatus.FAILED
+            return 
             
     async def __layer_create(self, task: Task) -> Task:
         """Create the sub-tasks for the task.
@@ -156,7 +176,7 @@ class PlanFlow(BaseWorkflow):
             # Set the system prompt
             task.history.append(CompletionMessage(
                 role=MessageRole.SYSTEM, 
-                content=self.system_prompt.format(blueprint=self.blueprint.key_values["blueprint"]), 
+                content=self.system_prompt.format(blueprint=self.context.get("blueprint")), 
             ))
         
         # Set the task status to planning
@@ -197,12 +217,12 @@ class PlanFlow(BaseWorkflow):
         current_thinking = 0
         
         # Modify the orchestration
-        while True:
+        while task.status == TaskStatus.PLANNING:
             # Observe the task planning history
             observe = await self.agent.observe(task)
             # Log the observation
             self.custom_logger.info(f"Observation: \n{observe}")
-            
+
             # Create a new message for the current observation
             message = CompletionMessage(
                 role=MessageRole.USER, 
@@ -212,18 +232,20 @@ class PlanFlow(BaseWorkflow):
                 stop_reason=StopReason.NONE, 
             )
             
-            # Append Plan Prompt and Call for Completion
-            # Append for current task recording
-            task.history.append(message)
+            if task.history[-1].role != MessageRole.USER:
+                # Append Plan Prompt and Call for Completion
+                task.history.append(message)
+            else:
+                # Append the observation to the last content
+                task.history[-1].content += f"\n\n{message.content}"
+            
             # Call for completion
             message: CompletionMessage = await self.agent.think(
                 task.history, 
                 allow_tools=False, 
                 external_tools=self.tools,
             )
-            
             # Record the completion message
-            # Append for current task recording
             task.history.append(message)
             
             # Extract the finish flag from the message, this will not be used for tool calling.
@@ -270,20 +292,34 @@ class PlanFlow(BaseWorkflow):
             elif finish_flag:
                 # Set the task status to running
                 task.status = TaskStatus.RUNNING
-                # Break the loop
-                break
             else:
                 # Update the current thinking
                 current_thinking += 1
                 # Check if the current thinking is greater than the max thinking
                 if current_thinking > max_thinking:
                     # No more tool calling is allowed, break the loop
-                    break
+                    self.custom_logger.error(f"No more tool calling is allowed, set the task status to running: \n{TaskContextView(task).format()}")
+                    task.status = TaskStatus.RUNNING
                     
             # Check if the planning is finished
             if task.status == TaskStatus.RUNNING:
-                # No more orchestration is required, break the loop
-                break
+                # Double check the planning result
+                if len(task.sub_tasks) == 0 and not task.is_leaf and current_thinking < max_thinking:
+                    # The planning is error, re-plan the task
+                    self.custom_logger.error(f"The planning is error, re-plan the task: \n{TaskContextView(task).format()}")
+                    # Set the task status to planning
+                    task.status = TaskStatus.PLANNING
+                    # Record the error to history and announce the penalty
+                    task.history.append(CompletionMessage(
+                        role=MessageRole.USER, 
+                        content=f"任务规划错误，当前的任务没有子任务，但是当前的任务不是叶子任务，请重新执行规划拆解。以下是来自规划阶段的蓝图，你只需要执行：\n{self.context.get('blueprint')}", 
+                        stop_reason=StopReason.NONE, 
+                    ))
+                elif len(task.sub_tasks) == 0 and not task.is_leaf and current_thinking >= max_thinking:
+                    # The planning is error, re-plan the task
+                    self.custom_logger.error(f"The planning is error and no more thinking is allowed, set the task status to failed: \n{TaskContextView(task).format()}")
+                    # Set the task status to failed
+                    task.status = TaskStatus.FAILED
         
         return task
         
@@ -327,11 +363,11 @@ class PlanFlow(BaseWorkflow):
             blueprint = re.search(r"<orchestration>\n(.*)\n</orchestration>", message.content, re.DOTALL)
             if blueprint:
                 # Extract the blueprint from the task
-                blueprint = blueprint.group(1)
+                blueprint: str = blueprint.group(1)
                 # Log the blueprint
                 self.custom_logger.info(f"Orchestration Blueprint: \n{blueprint}")
                 # Update the blueprint to the task
-                self.blueprint = self.blueprint.create_next(blueprint=blueprint)
+                self.context = self.context.create_next(blueprint=blueprint)
                 break
             else:
                 # Update the current thinking
@@ -383,36 +419,50 @@ class PlanFlow(BaseWorkflow):
             # Create a new queue
             new_queue = []
             
+            # Get the first task from the queue
+            current_task = queue.pop(0)
+            
             # Traverse the queue
-            while queue:
-                # Get the first task from the queue
-                current_task = queue.pop(0)
-                
+            while True:
                 # Check if the current task is pending or failed
                 if current_task.status == TaskStatus.CREATED: 
-                    if len(current_task.sub_tasks) == 0:
+                    if len(current_task.sub_tasks) == 0 and not current_task.is_leaf:
                         # Log the current task
                         self.custom_logger.info(f"Planning current task: \n{TaskContextView(current_task).format()}")
-                        
                         # Call the plan flow to plan the task
                         current_task = await self.__layer_create(current_task)
-                    
-                    # Check if all the sub-tasks are cancelled
-                    elif all(sub_task.status == TaskStatus.CANCELLED for sub_task in current_task.sub_tasks.values()):
-                        # Log the current task
-                        self.custom_logger.info(f"Planning current task: \n{TaskContextView(current_task).format()}")
-                        
-                        # Call the plan flow to plan the task
-                        current_task = await self.__layer_create(current_task)
+                
+                elif current_task.status == TaskStatus.RUNNING:
+                    # Check if there is any pending sub-task
+                    if len(current_task.sub_tasks) > 0:
+                        # Add the sub-task to the new queue
+                        for sub_task in current_task.sub_tasks.values():
+                            if sub_task.status == TaskStatus.CREATED and not sub_task.is_leaf:
+                                new_queue.append(sub_task)
+                                # Log the new sub-task
+                                self.custom_logger.info(f"Add sub-task to the queue: \n{TaskContextView(sub_task).format()}")
+                                
+                    # Get the next task from the queue
+                    try:
+                        current_task = queue.pop(0)
+                    except Exception as e:
+                        # Queue is empty, break the loop
+                        break
+                
+                elif current_task.status == TaskStatus.FAILED:
+                    # Create a break point context for the failed task
+                    self.context = self.context.create_next(task=current_task, queue=queue)
+                    # TODO: Roll back the task and call for re-planning the blueprint
+                    raise NotImplementedError("The task is failed, but the roll back is not implemented.")
+                
+                # Check if all the sub-tasks are cancelled
+                elif all(sub_task.status == TaskStatus.CANCELLED for sub_task in current_task.sub_tasks.values()):
+                    # Log the current task
+                    self.custom_logger.info(f"Planning current task: \n{TaskContextView(current_task).format()}")
+                    # Call the plan flow to plan the task
+                    current_task = await self.__layer_create(current_task)
             
-                # Check if there is any pending sub-task
-                if current_task.sub_tasks:
-                    # Add the sub-task to the new queue
-                    for sub_task in current_task.sub_tasks.values():
-                        if sub_task.status == TaskStatus.CREATED and not sub_task.is_leaf:
-                            new_queue.append(sub_task)
-                            # Log the new sub-task
-                            self.custom_logger.info(f"Add sub-task to the queue: \n{TaskContextView(sub_task).format()}")
+                
             
             # Update the queue
             queue = new_queue
@@ -420,7 +470,7 @@ class PlanFlow(BaseWorkflow):
             self.custom_logger.info(f"Update queue with {len(queue)} tasks")
         
         # Done the blueprint
-        self.blueprint = self.blueprint.done()
+        self.context = self.context.done()
         
         return task
     

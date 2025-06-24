@@ -7,6 +7,7 @@ from traceback import format_exc
 
 from loguru import logger
 from datasets import load_from_disk
+from openai import AsyncOpenAI
 
 from myagents.src.envs.task import BaseTask, TaskContextView
 from myagents.src.llms import to_openai_dict
@@ -44,72 +45,60 @@ PROMPT = """
 
 
 async def process_single_task(
-    config: AutoAgentConfig,
+    client: AsyncOpenAI,
     prompt: str, 
-    token_counter: TokenStepCounter = None, 
 ) -> list[dict[str, Union[str, dict]]]:
     """处理单个任务
 
     Args:
-        config (AutoAgentConfig): 配置信息
+        client (AsyncOpenAI): 异步OpenAI客户端
         prompt (str): 提示词
-        token_counter (TokenStepCounter, optional): 全局令牌计数器. 默认为None
     
     Returns:
         list[dict[str, Union[str, dict]]]: 
             处理结果，包含所有步骤的输出
     """
-    # 创建工厂实例
-    factory = AutoAgent()
-    # 构建工作流
-    workflow: Workflow = factory.auto_build(config)
-    # 创建新任务
     task = BaseTask(question="请认真思考后回答以下问题：", description=prompt)
-    # 注册令牌计数器
-    if token_counter is not None:
-        await workflow.register_counter(token_counter)
-    
-    try:
-        # 运行工作流
-        task = await workflow.run(task)
-    except MaxStepsError as e:
-        logger.error(e)
-        pass
-    except Exception as e:
-        # 最大步数达到，自动退出
-        raise e
-    
-    # 获取历史记录
-    history = task.history
-    # 截取历史记录
-    history = history[:2]
-    # 替换第一条记录的内容
-    history[0].content = PROMPT.format(task_info=TaskContextView(task).format(layer=1))
-    # 转换为OpenAI格式
-    history = to_openai_dict(history)
+    # 转换Task为str
+    task_str = TaskContextView(task).format(layer=1)
+    # 构建提示词
+    prompt = PROMPT.format(task_info=task_str)
+    # 构建消息
+    history = [
+        {"role": "user", "content": prompt}
+    ]
+    # 调用OpenAI API
+    response = await client.chat.completions.create(
+        model="Qwen/Qwen3-14B-AWQ",
+        messages=history, 
+        temperature=1.2,
+    )
+    history.append({
+        "role": "assistant", 
+        "content": response.choices[0].message.content
+    })
     return history
 
 
 async def run_sample(
-    config: AutoAgentConfig,
+    client: AsyncOpenAI,
     dataset_path: str,
     output_dir: str, 
     num_workers: int = 5, 
     max_samples: int = 300, 
-    token_limit: int = 100000, 
-) -> List[dict[str, Union[str, dict]]]:
+) -> list[list[dict[str, Union[str, dict]]]]:
     """运行样本处理
 
     Args:
-        config (AutoAgentConfig): 配置信息
+        client (AsyncOpenAI): 异步OpenAI客户端
         dataset_path (str): 数据集路径
         output_dir (str): 输出目录
         num_workers (int, optional): 工作线程数. 默认为2
         max_samples (int, optional): 最大样本数. 默认为500
-        token_limit (int, optional): 最大token数. 默认为100000
 
     Returns:
-        List[dict[str, Union[str, dict]]]: 所有任务的处理结果
+        list[list[dict[str, Union[str, dict]]]]: 
+            所有任务的处理结果，每个任务的处理结果是一个列表，列表中是每个步骤的输出
     """
     # 加载数据集
     dataset = load_from_disk(dataset_path)
@@ -133,16 +122,11 @@ async def run_sample(
     semaphore = asyncio.Semaphore(num_workers)
     # 创建jsonl文件
     jsonl_path = os.path.join(output_dir, "results.jsonl")
-    if token_limit > 0:
-        # 创建令牌计数器
-        token_counter = TokenStepCounter(limit=token_limit)
-    else:
-        token_counter = None
     
     async def process_with_semaphore(item):
         async with semaphore:
             try:
-                result = await process_single_task(config, item['question'], token_counter)
+                result = await process_single_task(client, item['question'])
                 if result is not None:
                     # 将结果写入jsonl文件
                     with open(jsonl_path, "a", encoding="utf-8") as f:
@@ -153,12 +137,10 @@ async def run_sample(
                         f.write("\n")
                     
                     logger.info(f"已处理并保存: {item['question'][:50]}...")
-                    if token_counter is not None:
-                        logger.info(f"当前已消耗令牌数: {token_counter.current}")
                 return result
             except Exception as e:
                 logger.error(f'处理提示词时发生错误: {item["question"]}')
-                logger.error(f'错误信息: {format_exc()}')
+                logger.error(f'错误信息: {e}, 调用栈: {format_exc()}')
                 return None
     
     # 创建所有任务
@@ -178,20 +160,22 @@ async def main():
         for key, value in api_keys.items():
             os.environ[key] = value
     
-    # 加载配置
-    with open("configs/sampling.json", "r") as f:
-        config = AutoAgentConfig.model_validate(json.load(f))
+    # 创建OpenAI客户端
+    client = AsyncOpenAI(
+        api_key=os.environ["OPENAI_KEY"], 
+        base_url="http://192.168.152.104:45519/v1", 
+    )
         
     # 设置数据集路径
     dataset_path = "datasets/GAOKAO-Bench/processed/train"
     
     # 创建输出目录
-    output_dir = f"datasets/generated_gaokao_qwen3_14b_awq_3"
+    output_dir = f"datasets/generated_rejected_gaokao_qwen3_14b_awq_5"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
     # 运行样本处理
-    results = await run_sample(config, dataset_path, output_dir, max_samples=-1, token_limit=-1)
+    results = await run_sample(client, dataset_path, output_dir, max_samples=-1)
     
     # 打印处理结果统计
     print(f"\n处理完成!")

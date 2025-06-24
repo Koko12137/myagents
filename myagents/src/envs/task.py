@@ -121,7 +121,8 @@ class TaskContextView:
             
         # Check if the sub-tasks is not empty
         if len(sub_tasks) > 0:
-            sub_tasks = f"\t - Sub-Tasks: \n{"\n".join(sub_tasks)}"
+            sub_tasks_str = '\n'.join(sub_tasks)
+            sub_tasks = f"\t - Sub-Tasks: \n{sub_tasks_str}"
         else:
             sub_tasks = f"\t - Sub-Tasks: \n\t\t No sub-tasks now"
         view = f"{view}\n{sub_tasks}"

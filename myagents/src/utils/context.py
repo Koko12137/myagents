@@ -43,3 +43,16 @@ class BaseContext(BaseModel):
                 The previous tool call context.
         """
         return self.prev
+
+    def get(self, key: str) -> Any:
+        """Get the value of the context.
+        
+        Args:
+            key (str):
+                The key of the value.
+                
+        Returns:
+            Any:
+                The value of the context.
+        """
+        return self.key_values.get(key)

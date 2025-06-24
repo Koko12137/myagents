@@ -42,6 +42,8 @@ class ActionFlow(BaseWorkflow):
         tool_functions (dict[str, Callable]):
             The functions of the tools provided by the workflow. These functions can be used to control the workflow. 
     """
+    system_prompt: str = ACTION_PROMPT
+    
     agent: Agent
     debug: bool
     custom_logger: Logger
@@ -105,45 +107,41 @@ class ActionFlow(BaseWorkflow):
             ValueError:
                 If more than one tool calling is required. 
         """
-        # 1. Observe the task
-        history, current_observation = await self.agent.observe(task)
-        # 2. Create a new message for the current observation
+        # Create a new message for the current observation
         tools_str = "\n".join([ToolView(tool).format() for tool in self.tools.values()])
+        
+        # Observe the task
+        observe = await self.agent.observe(task)
+        # Create a new message for the action prompt
         message = CompletionMessage(
             role=MessageRole.USER, 
-            content=ACTION_PROMPT.format(
+            content=self.system_prompt.format(
                 tools=tools_str, 
-                task_context=current_observation, 
+                task_context=observe, 
             ), 
             stop_reason=StopReason.NONE, 
         )
         
-        # 3. Append Action Prompt and Call for Completion
-        # Append for current task recording
+        # Append Action Prompt and Call for Completion
         task.history.append(message)
-        # Append for agent's completion
-        history.append(message)
         # Call for completion
-        message: CompletionMessage = await self.agent.think(history, allow_tools=True, external_tools=self.tools)
+        message: CompletionMessage = await self.agent.think(task.history, allow_tools=True, external_tools=self.tools)
         
-        # 4. Record the completion message
-        # Append for current task recording
+        # Record the completion message
         task.history.append(message)
-        # Append for agent's completion
-        history.append(message)
         
-        # 5. Check the stop reason
+        # Check the stop reason
         if message.stop_reason == StopReason.TOOL_CALL:
-            # 4. Check if there is more than one tool calling
+            # TODO: Allow more than one tool calling. 
             if len(message.tool_calls) > 1:
                 # BUG: Handle the case of more than one tool calling. An unexpected error should not be raised. 
                 raise ValueError("More than one tool calling is not allowed.")
             
-            # 5. Get the tool call
+            # Get the tool call
             tool_call = message.tool_calls[0]
             
             try:
-                # 6. Call the tool
+                # Call the tool
                 # Check if the tool is maintained by the workflow
                 if tool_call.name in self.tools:
                     # Call from external tools. 
@@ -172,11 +170,8 @@ class ActionFlow(BaseWorkflow):
                 )
                 self.custom_logger.error(f"{e}, traceback: {traceback.format_exc()}")
             
-            # 7. Update the messages
-            # Append for current task recording
+            # Update the messages
             task.history.append(tool_result)
-            # Append for agent's completion
-            history.append(tool_result)
         
         # Check if the task is cancelled
         if task.status == TaskStatus.CANCELLED:
@@ -184,30 +179,24 @@ class ActionFlow(BaseWorkflow):
             return task
         
         # If the stop reason is not tool call, answer the task directly
-        # 8. Create a new message for the reflection
+        # Create a new message for the reflection
         message = CompletionMessage(
             role=MessageRole.USER, 
             content=REFLECT_PROMPT, 
             stop_reason=StopReason.NONE
         )
         
-        # 9. Append Reflect Prompt and Call for Completion
-        # Append for current task recording
+        # Append Reflect Prompt and Call for Completion
         task.history.append(message)
-        # Append for agent's completion
-        history.append(message)
         # Call for completion
-        message: CompletionMessage = await self.agent.think(history, allow_tools=False)
+        message: CompletionMessage = await self.agent.think(task.history, allow_tools=False)
         
-        # 10. Record the completion message 
-        # Append for current task recording
+        # Record the completion message 
         task.history.append(message)
-        # Append for agent's completion
-        history.append(message)
         
-        # 11. Fill the answer
+        # Fill the answer
         task.answer = message.content
-        # 12. Update the task status
+        # Update the task status
         if task.status != TaskStatus.FAILED:
             task.status = TaskStatus.FINISHED
         return task
@@ -334,7 +323,7 @@ class ActionFlow(BaseWorkflow):
             # No sub-tasks are finished, roll back the task status to created
             task.status = TaskStatus.CREATED
             # Log the roll back
-            self.custom_logger.info(f"The task roll back to created status due to the errors in the sub-tasks: \n{TaskContextView(task).format()}")
+            self.custom_logger.error(f"The task roll back to created status due to the errors in the sub-tasks: \n{TaskContextView(task).format()}")
             # Raise an error to call for re-planning
             raise TaskCancelledError("There are some errors in the sub-tasks.", task)
             

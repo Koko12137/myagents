@@ -6,7 +6,7 @@ from fastmcp.tools import Tool as FastMCPTool
 from myagents.src.message import CompletionMessage, ToolCallRequest, ToolCallResult
 from myagents.src.interface import Agent, Workflow, Environment, Logger
 from myagents.src.workflows.base import BaseWorkflow
-from myagents.src.utils.tools import BaseToolCallContext
+from myagents.src.utils.context import BaseContext
 from myagents.src.utils.logger import Logger
 
 
@@ -38,7 +38,7 @@ class BaseEnvironment(BaseWorkflow, Environment):
     agent: Agent
     debug: bool
     custom_logger: Logger
-    context: BaseToolCallContext
+    context: BaseContext
     
     tools: dict[str, FastMCPTool]
     tool_functions: dict[str, Callable]

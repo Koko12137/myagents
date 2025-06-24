@@ -168,6 +168,20 @@ class Context(Protocol):
                 The previous context.
         """
         pass
+    
+    @abstractmethod
+    def get(self, key: str) -> Any:
+        """Get the value of the context.
+        
+        Args:
+            key (str):
+                The key of the value.
+                
+        Returns:
+            Any:
+                The value of the context.
+        """
+        pass
 
 
 class TaskStatus(Enum):
@@ -255,6 +269,76 @@ class Task(Protocol):
     
     # History Messages
     history: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]
+
+
+class FillTask(Task):
+    """FillTask is a task that is used to fill the task answer into the template.
+    
+    Attributes:
+        uid (str): 
+            The unique identifier of the task. Do not specify this field. It will be automatically generated.
+            
+        question (str): 
+            The question to be answered. 
+        description (str):
+            The description of the task. 
+        parent (Task):
+            The parent task of the current task. If the task does not have a parent task, the parent is None.
+        sub_tasks (OrderedDict[str, Task]):
+            The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
+            
+        status (TaskStatus):
+            The status of the current task.
+        strategy (TaskStrategy):
+            The strategy of the current task. 
+        is_leaf (bool):
+            Whether the current task is a leaf task. If the task is a leaf task, the task will not be orchestrated by the workflow.
+        answer (str):
+            The answer to the question. If the task is not finished, the answer is None.
+        template (str):
+            The template of the task.
+        designated (str):
+            Whether the response template is designated. If the response template is designated, the answer should be filled into the template. 
+            Otherwise, agent should generate a template at first.
+            
+        history (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]):
+            The history messages of the current task. 
+    """
+    template: str
+    designated: str
+    
+    
+class SelectTask(Task):
+    """SelectTask is a task that is used to select the answer from the options.
+    
+    Attributes:
+        uid (str): 
+            The unique identifier of the task. Do not specify this field. It will be automatically generated.
+            
+        question (str): 
+            The question to be answered. 
+        description (str):
+            The description of the task. 
+        parent (Task):
+            The parent task of the current task. If the task does not have a parent task, the parent is None.
+        sub_tasks (OrderedDict[str, Task]):
+            The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
+            
+        status (TaskStatus):
+            The status of the current task.
+        strategy (TaskStrategy):
+            The strategy of the current task. 
+        is_leaf (bool):
+            Whether the current task is a leaf task. If the task is a leaf task, the task will not be orchestrated by the workflow.
+        answer (str):
+            The answer to the question. If the task is not finished, the answer is None.
+        options (list[str]):
+            The options to select from. The options should be a list of strings. 
+            
+        history (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]):
+            The history messages of the current task. 
+    """
+    options: list[str]
 
 
 @runtime_checkable
