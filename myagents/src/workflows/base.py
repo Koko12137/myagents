@@ -44,6 +44,24 @@ class BaseWorkflow(Workflow, metaclass=ABCMeta):
         custom_logger: Logger = logger, 
         debug: bool = False, 
     ) -> None:
+        """Initialize the BaseWorkflow. This will initialize the following components:
+        
+        - agent: The agent that is used to work with the workflow.
+        - custom_logger: The custom logger. If not provided, the default loguru logger will be used. 
+        - debug: The debug flag. If not provided, the default value is False. 
+        - context: The global context container of the workflow.
+        - tools: The tools' description that can be used for the workflow.
+        - tool_functions: The tool functions that can be used for the workflow.
+        - workflows: The workflows that will be orchestrated to process the task. 
+        
+        Args:
+            agent (Agent):
+                The agent that is used to work with the workflow.
+            custom_logger (Logger, optional):
+                The custom logger. If not provided, the default loguru logger will be used. 
+            debug (bool, optional):
+                The debug flag. If not provided, the default value is False. 
+        """
         self.agent = agent
         self.custom_logger = custom_logger
         self.debug = debug
@@ -159,7 +177,7 @@ class BaseWorkflow(Workflow, metaclass=ABCMeta):
         """
         pass
         
-    async def register_counter(self, counter: StepCounter) -> None:
+    def register_counter(self, counter: StepCounter) -> None:
         """Register a step counter to the workflow.
         
         Args:
@@ -167,7 +185,7 @@ class BaseWorkflow(Workflow, metaclass=ABCMeta):
                 The step counter to register.
         """
         # Register the step counter to the agent
-        await self.agent.register_counter(counter)
+        self.agent.register_counter(counter)
         # Register the step counter to the workflows
         for workflow in self.workflows.values():
-            await workflow.register_counter(counter)
+            workflow.register_counter(counter)

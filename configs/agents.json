@@ -1,8 +1,14 @@
 {
+    "debug": true, 
+    "save_dir": "logs", 
     "step_counters": [
         {
-            "name": "max",
-            "limit": 1
+            "name": "base",
+            "limit": 100
+        }, 
+        {
+            "name": "token",
+            "limit": 1000000
         }
     ],
     "environment": {
@@ -23,7 +29,7 @@
                     "name": "base", 
                     "llm": {
                         "provider": "openai",
-                        "base_url": "http://localhost:8889/v1",
+                        "base_url": "http://192.168.152.85:65189/v1",
                         "model": "Qwen/Qwen3-14B-AWQ",
                         "temperature": 0.8, 
                         "api_key_field": "OPENAI_KEY", 
@@ -39,7 +45,7 @@
                             "name": "base",
                             "llm": {
                                 "provider": "openai",
-                                "base_url": "http://localhost:8889/v1",
+                                "base_url": "http://192.168.152.85:65189/v1",
                                 "model": "Qwen/Qwen3-14B-AWQ",
                                 "temperature": 1.0, 
                                 "api_key_field": "OPENAI_KEY", 
@@ -55,7 +61,7 @@
                             "name": "base",
                             "llm": {
                                 "provider": "openai",
-                                "base_url": "http://localhost:8889/v1",
+                                "base_url": "http://192.168.152.85:65189/v1",
                                 "model": "Qwen/Qwen3-14B-AWQ",
                                 "temperature": 0.8, 
                                 "api_key_field": "OPENAI_KEY", 

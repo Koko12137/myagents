@@ -21,3 +21,9 @@ wheels/
 
 # Data files
 data*/
+
+# VSCode
+.vscode/
+
+# Config files
+config*

@@ -75,7 +75,7 @@ class ReActFlow(BaseWorkflow):
                 Whether to enable the debug mode.
         """
         super().__init__(agent, custom_logger, debug)
-
+        
         # Initialize the workflows
         self.workflows = workflows
         
@@ -205,7 +205,7 @@ class ReActFlow(BaseWorkflow):
                 stop_reason=StopReason.NONE, 
             )
             # Log the react think prompt
-            self.custom_logger.info(f"ReAct Flow thinking about the current task: \n{message.content}")
+            self.custom_logger.info(f"ReAct Flow checking the planning result: \n{message.content}")
             # Append the message to the task history
             current.history.append(message)
             
@@ -249,9 +249,9 @@ class ReActFlow(BaseWorkflow):
                         # Handle the unexpected error
                         self.custom_logger.error(f"Tool call {tool_call.name} failed with information: {e}")
                         raise e
-
                     # Append the result to the task history
                     current.history.append(result)
+                    
             elif finish_flag:
                 # Set the task status to running
                 current.status = TaskStatus.RUNNING
@@ -284,6 +284,8 @@ class ReActFlow(BaseWorkflow):
         """
         # Plan the current task
         env = await self.__plan(env)
+        # Add the context of the plan flow to action flow
+        self.workflows["action"].context = self.workflows["plan"].context
         
         while env.status != TaskStatus.FINISHED: 
             # Log the current task
@@ -295,8 +297,10 @@ class ReActFlow(BaseWorkflow):
             except TaskCancelledError as e:
                 # The re-planning is needed, continue and re-plan the task
                 current = self.workflows["action"].context.get("task")
+                # Resume the temporary task context of the action flow
+                self.workflows["action"].context = self.workflows["action"].context.done()
                 current = await self.__plan(current)
-                # Resume the context of the action flow
+                # Resume the temporary blueprint context of the action flow
                 self.workflows["action"].context = self.workflows["action"].context.done()
                 continue
             except Exception as e:

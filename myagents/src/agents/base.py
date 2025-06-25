@@ -275,6 +275,7 @@ class TokenStepCounter(BaseStepCounter):
         """
         async with self.lock:
             self.current += step.total_tokens
+            self.custom_logger.warning(f"The current Token Usage is {self.current}, the Limit is {self.limit}.")
             
         # Check if the current step is greater than the max auto steps
         if await self.check_limit():
@@ -423,14 +424,14 @@ class DummyAgent(Agent):
         """
         return "Dummy agent is observing the environment."
     
-    async def register_counter(self, counter: StepCounter) -> None:
+    def register_counter(self, counter: StepCounter) -> None:
         """Register a step counter to the dummy agent.
         
         Args:
             counter (StepCounter):
                 The step counter to register.
         """
-        self.step_counters.append(counter)
+        self.step_counters[counter.uid] = counter
         
 
 class BaseAgent(Agent):
@@ -673,7 +674,7 @@ class BaseAgent(Agent):
             is_error=False, 
         )
 
-    async def register_counter(self, counter: StepCounter) -> None:
+    def register_counter(self, counter: StepCounter) -> None:
         """Register a step counter to the base agent.
         
         Args:

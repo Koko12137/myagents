@@ -1,3 +1,4 @@
+import sys
 from typing import Union
 
 from loguru import logger
@@ -264,7 +265,11 @@ class AutoAgent:
         custom_logger = init_logger(
             sink=config.save_dir, 
             level=log_level, 
+            colorize=True, 
         )
+        # If sink is not stdout, add an additional stdout logger
+        if config.save_dir != "stdout":
+            custom_logger.add(sys.stdout, level=log_level, colorize=True)
         
         # Build the step counter
         step_counters = [self.build_counter(step_counter) for step_counter in config.step_counters]

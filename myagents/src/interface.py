@@ -221,6 +221,19 @@ class TaskStrategy(Enum):
     """
     ALL = "all"
     ANY = "any"
+    
+    
+class TaskParallelStrategy(Enum):
+    """TaskParallelStrategy indicates the parallel strategy of the task.
+    
+    Attributes:
+        SEQUENTIAL (str):
+            The task should be running sequentially. This is the default strategy.
+        PARALLEL (str):
+            The task can be running in parallel.
+    """
+    SEQUENTIAL = "sequential"
+    PARALLEL = "parallel"
 
 
 @runtime_checkable
@@ -269,6 +282,18 @@ class Task(Protocol):
     
     # History Messages
     history: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]
+    
+    @abstractmethod
+    def reset(self) -> None:
+        """Reset the task. This will reset the task history to the initial state.
+        
+        Args:
+            None
+            
+        Returns:
+            None
+        """
+        pass
 
 
 class FillTask(Task):
@@ -505,7 +530,7 @@ class Workflow(Protocol):
         pass
     
     @abstractmethod
-    async def register_counter(self, counter: 'StepCounter') -> None:
+    def register_counter(self, counter: 'StepCounter') -> None:
         """Register a step counter to all the agents in the workflow.
         
         Args:
@@ -891,7 +916,7 @@ class Agent(Protocol):
         pass
     
     @abstractmethod
-    async def register_counter(self, counter: StepCounter) -> None:
+    def register_counter(self, counter: StepCounter) -> None:
         """Register a step counter to the agent.
         
         Args:

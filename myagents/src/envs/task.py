@@ -60,6 +60,17 @@ class BaseTask(BaseModel):
         default_factory=list,
         description="The messages of the current task.", 
     )
+    
+    def reset(self) -> None:
+        """Reset the task. This will reset the task history to the initial state.
+        
+        Args:
+            None
+            
+        Returns:
+            None
+        """
+        self.history = []
 
 
 class TaskContextView:
