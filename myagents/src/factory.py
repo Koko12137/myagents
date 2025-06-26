@@ -1,5 +1,5 @@
 import sys
-from typing import Union
+from typing import Union, Optional
 
 from loguru import logger
 from fastmcp.client import Client as MCPClient
@@ -20,15 +20,38 @@ from myagents.src.utils.logger import init_logger
     
 class AutoAgentConfig(BaseModel):
     """AutoAgentConfig is the configuration for the AutoAgent.
+    
+    Attributes:
+        step_counters (list[CounterConfig]):
+            The step counters for the auto agent. Any of one reach the limit, the auto agent will be stopped. 
+        environment (EnvironmentConfig, optional):
+            The configuration for the environment.
+        workflow (WorkflowConfig, optional):
+            The configuration for the workflow.
+        debug (bool):
+            Whether to enable the debug mode for the auto agent.
+        log_level (str, defaults to "INFO"):
+            The log level for the auto agent.
+        save_dir (str, defaults to "stdout"):
+            The directory to save the logs for the auto agent.
     """
-    step_counters: list[CounterConfig] = Field(default_factory=list[CounterConfig])
-    environment: EnvironmentConfig = Field(default=None)
-    workflow: WorkflowConfig = Field(default=None)
+    step_counters: list[CounterConfig] = Field(
+        default_factory=list[CounterConfig], 
+        description="The step counters for the auto agent. Any of one reach the limit, the auto agent will be stopped."
+    )
+    environment: Optional[EnvironmentConfig] = Field(
+        default=None, 
+        description="The configuration for the environment."
+    )
+    workflow: Optional[WorkflowConfig] = Field(
+        default=None, 
+        description="The configuration for the workflow."
+    )
     
     # Debug and logging settings
-    debug: bool = Field(default=False)
-    log_level: str = Field(default="INFO")
-    save_dir: str = Field(default="stdout")
+    debug: bool = Field(default=False, description="Whether to enable the debug mode for the auto agent.")
+    log_level: str = Field(default="INFO", description="The log level for the auto agent.")
+    save_dir: str = Field(default="stdout", description="The directory to save the logs for the auto agent.")
     
     
 class AutoAgent:
@@ -120,8 +143,25 @@ class AutoAgent:
         Args:
             config (MCPConfig):
                 The configuration for the MCP client.
+                
+        Returns:
+            MCPClient:
+                The MCP client. 
         """
-        raise NotImplementedError("MCP client is not implemented yet.")
+        if config is None:
+            return None
+        
+        # Create the MCP client
+        mcp_client = MCPClient(
+            server_name=config.server_name, 
+            server_url=config.server_url, 
+            server_port=config.server_port, 
+            auth_token=config.auth_token, 
+        )
+        
+        # Return the MCP client
+        return mcp_client
+        
         
     def __build_agent(
         self, 
@@ -153,9 +193,15 @@ class AutoAgent:
                 # Build the LLM
                 llm = self.__build_llm(config.llm, custom_logger, debug)
                 # Build the MCP client
-                # mcp_client = self.build_mcp_client(config.mcp_client)
+                mcp_client = self.__build_mcp_client(config.mcp_client)
                 # Build the agent
-                return BaseAgent(llm=llm, step_counters=step_counters, custom_logger=custom_logger, debug=debug)
+                return BaseAgent(
+                    llm=llm, 
+                    step_counters=step_counters, 
+                    mcp_client=mcp_client, 
+                    custom_logger=custom_logger, 
+                    debug=debug,
+                )
             case "dummy":
                 # Build the LLM
                 llm = self.__build_llm(config.llm, custom_logger, debug)
@@ -233,7 +279,7 @@ class AutoAgent:
             Environment:
                 The environment.
         """
-        agent = self.__build_agent(config.agent, step_counters)
+        agent = self.__build_agent(config.agent, step_counters, custom_logger, debug)
         # Build the workflows
         workflows: dict[str, Workflow] = {}
         for workflow in config.workflows:
@@ -244,7 +290,7 @@ class AutoAgent:
         # Build the environment
         match name:
             case "query":
-                return Query(agent=agent, react_flow=workflows["react"])
+                return Query(agent=agent, react_flow=workflows["react"], custom_logger=custom_logger, debug=debug)
             case _:
                 raise ValueError(f"Invalid environment name: {name}")
             

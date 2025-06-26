@@ -1,28 +1,30 @@
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 from myagents.src.configs.agents import AgentConfig, CounterConfig
 
 
 class WorkflowConfig(BaseModel):
-    """The configuration for the workflow.
+    """WorkflowConfig is the configuration for the workflow.
     
     Args:
         name (str):
             The name of the workflow.
         agent (AgentConfig):
             The configuration for the agent.
-        step_counters (list[CounterConfig]):
+        step_counters (list[CounterConfig], optional):
             The step counters for the workflow.
-        workflows (list['WorkflowConfig']):
+        workflows (list['WorkflowConfig'], optional):
             The configurations for the workflows.
     """
     name: str = Field(description="The name of the workflow.")
     agent: AgentConfig = Field(description="The configuration for the agent.")
-    step_counters: list[CounterConfig] = Field(
+    step_counters: Optional[list[CounterConfig]] = Field(
         description="The step counters for the workflow.", 
         default=[]
     )
-    workflows: list['WorkflowConfig'] = Field(
+    workflows: Optional[list['WorkflowConfig']] = Field(
         description="The configurations for the workflows.", 
         default=[]
     )

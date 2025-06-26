@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,7 +27,12 @@ class AgentConfig(BaseModel):
             The name of the agent.
         llm (LLMConfig):
             The configuration for the LLM.
+        mcp_client (MCPConfig, optional):
+            The configuration for the MCP client. 
     """
     name: str = Field(description="The name of the agent.")
     llm: LLMConfig = Field(description="The configuration for the LLM.")
-    # mcp_client: MCPConfig = Field(description="The configuration for the MCP client.")
+    mcp_client: Optional[MCPConfig] = Field(
+        description="The configuration for the MCP client.", 
+        default=None, 
+    )

@@ -296,7 +296,7 @@ class ActionFlow(BaseWorkflow):
         # Set the answer of the task
         task.answer = answer if answer is not None else "The current task end without answer due to the thinking limit."
         # Log the answer
-        self.custom_logger.info(f"The task is finished with answer: {task.answer}")
+        self.custom_logger.info(f"The task is finished with answer: \n{task.answer}")
         return task
     
     async def __act_retry(self, task: Task, max_retry_count: int = 3) -> Task:
