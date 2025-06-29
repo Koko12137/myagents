@@ -199,7 +199,7 @@ class CreatedTaskView(TaskView):
             The template of the task view.
     """
     model: Task
-    template: str = """ - [ ] {question}\n\t 描述: {description}\n\t 任务状态: {status}\n\t 是否叶子: {is_leaf}"""
+    template: str = """ - [ ] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}"""
     
     def __init__(self, model: Task) -> None:
         self.model = model
@@ -224,7 +224,7 @@ class PlanningTaskView(TaskView):
             The template of the task view.
     """
     model: Task
-    template: str = """ - [p] {question}\n\t 描述: {description}\n\t 任务状态: {status}\n\t 是否叶子: {is_leaf}"""
+    template: str = """ - [p] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}"""
     
     def __init__(self, model: Task) -> None:
         self.model = model
@@ -249,7 +249,7 @@ class RunningTaskView(TaskView):
             The template of the task view.
     """
     model: Task
-    template: str = """ - [r] {question}\n\t 描述: {description}\n\t 任务状态: {status}\n\t 是否叶子: {is_leaf}"""
+    template: str = """ - [r] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}"""
     
     def __init__(self, model: Task) -> None:
         self.model = model
@@ -273,7 +273,7 @@ class FinishedTaskView(TaskView):
             The template of the task view.
     """
     model: Task
-    template: str = """ - [x] {question}\n\t 描述: {description}\n\t 任务状态: {status}\n\t 是否叶子: {is_leaf}\n\t 答案: {answer}"""
+    template: str = """ - [x] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}\n\t - 答案: {answer}"""
     
     def __init__(self, model: Task) -> None:
         self.model = model
@@ -298,7 +298,7 @@ class FailedTaskView(TaskView):
             The template of the task view.
     """
     model: Task
-    template: str = """ - [f] {question}\n\t 描述: {description}\n\t 任务状态: {status}\n\t 是否叶子: {is_leaf}\n\t 失败原因: {failed_reason}"""
+    template: str = """ - [f] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}\n\t - 失败原因: {failed_reason}"""
     
     def __init__(self, model: Task) -> None:
         self.model = model
@@ -323,7 +323,7 @@ class CancelledTaskView(TaskView):
             The template of the task view.
     """
     model: Task
-    template: str = """ - [c] {question}\n\t 描述: {description}\n\t 任务状态: {status}\n\t 是否叶子: {is_leaf}\n\t 取消原因: {cancelled_reason}"""
+    template: str = """ - [c] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}\n\t - 取消原因: {cancelled_reason}"""
     
     def __init__(self, model: Task) -> None:
         self.model = model

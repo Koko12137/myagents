@@ -1,4 +1,3 @@
-import re
 from typing import Callable
 from traceback import format_exc
 
@@ -197,7 +196,7 @@ class PlanFlow(BaseWorkflow):
         
         if self.debug:
             # Check the tools
-            self.custom_logger.info(f"Tools: \n{tools_str}")
+            self.custom_logger.debug(f"Tools: \n{tools_str}")
             # Check the registered tools count
             if len(self.tools) == 0:
                 self.custom_logger.error(f"No tools registered for the plan flow. {format_exc()}")
@@ -237,28 +236,27 @@ class PlanFlow(BaseWorkflow):
         observe = await self.agent.observe(task)
         # Log the observation
         self.custom_logger.info(f"当前观察: \n{observe}")
-        
-        # Check if the last message is a user message
-        if len(task.history[TaskStatus.PLANNING]) > 0 and task.history[TaskStatus.PLANNING][-1].role == MessageRole.USER:
-            # Append the observation to the last message
-            task.history[TaskStatus.PLANNING][-1].content += f"\n\n当前观察: {observe}"
-        else:
-            # Create a new message for the current observation
-            message = CompletionMessage(
-                role=MessageRole.USER, 
-                content=PLAN_ATTENTION_PROMPT.format(
-                    task_context=observe, 
-                    tools=tools_str, 
-                ), 
-                stop_reason=StopReason.NONE, 
-            )
-            # Append Plan Prompt and Call for Completion
-            # Append for current task recording
-            task.update(TaskStatus.PLANNING, message)
-            
+        # Create a new message for the current observation
+        message = CompletionMessage(
+            role=MessageRole.USER, 
+            content=PLAN_ATTENTION_PROMPT.format(
+                task_context=observe, 
+                tools=tools_str, 
+            ), 
+            stop_reason=StopReason.NONE, 
+        )
+        # Append Plan Prompt and Call for Completion
+        # Append for current task recording
+        task.update(TaskStatus.PLANNING, message)
         # Call for completion
-        message: CompletionMessage = await self.agent.think(task.history[TaskStatus.PLANNING], allow_tools=False)
-        
+        message: CompletionMessage = await self.agent.think(
+            task.history[TaskStatus.PLANNING], 
+            allow_tools=False, 
+            external_tools=self.tools, 
+            tool_choice="auto",
+        )
+        # Log the message
+        self.custom_logger.info(f"模型回复: \n{message.content}")
         # Record the completion message
         task.update(TaskStatus.PLANNING, message)
         
@@ -266,6 +264,10 @@ class PlanFlow(BaseWorkflow):
         # If the agent is thinking more than max_thinking times, the loop will be finished.
         max_thinking = 3
         current_thinking = 0
+        # This is used for error limit.
+        # If the agent is thinking more than max_error times, the loop will be finished.
+        max_error = 3
+        current_error = 0
         
         # Modify the orchestration
         while task.status == TaskStatus.PLANNING:
@@ -290,6 +292,8 @@ class PlanFlow(BaseWorkflow):
                 allow_tools=False, 
                 external_tools=self.tools, 
             )
+            # Log the message
+            self.custom_logger.info(f"模型回复: \n{message.content}")
             # Record the completion message
             task.update(TaskStatus.PLANNING, message)
             
@@ -324,11 +328,11 @@ class PlanFlow(BaseWorkflow):
                             content=f"工具调用 {tool_call.name} 失败: \n{e}", 
                         )
                         # Handle the error and update the task status
-                        self.custom_logger.error(f"工具调用 {tool_call.name} 失败: \n{e}")
+                        self.custom_logger.warning(f"工具调用 {tool_call.name} 失败: \n{e}")
                     
                     except Exception as e:
                         # Handle the unexpected error
-                        self.custom_logger.error(f"工具调用 {tool_call.name} 失败: \n{e}")
+                        self.custom_logger.error(f"工具调用中出现了未知异常: \n{e}")
                         raise e
                     
                     # Append for current task recording
@@ -380,13 +384,30 @@ class PlanFlow(BaseWorkflow):
             if task.status == TaskStatus.RUNNING:
                 # Double check the planning result
                 if len(task.sub_tasks) == 0 and not task.is_leaf:
+                    current_error += 1
+                    # Check if the current error is greater than the max error
+                    if current_error >= max_error:
+                        # The planning is error, roll back the task status to planning
+                        self.custom_logger.error(f"任务规划执行错误，当前任务没有子任务，但是当前任务不是叶子任务。由于错误累计次数超过上限，将任务强制设为叶子任务: \n{TaskContextView(task).format()}")
+                        task.is_leaf = True
+                        task.status = TaskStatus.RUNNING
+                        # Record the error to history and announce the penalty
+                        task.update(TaskStatus.PLANNING, CompletionMessage(
+                            role=MessageRole.USER, 
+                            content=f"任务规划错误次数累计达到上限，将任务强制设为叶子任务，你将会被惩罚。", 
+                            stop_reason=StopReason.NONE, 
+                        ))
+                        # Force the loop to break
+                        break
+                    
                     # The planning is error, roll back the task status to planning
-                    self.custom_logger.error(f"任务规划错误，回滚到规划状态: \n{TaskContextView(task).format()}")
+                    self.custom_logger.error(f"任务规划执行错误，当前任务没有子任务，但是当前任务不是叶子任务，回滚到规划状态: \n{TaskContextView(task).format()}")
                     task.status = TaskStatus.PLANNING
                     # Record the error to history and announce the penalty
                     task.update(TaskStatus.PLANNING, CompletionMessage(
                         role=MessageRole.USER, 
-                        content=f"任务规划错误，当前的任务没有子任务，但是当前的任务不是叶子任务，请重新执行规划拆解。以下是来自规划阶段的蓝图，你只需要执行: \n{self.context.get('blueprint')}", 
+                        content=f"任务规划错误，当前的任务没有子任务，但是当前的任务不是叶子任务，请重新执行规划拆解。" \
+                            f"如果蓝图规划该任务为叶子任务，请调用 `set_as_leaf` 工具来将当前任务设置为叶子任务。累计错误次数上限为 {max_error} 次。", 
                         stop_reason=StopReason.NONE, 
                     ))
         
@@ -502,6 +523,8 @@ class PlanFlow(BaseWorkflow):
             queue = new_queue
             # Log the new queue
             self.custom_logger.info(f"更新队列，当前队列中包含 {len(queue)} 个任务。")
+            # Log the structure of the task
+            self.custom_logger.warning(f"当前任务结构: \n{TaskContextView(task).format()}")
         
         return task
     
@@ -524,6 +547,9 @@ class PlanFlow(BaseWorkflow):
             ValueError:
                 If the tool call name is unknown. 
         """
+        # Log the tool call
+        self.custom_logger.info(f"Tool calling {tool_call.name} with arguments: {tool_call.args}.")
+        
         # Create a new context
         self.context = self.context.create_next(task=ctx, **kwargs)
         
@@ -549,7 +575,7 @@ class PlanFlow(BaseWorkflow):
                 tool_result = ToolCallResult(
                     tool_call_id=tool_call.id, 
                     is_error=False, 
-                    content="Planning finished by calling the finish_planning tool.",
+                    content=f"Planning finished by calling the finish_planning tool.",
                 )
                 # Log the tool call result
                 self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
@@ -562,7 +588,20 @@ class PlanFlow(BaseWorkflow):
                 tool_result = ToolCallResult(
                     tool_call_id=tool_call.id, 
                     is_error=False, 
-                    content="Task set as leaf task.",
+                    content=f"Task {ctx.question} set as leaf task.",
+                )
+                # Log the tool call result
+                self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
+                
+            elif tool_call.name == "cancel_task":
+                # Cancel the task
+                await self.tool_functions[tool_call.name](**tool_call.args)
+                
+                # Create ToolCallResult
+                tool_result = ToolCallResult(
+                    tool_call_id=tool_call.id, 
+                    is_error=False, 
+                    content=f"Task {ctx.question} cancelled.",
                 )
                 # Log the tool call result
                 self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")

@@ -109,13 +109,17 @@ class OpenAiLLM(LLM):
             api_key=os.getenv(api_key_field) or getpass.getpass("Enter your OpenAI API key: "), 
         )
         
-        # Check extra body for requests
-        self.extra_body = kwargs.get("extra_body", {})
+        # Check extra keyword arguments for requests
+        self.kwargs = {}
+        for key, value in kwargs.items():
+            if key == "extra_body":
+                self.kwargs["extra_body"] = {key: value}
     
     async def completion(
         self, 
         messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
         available_tools: Optional[list[dict[str, str]]] = None, 
+        tool_choice: str = "auto",
     ) -> CompletionMessage:
         """Completion the messages.
 
@@ -124,7 +128,10 @@ class OpenAiLLM(LLM):
                 The messages to complete.
             available_tools (Optional[list[dict[str, str]]], optional): 
                 The available tools. Defaults to None.
-
+            tool_choice (str, defaults to "auto"):
+                The tool choice to use for the agent. This is used to control the tool calling. 
+                - "auto": The agent will automatically choose the tool to use. 
+            
         Raises:
             ValueError: 
                 The value error raised by the unsupported message type.
@@ -133,9 +140,14 @@ class OpenAiLLM(LLM):
             CompletionMessage: 
                 The completed message.
         """
+        kwargs = self.kwargs.copy()
+        
         # Check tools are provided
         if available_tools is not None and len(available_tools) == 0:
             available_tools = None
+        else:
+            # Set the tool choice
+            kwargs["tool_choice"] = tool_choice
         
         # Create the generation history
         history = to_openai_dict(messages)
@@ -146,10 +158,10 @@ class OpenAiLLM(LLM):
             messages=history,
             temperature=self.temperature,
             tools=available_tools, 
-            extra_body=self.extra_body, 
+            **kwargs, 
         )
         content = response.choices[0].message.content
-        self.custom_logger.info(f"\n{content}")
+        self.custom_logger.debug(f"\n{content}")
         # Get the usage
         usage = response.usage
         # Create the usage
@@ -159,7 +171,7 @@ class OpenAiLLM(LLM):
             total_tokens=usage.total_tokens or -100
         )
         # Log the usage
-        self.custom_logger.info(f"Usage: {usage}")
+        self.custom_logger.warning(f"Usage: {usage}")
         
         # Extract tool calls from response
         tool_calls = []
@@ -167,7 +179,7 @@ class OpenAiLLM(LLM):
             # Traverse all the tool calls and log the tool call
             for i, tool_call in enumerate(response.choices[0].message.tool_calls):
                 # Log the tool call
-                self.custom_logger.info(f"Tool call {i + 1}: {tool_call}")
+                self.custom_logger.debug(f"Tool call {i + 1}: {tool_call}")
                 
                 # Create the tool call request
                 tool_calls.append(ToolCallRequest(

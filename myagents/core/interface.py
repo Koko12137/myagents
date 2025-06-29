@@ -882,6 +882,7 @@ class Agent(Protocol):
         observe: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
         allow_tools: bool,  
         external_tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
+        tool_choice: str = "auto",
         **kwargs,
     ) -> CompletionMessage:
         """Think about the environment.
@@ -894,6 +895,9 @@ class Agent(Protocol):
                 external tools provided by the workflow. 
             external_tools (Optional[dict[str, Union[FastMcpTool, MCPTool]]], defaults to {}):
                 The external tools to use for the agent. 
+            tool_choice (str, defaults to "auto"):
+                The tool choice to use for the agent. This is used to control the tool calling. 
+                - "auto": The agent will automatically choose the tool to use. 
             **kwargs:
                 The additional keyword arguments for thinking about the environment. 
                 

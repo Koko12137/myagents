@@ -1,6 +1,6 @@
 {
-    "debug": true, 
-    "save_dir": "benchmark/logs/", 
+    "debug": false, 
+    "save_dir": "logs/", 
     "step_counters": [
         {
             "name": "base",
@@ -20,7 +20,7 @@
                 "base_url": "http://localhost:8889/v1",
                 "model": "Qwen/Qwen3-14B-AWQ",
                 "temperature": 0.8, 
-                "api_key_field": "OPENAI_KEY", 
+                "api_key_field": "LOCAL_KEY", 
                 "extra_body": {
                     "enable_thinking": false
                 }
@@ -36,7 +36,7 @@
                         "base_url": "http://localhost:8889/v1",
                         "model": "Qwen/Qwen3-14B-AWQ",
                         "temperature": 0.8, 
-                        "api_key_field": "OPENAI_KEY", 
+                        "api_key_field": "LOCAL_KEY", 
                         "extra_body": {
                             "enable_thinking": false
                         }
@@ -52,7 +52,7 @@
                                 "base_url": "http://localhost:8889/v1",
                                 "model": "Qwen/Qwen3-14B-AWQ",
                                 "temperature": 1.0, 
-                                "api_key_field": "OPENAI_KEY", 
+                                "api_key_field": "LOCAL_KEY", 
                                 "extra_body": {
                                     "enable_thinking": false
                                 }
@@ -68,7 +68,7 @@
                                 "base_url": "http://localhost:8889/v1",
                                 "model": "Qwen/Qwen3-14B-AWQ",
                                 "temperature": 0.8, 
-                                "api_key_field": "OPENAI_KEY", 
+                                "api_key_field": "LOCAL_KEY", 
                                 "extra_body": {
                                     "enable_thinking": false
                                 }

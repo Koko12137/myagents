@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import re
-from typing import List, Dict, Any, Set
+from typing import Dict, Any, Set
 from tqdm import tqdm
 
 from loguru import logger
@@ -44,11 +44,52 @@ def extract_answer_from_response(response: str) -> str:
         
         # 匹配 "选X" 格式
         r'选\s*([A-D])',
+        
+        # 匹配单个选项（如：A、B、C、D）
+        r'^([A-D])$',
+        r'^\s*([A-D])\s*$',
+        
+        # 匹配带选项内容的格式（如：A.xxxxx）- 改进版本
+        r'([A-D])[.．]\s*[^A-D\n]*',  # 避免匹配到下一个选项
+        r'([A-D])[、]\s*[^A-D\n]*',
+        r'([A-D])[）\)]\s*[^A-D\n]*',
+        
+        # 新增：专门匹配数学公式选项格式
+        r'([A-D])[.．]\s*\$[^$]*\$[^A-D\n]*',  # 匹配包含LaTeX公式的选项
+        r'([A-D])[.．]\s*[^A-D\n]*\$[^$]*\$[^A-D\n]*',  # 匹配包含LaTeX公式的选项（公式在中间）
+        
+        # 匹配括号中的选项
+        r'[（\(]([A-D])[）\)]',
+        r'[（\(]\s*([A-D])\s*[）\)]',
+        
+        # 匹配方括号中的选项
+        r'[\[【]([A-D])[\]】]',
+        r'[\[【]\s*([A-D])\s*[\]】]',
+        
+        # 匹配引号中的选项
+        r'[""]([A-D])[""]',
+        r'[""]\s*([A-D])\s*[""]',
+        
+        # 匹配冒号后的选项
+        r'[：:]\s*([A-D])\s*[。.！!？?]?$',
+        r'[：:]\s*([A-D])\s*$',
+        
+        # 匹配句末的选项
+        r'[。.！!？?]\s*([A-D])\s*$',
+        r'[。.！!？?]\s*([A-D])$',
+        
+        # 匹配行首的选项
+        r'^\s*([A-D])\s*[。.！!？?]',
+        r'^\s*([A-D])\s*[：:]',
+        
+        # 匹配行末的选项
+        r'[：:]\s*([A-D])\s*$',
+        r'[。.！!？?]\s*([A-D])\s*$',
     ]
     
     # 尝试每个模式
     for pattern in patterns:
-        match = re.search(pattern, response, re.IGNORECASE)
+        match = re.search(pattern, response, re.IGNORECASE | re.MULTILINE)
         if match:
             return match.group(1).upper()
     
@@ -57,7 +98,7 @@ def extract_answer_from_response(response: str) -> str:
     if last_option:
         return last_option[-1].upper()
     
-    return ""
+    return response
 
 
 def normalize_answer(answer: str) -> str:
@@ -197,14 +238,14 @@ async def process_single_question(
         factory = AutoAgent()
         query_env: Query = factory.auto_build(config=config)
         
-        # 构建描述，让最终答案放到query的answer里
-        description = f"请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A/B/C/D中的一个。最终答案需要放在<answer></answer>中。"
+        # 构建描述，让最终答案放到query的answer里``
+        description = f"请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A/B/C/D中的一个。"
         
         # 使用query环境的summary模式提问
         response = await query_env.run(
             question=question,
             description=description,
-            output_type=OutputType.SUMMARY
+            output_type=OutputType.SELECTION, # 选择题
         )
         
         # 提取答案
@@ -403,9 +444,9 @@ async def main():
     # 运行基准测试
     results = await run_benchmark(
         dataset_path="datasets/GAOKAO-Math-Bench",
-        max_samples=20,  # 可以调整测试样本数
+        max_samples=200,  # 可以调整测试样本数
         output_file="benchmark/results.jsonl",
-        concurrency=5  # 并发数量
+        concurrency=1  # 并发数量
     )
     
     # 打印详细结果

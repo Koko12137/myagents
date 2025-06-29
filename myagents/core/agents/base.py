@@ -567,6 +567,7 @@ class BaseAgent(Agent):
         observe: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
         allow_tools: bool, 
         external_tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
+        tool_choice: str = "auto",
         **kwargs, 
     ) -> CompletionMessage:
         """Think about the environment.
@@ -579,6 +580,9 @@ class BaseAgent(Agent):
                 external tools provided by the workflow. 
             external_tools (dict[str, Union[FastMcpTool, MCPTool]]):
                 The external tools to use for the agent.  
+            tool_choice (str, defaults to "auto"):
+                The tool choice to use for the agent. This is used to control the tool calling. 
+                - "auto": The agent will automatically choose the tool to use. 
             **kwargs: 
                 The additional keyword arguments for thinking about the observed messages. 
 
@@ -599,7 +603,12 @@ class BaseAgent(Agent):
             available_tools = external_tools_list
         
         # Call for completion from the LLM
-        message = await self.llm.completion(observe, available_tools=available_tools, **kwargs)
+        message = await self.llm.completion(
+            observe, 
+            available_tools=available_tools, 
+            tool_choice=tool_choice, 
+            **kwargs
+        )
         
         errors = []
         # Increase the current step

@@ -190,7 +190,7 @@ class ReasonPlanActFlow(BaseWorkflow):
         tool_str = ""
         for tool in self.tools.values():
             tool_str += f"{ToolView(tool).format()}\n"
-        self.custom_logger.info(f"Tools: \n{tool_str}")
+        self.custom_logger.debug(f"Tools: \n{tool_str}")
         
     async def __reason(self, env: Task) -> Task:
         """Reason about the task. This is the pre step of the planning in order to inference the real 
@@ -211,35 +211,37 @@ class ReasonPlanActFlow(BaseWorkflow):
         max_thinking = 3
         current_thinking = 0
         
+        # Observe the task
+        observe = await self.agent.observe(env)
+        # Log the observation
+        self.custom_logger.info(f"当前观察: \n{observe}")
+        # Create a new message for the current observation
+        message = CompletionMessage(
+            role=MessageRole.USER, 
+            content=RPA_PLAN_PROMPT.format(
+                task_context=observe, 
+                detail_level=env.detail_level, 
+            ), 
+            stop_reason=StopReason.NONE, 
+        )
+        # Append the reason prompt to the task history
+        env.update(TaskStatus.CREATED, message)
+    
         while env.status == TaskStatus.CREATED:
-            # Observe the task
-            observe = await self.agent.observe(env)
-            # Create a new message for the current observation
-            message = CompletionMessage(
-                role=MessageRole.USER, 
-                content=RPA_PLAN_PROMPT.format(
-                    task_context=observe, 
-                    detail_level=env.detail_level, 
-                ), 
-                stop_reason=StopReason.NONE, 
-            )
-            # Append the reason prompt to the task history
-            env.update(TaskStatus.CREATED, message)
-
             # Call for completion
             message: CompletionMessage = await self.agent.think(
                 env.history[TaskStatus.CREATED], 
                 allow_tools=False, 
                 external_tools=self.tools, 
             )
+            # Log the message
+            self.custom_logger.info(f"模型回复: \n{message.content}")
             # Record the completion message
             env.update(TaskStatus.CREATED, message)
             
             # Extract the orchestration blueprint from the task by regular expression
-            blueprint = re.search(r"<orchestration>\s*\n(.*)\n\s*</orchestration>", message.content, re.DOTALL)
-            if blueprint:
-                # Extract the blueprint from the task
-                blueprint: str = blueprint.group(1)
+            blueprint = extract_by_label(message.content, "orchestration")
+            if blueprint is not None:
                 # Log the blueprint
                 self.custom_logger.info(f"规划蓝图: \n{blueprint}")
                 # Update the blueprint to the global context of react flow and all the sub-flows
@@ -266,15 +268,14 @@ class ReasonPlanActFlow(BaseWorkflow):
                 # No blueprint is found, create an error message
                 message = CompletionMessage(
                     role=MessageRole.USER, 
-                    content=f"没有在<orchestration>标签中找到规划蓝图。请重新规划。你已经思考了 {current_thinking} 次，在思考 {max_thinking} 次后，你将会被强制退出循环。", 
+                    content=f"没有在<orchestration>标签中找到规划蓝图。请重新规划。你已经思考了 {current_thinking} 次，" \
+                        f"在思考 {max_thinking} 次后，你将会被强制退出循环。下一步你必须给出规划蓝图，否则你将会被惩罚。", 
                     stop_reason=StopReason.NONE, 
                 )
                 # Append the error message to the task history
                 env.update(TaskStatus.CREATED, message)
-                # Call for completion
-                message: CompletionMessage = await self.agent.think(env.history[TaskStatus.CREATED], allow_tools=False)
-                # Record the completion message
-                env.update(TaskStatus.CREATED, message)
+                # Log the message
+                self.custom_logger.warning(f"模型回复中没有找到规划蓝图，提醒模型重新思考。")
         
         return env
         
@@ -297,6 +298,8 @@ class ReasonPlanActFlow(BaseWorkflow):
             """ [[ ## Check if the planning flow is finished properly ## ]] """
             # Observe the task
             observe = await self.agent.observe(env)
+            # Log the observation
+            self.custom_logger.info(f"当前观察: \n{observe}")
             # Think about the env task
             message = CompletionMessage(
                 role=MessageRole.USER, 
@@ -312,7 +315,9 @@ class ReasonPlanActFlow(BaseWorkflow):
                 allow_tools=False, 
                 external_tools=self.tools, 
             )
-            # Append the message to the task history
+            # Log the message
+            self.custom_logger.info(f"模型回复: \n{message.content}")
+            # Record the completion message
             env.update(TaskStatus.CREATED, message)
             
             # Reset the current thinking
@@ -342,6 +347,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                         result = await self.call_tool(env, tool_call)
                     except Exception as e:
                         # Handle the unexpected error
+                        self.custom_logger.error(f"工具调用中出现了未知异常: \n{e}")
                         raise e
                     # Append the result to the task history
                     env.update(TaskStatus.CREATED, result)
@@ -455,6 +461,9 @@ class ReasonPlanActFlow(BaseWorkflow):
             ValueError:
                 If the tool call name is unknown. 
         """
+        # Log the tool call
+        self.custom_logger.info(f"Tool calling {tool_call.name} with arguments: {tool_call.args}.")
+        
         # Check if the tool is maintained by the workflow
         if tool_call.name not in self.tools:
             raise ValueError(f"Unknown tool call name: {tool_call.name}, react flow allow only react tools.")

@@ -26,6 +26,7 @@ class OutputType(Enum):
     """
     SUMMARY = "summary"
     DOCUMENT = "document"
+    SELECTION = "selection"
 
 
 class Query(BaseEnvironment):
@@ -157,11 +158,35 @@ class Query(BaseEnvironment):
             self.custom_logger.error(f"Query 注册的工具为空: {format_exc()}")
             raise RuntimeError("No tools registered for the query environment.")
         
+        @self.register_tool("select_answer")
+        async def select_answer(answer: str) -> str:
+            """
+            选择当前任务的答案。如果是选择题，则需要调用这个工具来选择答案，你传入的选项必须是题目中给出的选项。
+            
+            Args:
+                answer (str):
+                    The answer to the question. 
+                    - 如果是选择题，则需要传入题目中给出的选项，例如："A"。注意不要有任何其他字符。
+                    - 如果是填空题，则需要传入填空的内容。
+                    【注意】：其他类型题目，请不要调用这个工具。
+            Returns:
+                str:
+                    选项（不允许包含除选项外的任何字符）或者填空的内容。
+            """
+            # Get the task
+            task: Task = self.context.get("task")
+            # Set the answer to self.answers
+            self.answers[task.question] = answer
+            # Set the status to finished
+            self.status = EnvironmentStatus.FINISHED
+            # Return the answer
+            return answer
+        
         # Check the tools
         tool_str = ""
         for tool in self.tools.values():
             tool_str += f"{ToolView(tool).format()}\n"
-        self.custom_logger.info(f"Tools: \n{tool_str}")
+        self.custom_logger.debug(f"Tools: \n{tool_str}")
 
     async def __post_process(self, task: Task, output_type: OutputType) -> str:
         """Post process the answer.
@@ -176,6 +201,12 @@ class Query(BaseEnvironment):
             str:
                 The answer to the question.
         """
+        # Designate the tool choice
+        if output_type == OutputType.SELECTION:
+            tool_choice = "select_answer"
+        else:
+            tool_choice = "auto"
+        
         # Additional tools information for tool calling
         tools_str = "\n".join([ToolView(tool).format() for tool in self.tools.values()])
         # Get the command explanation
@@ -201,11 +232,18 @@ class Query(BaseEnvironment):
                 stop_reason=StopReason.NONE, 
             )
             # Record the post process message
-            self.history.append(message)
+            self.update(message)
             # Call for completion
-            message: CompletionMessage = await self.agent.think(self.history, allow_tools=True)
+            message: CompletionMessage = await self.agent.think(
+                self.history, 
+                allow_tools=False, 
+                external_tools=self.tools, 
+                tool_choice=tool_choice,
+            )
             # Record the completion message
-            self.history.append(message)
+            self.update(message)
+            # Log the message
+            self.custom_logger.info(f"模型回复: \n{message.content}")
                 
             # Extract the finish flag
             finish_flag = re.search(r"<finish_flag>\s*\n(.*)\n\s*</finish_flag>", message.content, re.DOTALL)
@@ -241,9 +279,8 @@ class Query(BaseEnvironment):
                             content=e
                         )
                         self.custom_logger.error(f"工具调用 {tool_call.name} 失败: \n{tool_result.content}")
-                    
                     # Update the messages
-                    task.history[TaskStatus.RUNNING].append(tool_result)
+                    self.update(tool_result)
                     
             elif finish_flag:
                 self.custom_logger.info(f"总结或修订任务执行完成: \n{task.question}") 
@@ -253,14 +290,29 @@ class Query(BaseEnvironment):
             else:
                 # Update the current thinking
                 current_thinking += 1
+                # Log the current thinking
+                self.custom_logger.warning(f"模型没有执行动作,当前思考次数: {current_thinking}")
             
-            # Check if the current thinking is reached the limit
-            if current_thinking >= max_thinking:
-                # The current thinking is reached the limit, end the workflow
-                self.custom_logger.error(f"当前任务执行已达到最大思考次数，总结或修订任务执行结束: \n{task.question}")
-                self.status = EnvironmentStatus.FINISHED
-                # Force the loop to break
-                break
+                # Check if the current thinking is reached the limit
+                if current_thinking >= max_thinking:
+                    # The current thinking is reached the limit, end the workflow
+                    self.custom_logger.error(f"当前任务执行已达到最大思考次数，总结或修订任务执行结束: \n{task.question}")
+                    self.status = EnvironmentStatus.FINISHED
+                    # Announce the idle thinking
+                    message = CompletionMessage(
+                        role=MessageRole.USER, 
+                        content=f"你目前已经达到了最大思考次数，你将没有机会更新答案。",
+                    )
+                    self.update(message)
+                    # Force the loop to break
+                    break
+                
+                # Announce the idle thinking
+                message = CompletionMessage(
+                    role=MessageRole.USER, 
+                    content=f"你目前已经思考了 {current_thinking} 次，最多思考 {max_thinking} 次后会被强制停止思考并退出循环，并且你将没有机会更新答案。",
+                )
+                self.update(message)
         
         # Set the answer
         document: BaseDocument = self.context.get("document")
@@ -288,7 +340,7 @@ class Query(BaseEnvironment):
                 The type of the output. 
                 - OutputType.SUMMARY: The summary of the answer.
                 - OutputType.DOCUMENT: The document of the answer.
-                
+                - OutputType.SELECTION: The selection of the answer.
         Returns:
             str:
                 The answer to the question. 
@@ -331,6 +383,8 @@ class Query(BaseEnvironment):
                     content=TaskAnswerView(task).format(),
                 )
             )
+            # Log the content
+            self.custom_logger.info(f"最终答案: \n{task.answer}")
             # Record the answer
             self.answers[task.question] = task.answer
             # Return the answer
@@ -344,22 +398,55 @@ class Query(BaseEnvironment):
             document = BaseDocument(original_content=content)
             # Format to line view
             line_view = document.format(FormatType.LINE)
+            # Log the content
+            self.custom_logger.info(f"文档按[行号-内容]输出: \n{line_view}")
             # Append as the assistant response
-            self.history.append(
+            self.update(
                 CompletionMessage(
                     role=MessageRole.ASSISTANT, 
                     content=line_view,
                 )
             )
-            # Post process the answer
+            """ [[ ## Post process the answer ##]] """
             # Set the document to the context
             self.context = self.context.create_next(document=document, task=task)
             # Post process the answer
             answer = await self.__post_process(task, output_type)
             # Record the answer
             self.answers[task.question] = answer
+            # Log the answer
+            self.custom_logger.info(f"最终文档: \n{answer}")
+            # Resume the context
+            self.context = self.context.done()
             # Return the answer
             return answer
+        
+        elif output_type == OutputType.SELECTION:
+            # Set the answer view of the task as the output history
+            # This is used for the selection output type. 
+            content = TaskAnswerView(task).format()
+            # Log the content
+            self.custom_logger.info(f"选择题分析过程: \n{content}")
+            # Update the history
+            self.update(
+                CompletionMessage(
+                    role=MessageRole.ASSISTANT, 
+                    content=content,
+                )
+            )
+            """ [[ ## Post process the answer ##]] """
+            # Set the task to the context
+            self.context = self.context.create_next(task=task)
+            # Post process the answer
+            answer = await self.__post_process(task, output_type)
+            # Record the answer
+            self.answers[task.question] = answer
+            # Log the answer
+            self.custom_logger.info(f"最终答案: \n{answer}")
+            # Resume the context
+            self.context = self.context.done()
+            # Return the answer
+            return content
         
         else:
             raise ValueError(f"Unknown output type: {output_type}")
@@ -376,6 +463,8 @@ class Query(BaseEnvironment):
                 is_error=False, 
                 content="The document is modified.",
             )
+            # Log the result
+            self.custom_logger.info(f"文档修改完成: \n{tool_call.args}")
         
         elif tool_call.name == "finish_query":
             # Finish the query
@@ -385,8 +474,22 @@ class Query(BaseEnvironment):
                 is_error=False, 
                 content="The query is finished.",
             )
+            # Log the result
+            self.custom_logger.info(f"任务完成: \n{tool_call.args}")
+            
+        elif tool_call.name == "select_answer":
+            # Select the answer
+            answer = await self.tool_functions["select_answer"](**tool_call.args)
+            return ToolCallResult(
+                tool_call_id=tool_call.id, 
+                is_error=False, 
+                content=f"The answer is selected: {answer}",
+            )
+            # Log the result
+            self.custom_logger.info(f"答案选择完成: \n{tool_call.args}")
+            
         else:
-            raise ValueError(f"Unknown tool call name: {tool_call.name}, query environment allow only diff_modify and finish_query.")
+            raise ValueError(f"Unknown tool call name: {tool_call.name}.")
         
         # Done the current context
         self.context = self.context.done()

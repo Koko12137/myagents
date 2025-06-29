@@ -105,7 +105,7 @@ class ActionFlow(BaseWorkflow):
         
         # Check the tools
         tools_str = "\n".join([ToolView(tool).format() for tool in self.tools.values()])
-        self.custom_logger.info(f"工具: \n{tools_str}")
+        self.custom_logger.debug(f"工具: \n{tools_str}")
         # Check the registered tools count
         if len(self.tools) == 0:
             self.custom_logger.error(f"注册工具失败: \n{traceback.format_exc()}")
@@ -157,6 +157,8 @@ class ActionFlow(BaseWorkflow):
         while task.status == TaskStatus.RUNNING:
             # Observe the task
             observe = await self.agent.observe(task)
+            # Log the observation
+            self.custom_logger.info(f"当前观察: \n{observe}")
             # Create a new message for the action prompt
             message = CompletionMessage(
                 role=MessageRole.USER, 
@@ -167,6 +169,8 @@ class ActionFlow(BaseWorkflow):
             task.update(TaskStatus.RUNNING, message)
             # Call for completion
             message: CompletionMessage = await self.agent.think(task.history[TaskStatus.RUNNING], allow_tools=True)
+            # Log the message
+            self.custom_logger.info(f"模型回复: \n{message.content}")
             # Record the completion message
             task.update(TaskStatus.RUNNING, message)
                 
@@ -197,7 +201,7 @@ class ActionFlow(BaseWorkflow):
                     
                     except RuntimeError as runtime_error:
                         # Runtime error
-                        self.custom_logger.error(f"工具调用 {tool_call.name} 失败: \n{runtime_error}, traceback: {traceback.format_exc()}")
+                        self.custom_logger.error(f"工具调用中出现了未知异常: \n{runtime_error}, traceback: {traceback.format_exc()}")
                         raise runtime_error
                     
                     except Exception as e:
@@ -207,7 +211,7 @@ class ActionFlow(BaseWorkflow):
                             is_error=True, 
                             content=e
                         )
-                        self.custom_logger.error(f"工具调用 {tool_call.name} 失败: \n{tool_result.content}")
+                        self.custom_logger.warning(f"工具调用 {tool_call.name} 失败: \n{tool_result.content}")
                     
                     # Update the messages
                     task.update(TaskStatus.RUNNING, tool_result)
@@ -241,6 +245,8 @@ class ActionFlow(BaseWorkflow):
             
             # Observe the task
             observe = await self.agent.observe(task)
+            # Log the observation
+            self.custom_logger.info(f"当前观察: \n{observe}")
             # If the stop reason is not tool call, answer the task directly
             # Create a new message for the reflection
             message = CompletionMessage(
@@ -255,6 +261,8 @@ class ActionFlow(BaseWorkflow):
             task.update(TaskStatus.RUNNING, message)
             # Call for completion
             message: CompletionMessage = await self.agent.think(task.history[TaskStatus.RUNNING], allow_tools=False)
+            # Log the message
+            self.custom_logger.info(f"模型回复: \n{message.content}")
             # Record the completion message 
             task.update(TaskStatus.RUNNING, message)
             
@@ -285,7 +293,7 @@ class ActionFlow(BaseWorkflow):
                         is_error=True, 
                         content=e
                     )
-                    self.custom_logger.error(f"工具调用 {tool_call.name} 失败: \n{tool_result.content}")
+                    self.custom_logger.warning(f"工具调用 {tool_call.name} 失败: \n{tool_result.content}")
                 
                 # Update the messages
                 task.update(TaskStatus.RUNNING, tool_result)
@@ -448,6 +456,9 @@ class ActionFlow(BaseWorkflow):
             ToolCallResult:
                 The tool call result.
         """
+        # Log the tool call
+        self.custom_logger.info(f"Tool calling {tool_call.name} with arguments: {tool_call.args}.")
+        
         # Create a new context
         self.context = self.context.create_next(task=ctx, **kwargs)
         
