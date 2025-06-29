@@ -8,11 +8,11 @@ from traceback import format_exc
 from loguru import logger
 from datasets import load_from_disk
 
-from myagents.src.envs.task import BaseTask, TaskContextView
-from myagents.src.llms import to_openai_dict
-from myagents.src.factory import AutoAgent, AutoAgentConfig
-from myagents.src.interface import Workflow, CompletionMessage, ToolCallRequest, ToolCallResult
-from myagents.src.agents import MaxStepsError, TokenStepCounter
+from myagents.core.envs.task import BaseTask, TaskContextView
+from myagents.core.llms import to_openai_dict
+from myagents.core.factory import AutoAgent, AutoAgentConfig
+from myagents.core.interface import Workflow
+from myagents.core.agents import MaxStepsError, TokenStepCounter
 
 
 PROMPT = """

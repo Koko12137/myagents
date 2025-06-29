@@ -2,7 +2,7 @@ import asyncio
 
 import click
 
-from myagents.tests.test import test_async_query
+from myagents.tests.test_query import test_async_query
 from scripts.sample.sampling import main as sampling_main
 from scripts.sample.neg_sampling import main as neg_sampling_main
 

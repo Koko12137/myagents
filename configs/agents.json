@@ -1,6 +1,6 @@
 {
     "debug": true, 
-    "save_dir": "logs", 
+    "save_dir": "logs/", 
     "step_counters": [
         {
             "name": "base",
@@ -14,34 +14,32 @@
     "environment": {
         "name": "query", 
         "agent": {
-            "name": "dummy",
+            "name": "base",
             "llm": {
-                "provider": "dummy",
-                "model": "dummy", 
-                "base_url": "dummy",
-                "temperature": 0.8
+                "provider": "openai",
+                "base_url": "http://localhost:8889/v1",
+                "model": "Qwen/Qwen3-14B-AWQ",
+                "temperature": 0.8, 
+                "api_key_field": "OPENAI_KEY", 
+                "extra_body": {
+                    "enable_thinking": false
+                }
             }
         },
         "workflows": [
             {
-                "name": "react",
+                "name": "rpa",
                 "agent": {
                     "name": "base", 
                     "llm": {
                         "provider": "openai",
-                        "base_url": "http://192.168.152.85:65189/v1",
+                        "base_url": "http://localhost:8889/v1",
                         "model": "Qwen/Qwen3-14B-AWQ",
                         "temperature": 0.8, 
                         "api_key_field": "OPENAI_KEY", 
                         "extra_body": {
                             "enable_thinking": false
                         }
-                    }, 
-                    "mcp_client": {
-                        "server_name": "mcp_gate",
-                        "server_url": "http://192.168.152.85",
-                        "server_port": 65189,
-                        "auth_token": "dummy"
                     }
                 }, 
                 "workflows": [
@@ -51,7 +49,7 @@
                             "name": "base",
                             "llm": {
                                 "provider": "openai",
-                                "base_url": "http://192.168.152.85:65189/v1",
+                                "base_url": "http://localhost:8889/v1",
                                 "model": "Qwen/Qwen3-14B-AWQ",
                                 "temperature": 1.0, 
                                 "api_key_field": "OPENAI_KEY", 
@@ -67,7 +65,7 @@
                             "name": "base",
                             "llm": {
                                 "provider": "openai",
-                                "base_url": "http://192.168.152.85:65189/v1",
+                                "base_url": "http://localhost:8889/v1",
                                 "model": "Qwen/Qwen3-14B-AWQ",
                                 "temperature": 0.8, 
                                 "api_key_field": "OPENAI_KEY", 

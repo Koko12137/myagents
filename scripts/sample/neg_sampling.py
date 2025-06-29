@@ -2,18 +2,14 @@ import asyncio
 import json
 import os
 import random
-from typing import Union, List
+from typing import Union
 from traceback import format_exc
 
 from loguru import logger
 from datasets import load_from_disk
 from openai import AsyncOpenAI
 
-from myagents.src.envs.task import BaseTask, TaskContextView
-from myagents.src.llms import to_openai_dict
-from myagents.src.factory import AutoAgent, AutoAgentConfig
-from myagents.src.interface import Workflow, CompletionMessage, ToolCallRequest, ToolCallResult
-from myagents.src.agents import MaxStepsError, TokenStepCounter
+from myagents.core.envs.task import BaseTask, TaskContextView
 
 
 PROMPT = """
