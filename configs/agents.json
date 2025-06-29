@@ -1,6 +1,6 @@
 {
     "debug": true, 
-    "save_dir": "logs/", 
+    "save_dir": "benchmark/logs/", 
     "step_counters": [
         {
             "name": "base",

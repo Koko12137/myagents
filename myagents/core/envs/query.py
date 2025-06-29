@@ -264,13 +264,8 @@ class Query(BaseEnvironment):
         
         # Set the answer
         document: BaseDocument = self.context.get("document")
-        if document:
-            self.answer = document.format(FormatType.ARTICLE)
-        else:
-            self.answer = answer
-        
         # Return the answer
-        return self.answer
+        return document.format(FormatType.ARTICLE)
                 
     async def run(
         self, 
@@ -336,6 +331,8 @@ class Query(BaseEnvironment):
                     content=TaskAnswerView(task).format(),
                 )
             )
+            # Record the answer
+            self.answers[task.question] = task.answer
             # Return the answer
             return task.answer
         
@@ -359,6 +356,8 @@ class Query(BaseEnvironment):
             self.context = self.context.create_next(document=document, task=task)
             # Post process the answer
             answer = await self.__post_process(task, output_type)
+            # Record the answer
+            self.answers[task.question] = answer
             # Return the answer
             return answer
         
