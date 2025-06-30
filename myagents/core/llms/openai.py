@@ -5,6 +5,7 @@ from typing import Optional, Union
 
 from loguru import logger
 from openai import AsyncOpenAI
+from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.interface import LLM, Logger
 from myagents.core.message import CompletionMessage, MessageRole, StopReason, ToolCallRequest, ToolCallResult, CompletionUsage
@@ -48,7 +49,7 @@ def to_openai_dict(
                         "type": "function",
                         "function": {
                             "name": tool_call.name, 
-                            "arguments": json.dumps(tool_call.args, ensure_ascii=False)
+                            "arguments": json.dumps(tool_call.args, ensure_ascii=False), 
                         }
                     })
         else:
@@ -119,7 +120,7 @@ class OpenAiLLM(LLM):
         self, 
         messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
         available_tools: Optional[list[dict[str, str]]] = None, 
-        tool_choice: str = "auto",
+        tool_choice: Union[str, FastMcpTool] = "auto",
     ) -> CompletionMessage:
         """Completion the messages.
 
@@ -146,8 +147,21 @@ class OpenAiLLM(LLM):
         if available_tools is not None and len(available_tools) == 0:
             available_tools = None
         else:
-            # Set the tool choice
-            kwargs["tool_choice"] = tool_choice
+            if isinstance(tool_choice, FastMcpTool):
+                # Set the tool choice
+                kwargs["tool_choice"] = {
+                    "type": "function",
+                    "function": {
+                        "name": tool_choice.name, 
+                        "arguments": tool_choice.parameters['properties'], 
+                        "required": tool_choice.parameters['required'],
+                    }
+                }
+            else:
+                # Set the tool choice
+                kwargs["tool_choice"] = tool_choice
+            # Log the tool choice
+            self.custom_logger.debug(f"Tool choice: {kwargs['tool_choice']}")
         
         # Create the generation history
         history = to_openai_dict(messages)
@@ -190,9 +204,13 @@ class OpenAiLLM(LLM):
                 ))
         
         # Extract Finish reason
-        if response.choices[0].finish_reason == "tool_calls":
+        if response.choices[0].finish_reason == "length":
+            stop_reason = StopReason.LENGTH
+        elif response.choices[0].finish_reason == "content_filter":
+            stop_reason = StopReason.CONTENT_FILTER
+        elif response.choices[0].finish_reason != "stop" and len(tool_calls) > 0:
             stop_reason = StopReason.TOOL_CALL
-        elif response.choices[0].finish_reason == "stop":
+        elif response.choices[0].finish_reason == "stop" and len(tool_calls) == 0:
             stop_reason = StopReason.STOP
         else:
             stop_reason = StopReason.NONE

@@ -203,7 +203,7 @@ class Query(BaseEnvironment):
         """
         # Designate the tool choice
         if output_type == OutputType.SELECTION:
-            tool_choice = "select_answer"
+            tool_choice = self.tools["select_answer"]
         else:
             tool_choice = "auto"
         

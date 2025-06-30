@@ -116,3 +116,11 @@ class BaseEnvironment(BaseWorkflow, Environment):
         else:
             # Append the message directly
             self.history.append(message)
+
+    def reset(self) -> None:
+        """Reset the environment.
+        """
+        self.status = EnvironmentStatus.CREATED
+        self.history = []
+        self.tasks = OrderedDict()
+        self.answers = OrderedDict()

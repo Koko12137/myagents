@@ -7,22 +7,11 @@ from fastmcp.tools import Tool as FastMCPTool
 
 from myagents.core.message import CompletionMessage, StopReason, MessageRole, ToolCallRequest, ToolCallResult
 from myagents.core.interface import Agent, Task, TaskStatus, Logger, Workflow
-from myagents.core.envs.task import TaskContextView
+from myagents.core.envs.task import TaskContextView, TaskAnswerView
 from myagents.core.utils.tools import ToolView
 from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.utils.extractor import extract_by_label
 from myagents.prompts.workflows.act import ACTION_SYSTEM_PROMPT, ACTION_PROMPT, REFLECT_PROMPT, RETRY_PROMPT
-
-
-class TaskCancelledError(Exception):
-    """This is the error that is raised when the task is cancelled."""
-    def __init__(self, message: str, task: Task) -> None:
-        self.message = message
-        self.task: Task = task
-        super().__init__(self.message)
-    
-    def __str__(self) -> str:
-        return f"TaskCancelledError: {self.message}, task: {TaskContextView(self.task).format()}"
 
 
 class ActionFlow(BaseWorkflow):
@@ -132,15 +121,20 @@ class ActionFlow(BaseWorkflow):
         """
         # Get the blueprint from the context
         blueprint = self.context.get("blueprint")
+        # Get the task from the context
+        task = self.context.get("task")
+        # Convert to task answer view
+        task_result = TaskAnswerView(task).format()
+        
         # Check if the last message is a user message
         if len(task.history[TaskStatus.RUNNING]) > 0 and task.history[TaskStatus.RUNNING][-1].role == MessageRole.USER:
             # Append the blueprint to the last message
-            task.history[TaskStatus.RUNNING][-1].content += f"\n\n{ACTION_SYSTEM_PROMPT.format(blueprint=blueprint)}"
+            task.history[TaskStatus.RUNNING][-1].content += f"\n\n{ACTION_SYSTEM_PROMPT.format(blueprint=blueprint, task_result=task_result)}"
         else:
             # Create a new message for the current blueprint
             message = CompletionMessage(
                 role=MessageRole.SYSTEM, 
-                content=ACTION_SYSTEM_PROMPT.format(blueprint=blueprint), 
+                content=ACTION_SYSTEM_PROMPT.format(blueprint=blueprint, task_result=task_result), 
                 stop_reason=StopReason.NONE, 
             )
             # Append the blueprint to the last message
@@ -154,6 +148,7 @@ class ActionFlow(BaseWorkflow):
         max_thinking = 3
         current_thinking = 0
         
+        answer = ""
         while task.status == TaskStatus.RUNNING:
             # Observe the task
             observe = await self.agent.observe(task)
@@ -195,7 +190,7 @@ class ActionFlow(BaseWorkflow):
                             # Handle the error and update the task status
                             self.custom_logger.warning(f"工具调用 {tool_call.name} 失败: \n{tool_result.content}")
                             # Set the task status to failed and call for retry
-                            task.status = TaskStatus.FAILED
+                            task.status = TaskStatus.ERROR
                             # Force the loop to break
                             break
                     
@@ -260,7 +255,11 @@ class ActionFlow(BaseWorkflow):
             # Append Reflect Prompt and Call for Completion
             task.update(TaskStatus.RUNNING, message)
             # Call for completion
-            message: CompletionMessage = await self.agent.think(task.history[TaskStatus.RUNNING], allow_tools=False)
+            message: CompletionMessage = await self.agent.think(
+                task.history[TaskStatus.RUNNING], 
+                allow_tools=False, 
+                external_tools=self.tools,
+            )
             # Log the message
             self.custom_logger.info(f"模型回复: \n{message.content}")
             # Record the completion message 
@@ -310,7 +309,11 @@ class ActionFlow(BaseWorkflow):
                 break
         
         # Set the answer of the task
-        task.answer = answer if answer else "任务执行结束，但未提供答案，执行可能存在未知错误。"
+        if not answer and not task.answer:
+            task.answer = "任务执行结束，但未提供答案，执行可能存在未知错误。"
+        elif not task.answer: 
+            task.answer = answer
+            
         # Log the answer
         self.custom_logger.info(f"任务执行结束: \n{TaskContextView(task).format()}")
         return task
@@ -339,12 +342,12 @@ class ActionFlow(BaseWorkflow):
             task = await self.__act(task)
             
             # Check the task status
-            if task.status == TaskStatus.FAILED:
+            if task.status == TaskStatus.ERROR:
                 # The task is still failed, then continue the retry with the next retry count
                 self.custom_logger.warning(f"任务执行失败，重试中: \n{TaskContextView(task).format()}")
                 continue
             else:
-                # The task is finished, then return the task
+                # The task is finished or cancelled, then return the task
                 return task
         
         # The task is still failed and the retry count is reached the limit
@@ -373,43 +376,78 @@ class ActionFlow(BaseWorkflow):
             
             # Check if the sub-task is created, if True, then raise an error to call for re-planning
             if sub_task.status == TaskStatus.CREATED:
-                # Update the context
-                self.context = self.context.create_next(task=task)
-                # Raise an error to call for re-planning
-                raise TaskCancelledError("The task is roll back to created status due to the cancelled sub-task.", task)
+                # Append the error information to the planning history of the parent task
+                error_message = CompletionMessage(
+                    role=MessageRole.USER, 
+                    content=f"子任务 {sub_task.question} 执行失败: {sub_task.answer}，所有的未执行或执行失败的子任务将被取消并删除。", 
+                    stop_reason=StopReason.NONE,
+                )
+                task.answer = error_message.content
+                # Clean up the answer of the sub-task
+                sub_task.answer = ""
+                # Update the planning history of the parent task
+                task.update(TaskStatus.PLANNING, error_message)
+                # Update the created history of the parent task
+                task.update(TaskStatus.CREATED, error_message)
+                # Log the error message
+                self.custom_logger.error(f"已记录子任务取消信息到当前任务的`CREATED`和`PLANNING`历史: \n{error_message.content}")
+                
+                # Remove the sub-tasks from the parent task except the finished ones and the created ones
+                for sub_task in task.sub_tasks.values():
+                    if sub_task.status not in [TaskStatus.FINISHED, TaskStatus.CREATED]:
+                        del task.sub_tasks[sub_task.question]
+                
+                # Log the cancelled sub-task
+                self.custom_logger.error(f"取消所有未执行或执行失败的子任务: \n{TaskContextView(task).format()}")
+                # Set the parent task status to created
+                task.status = TaskStatus.CREATED
+                # Log the roll back status
+                self.custom_logger.error(f"任务执行失败，回滚到创建状态: \n{TaskContextView(task).format()}")
+                return task
                 
             # Check if the sub-task is running, if True, then act the sub-task
             elif sub_task.status == TaskStatus.RUNNING:
-                try:
-                    # Log the sub-task
-                    self.custom_logger.info(f"执行子任务: \n{TaskContextView(sub_task).format()}")
-                    # Act the sub-task
-                    sub_task = await self.run(sub_task)
-                except TaskCancelledError as e:
-                    # The re-planning is needed, then raise the error
-                    raise e
+                # Log the sub-task
+                self.custom_logger.info(f"执行子任务: \n{TaskContextView(sub_task).format()}")
+                # Act the sub-task
+                sub_task = await self.run(sub_task)
             
             # Check if the sub-task is failed, if True, then retry the sub-task
-            elif sub_task.status == TaskStatus.FAILED:
+            elif sub_task.status == TaskStatus.ERROR:
                 # Retry the sub-task
                 sub_task = await self.__act_retry(sub_task)
                 # Check if the sub-task is still failed
-                if sub_task.status == TaskStatus.FAILED:
+                if sub_task.status == TaskStatus.ERROR:
                     # The sub-task is still failed, cancel it
                     sub_task.status = TaskStatus.CANCELLED
             
             # Check if the sub-task is cancelled, if True, set the parent task status to created and stop the traverse
             elif sub_task.status == TaskStatus.CANCELLED:
-                # Cancel all the sub-tasks of the parent task
-                for sub_task in task.sub_tasks.values():
-                    sub_task.status = TaskStatus.CANCELLED
-                # Log the cancelled sub-task
-                self.custom_logger.warning(f"所有子任务已取消: \n{TaskContextView(task).format()}")
+                # Append the error information to the planning history of the parent task
+                error_message = CompletionMessage(
+                    role=MessageRole.USER, 
+                    content=f"子任务 {sub_task.question} 执行失败: {sub_task.answer}，所有的未执行或执行失败的子任务将被取消并删除。", 
+                    stop_reason=StopReason.NONE,
+                )
+                task.answer = error_message.content
+                # Update the planning history of the parent task
+                task.update(TaskStatus.PLANNING, error_message)
+                # Update the created history of the parent task
+                task.update(TaskStatus.CREATED, error_message)
+                # Log the error message
+                self.custom_logger.error(f"已记录子任务取消信息到当前任务的`CREATED`和`PLANNING`历史: \n{error_message.content}")
                 
-                # The strategy is ALL, but one of the sub-tasks is cancelled
-                task.status = TaskStatus.CREATED
+                # Cancel all the sub-tasks of the parent task except the finished ones
+                for sub_task in task.sub_tasks.values():
+                    if sub_task.status != TaskStatus.FINISHED:
+                        del task.sub_tasks[sub_task.question]
+                    
                 # Log the cancelled sub-task
-                self.custom_logger.warning(f"任务执行失败，回滚到创建状态: \n{TaskContextView(task).format()}")
+                self.custom_logger.error(f"取消所有未执行或执行失败的子任务: \n{TaskContextView(task).format()}")
+                # Set the parent task status to created
+                task.status = TaskStatus.CREATED
+                # Log the roll back status
+                self.custom_logger.error(f"任务执行失败，回滚到创建状态: \n{TaskContextView(task).format()}")
                 return task
             
             # Check if the sub-task is finished, if True, then summarize the result of the sub-task
@@ -424,16 +462,14 @@ class ActionFlow(BaseWorkflow):
             # ELSE, the sub-task is not created, running, failed, cancelled, or finished, it is a critical error
             else:
                 # The sub-task is not created, running, failed, cancelled, or finished, then raise an error
-                raise ValueError(f"The sub-task is not created, running, failed, cancelled, or finished: {TaskContextView(sub_task).format()}")
+                raise ValueError(f"The status of the sub-task is invalid in action flow: {sub_task.status}")
         
         # There are some errors in the sub-tasks, then raise an error to call for re-planning
         if len(sub_tasks_finished) == 0 and not task.is_leaf:
-            # No sub-tasks are finished, roll back the task status to created
-            task.status = TaskStatus.CREATED
+            # No sub-tasks are finished, the task is cancelled
+            task.status = TaskStatus.CANCELLED
             # Log the roll back
-            self.custom_logger.error(f"任务执行失败，回滚到创建状态: \n{TaskContextView(task).format()}")
-            # Raise an error to call for re-planning
-            raise TaskCancelledError("There are some errors in the sub-tasks.", task)
+            self.custom_logger.error(f"任务执行失败: \n{TaskContextView(task).format()}")
             
         # Post traverse the task
         # All the sub-tasks are finished, then call the action flow to act the task

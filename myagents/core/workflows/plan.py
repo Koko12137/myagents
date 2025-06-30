@@ -1,3 +1,4 @@
+import inspect
 from typing import Callable
 from traceback import format_exc
 
@@ -20,7 +21,6 @@ class PlanFlow(BaseWorkflow):
     Attributes:
         system_prompt (str):
             The system prompt of the workflow.
-            
         agent (Agent):
             The agent that will be used to plan the task. 
         context (BaseContext):
@@ -37,7 +37,6 @@ class PlanFlow(BaseWorkflow):
             The workflows that will be orchestrated to process the task. 
     """
     system_prompt: str = PLAN_SYSTEM_PROMPT
-    
     agent: Agent
     debug: bool
     custom_logger: Logger
@@ -116,44 +115,13 @@ class PlanFlow(BaseWorkflow):
                 new_task.status = TaskStatus.CREATED
             else:
                 # Set the status of the new task as running
-                new_task.status = TaskStatus.RUNNING
+                new_task.status = TaskStatus.CHECKING
                 
             # Add the new task to the task
             parent.sub_tasks[new_task.question] = new_task
             # Add the parent task to the new task
             new_task.parent = parent
             return new_task
-        
-        @self.register_tool("cancel_task")
-        async def cancel_task(question_path: list[str]) -> None:
-            """
-            取消当前任务特定路径指向的子任务。
-            
-            Args:
-                question_path (list[str]):
-                    错误任务的问答路径。这个路径将会被用于找到具有相同问题的子任务。第一个元素应该是根任务的问题，下一个元素应该是导航到子任务的下一个层级。
-                
-            Returns:
-                None
-                
-            Raises:
-                ValueError:
-                    如果问答路径没有在任务中找到。
-            """
-            task = self.context.get("task")
-            # Check if the length of the question path is greater than the detail level
-            if len(question_path) > task.detail_level:
-                raise ValueError(f"The length of the question path is greater than the detail level: {len(question_path)} > {task.detail_level}")
-            
-            if question_path[0] == task.question:
-                question_path = question_path[1:]
-            
-            # Traverse the question path and find the sub-task that has the same question
-            for question in question_path:
-                task = task.sub_tasks[question]
-            
-            # Update the task status
-            task.status = TaskStatus.CANCELLED
             
         @self.register_tool("finish_planning")
         async def finish_planning() -> bool:
@@ -172,7 +140,7 @@ class PlanFlow(BaseWorkflow):
             """
             # Set the task status to running
             task = self.context.get("task")
-            task.status = TaskStatus.RUNNING
+            task.status = TaskStatus.CHECKING
             return True
         
         @self.register_tool("set_as_leaf")
@@ -189,7 +157,7 @@ class PlanFlow(BaseWorkflow):
             # Set the task as a leaf task
             task = self.context.get("task")
             task.is_leaf = True
-            task.status = TaskStatus.RUNNING
+            task.status = TaskStatus.CHECKING
         
         # Additional tools information for tool calling
         tools_str = "\n".join([ToolView(tool).format() for tool in self.tools.values()])
@@ -281,6 +249,7 @@ class PlanFlow(BaseWorkflow):
                 role=MessageRole.USER, 
                 content=EXEC_PLAN_PROMPT.format(
                     task_context=observe, 
+                    task_status_description=inspect.getdoc(TaskStatus), 
                 ), 
                 stop_reason=StopReason.NONE, 
             )
@@ -342,7 +311,7 @@ class PlanFlow(BaseWorkflow):
                 # Update the current thinking
                 current_thinking += 1
                 # Set the task status to running
-                task.status = TaskStatus.RUNNING
+                task.status = TaskStatus.CHECKING
             else:
                 # Update the current thinking
                 current_thinking += 1
@@ -351,7 +320,7 @@ class PlanFlow(BaseWorkflow):
                 if current_thinking > max_thinking:
                     # No more tool calling is allowed, break the loop
                     self.custom_logger.error(f"连续思考上限达到，将任务状态设置为运行状态，并强制退出循环: \n{TaskContextView(task).format()}")
-                    task.status = TaskStatus.RUNNING
+                    task.status = TaskStatus.CHECKING
                     # Announce the idle thinking
                     message = CompletionMessage(
                         role=MessageRole.USER, 
@@ -381,7 +350,7 @@ class PlanFlow(BaseWorkflow):
                 task.update(TaskStatus.PLANNING, message)
                 
             # Check if the planning is finished
-            if task.status == TaskStatus.RUNNING:
+            if task.status == TaskStatus.CHECKING:
                 # Double check the planning result
                 if len(task.sub_tasks) == 0 and not task.is_leaf:
                     current_error += 1
@@ -390,7 +359,7 @@ class PlanFlow(BaseWorkflow):
                         # The planning is error, roll back the task status to planning
                         self.custom_logger.error(f"任务规划执行错误，当前任务没有子任务，但是当前任务不是叶子任务。由于错误累计次数超过上限，将任务强制设为叶子任务: \n{TaskContextView(task).format()}")
                         task.is_leaf = True
-                        task.status = TaskStatus.RUNNING
+                        task.status = TaskStatus.CHECKING
                         # Record the error to history and announce the penalty
                         task.update(TaskStatus.PLANNING, CompletionMessage(
                             role=MessageRole.USER, 
@@ -436,7 +405,7 @@ class PlanFlow(BaseWorkflow):
         # Check if the task is a leaf task
         if task.is_leaf:
             # Set the task status to running
-            task.status = TaskStatus.RUNNING
+            task.status = TaskStatus.CHECKING
             return task
         
         # Layer by layer traverse the task and create the sub-tasks
@@ -457,7 +426,7 @@ class PlanFlow(BaseWorkflow):
                         if current_task.detail_level == 1:
                             # Force the task to leaf
                             current_task.is_leaf = True
-                            current_task.status = TaskStatus.RUNNING
+                            current_task.status = TaskStatus.CHECKING
                             # Log the task
                             self.custom_logger.warning(f"由于达到了最大拆解层级，强制将任务设置为叶子任务: \n{TaskContextView(current_task).format()}")
                         
@@ -473,12 +442,12 @@ class PlanFlow(BaseWorkflow):
                             # Call the plan flow to plan the task
                             current_task = await self.__layer_create(current_task)
                     else:
-                        # Set the task status to running
-                        current_task.status = TaskStatus.RUNNING
+                        # Set the task status to checking
+                        current_task.status = TaskStatus.CHECKING
                         # Log the current task with a warning announcement
-                        self.custom_logger.warning(f"当前任务 {current_task.question} 是叶子任务，但没有进入运行状态，已强制设置为运行状态。")
+                        self.custom_logger.warning(f"当前任务 {current_task.question} 是叶子任务，但没有进入检查状态，已强制设置为检查状态。")
                 
-                elif current_task.status == TaskStatus.RUNNING:
+                elif current_task.status == TaskStatus.CHECKING:
                     if not current_task.is_leaf:
                         # Check the detail level of the current task
                         if current_task.detail_level == 2:
@@ -487,7 +456,7 @@ class PlanFlow(BaseWorkflow):
                                 if sub_task.status == TaskStatus.CREATED and not sub_task.is_leaf:
                                     # Force the sub-task to leaf
                                     sub_task.is_leaf = True
-                                    sub_task.status = TaskStatus.RUNNING
+                                    sub_task.status = TaskStatus.CHECKING
                                     # Log the sub-task
                                     self.custom_logger.warning(f"由于达到了最大拆解层级，强制将子任务设置为叶子任务: \n{TaskContextView(sub_task).format()}")
                         
@@ -511,7 +480,7 @@ class PlanFlow(BaseWorkflow):
                 # Check if all the sub-tasks are cancelled
                 elif all(sub_task.status == TaskStatus.CANCELLED for sub_task in current_task.sub_tasks.values()):
                     # Log the current task
-                    self.custom_logger.info(f"规划当前任务: \n{TaskContextView(current_task).format()}")
+                    self.custom_logger.info(f"重新规划当前任务: \n{TaskContextView(current_task).format()}")
                     # Call the plan flow to plan the task
                     current_task = await self.__layer_create(current_task)
                     
@@ -568,8 +537,8 @@ class PlanFlow(BaseWorkflow):
                 self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
                 
             elif tool_call.name == "finish_planning":
-                # No more orchestration is required, so we update the task status to running
-                ctx.status = TaskStatus.RUNNING
+                # No more orchestration is required, so we update the task status to checking
+                ctx.status = TaskStatus.CHECKING
                 
                 # Create ToolCallResult
                 tool_result = ToolCallResult(
@@ -589,19 +558,6 @@ class PlanFlow(BaseWorkflow):
                     tool_call_id=tool_call.id, 
                     is_error=False, 
                     content=f"Task {ctx.question} set as leaf task.",
-                )
-                # Log the tool call result
-                self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
-                
-            elif tool_call.name == "cancel_task":
-                # Cancel the task
-                await self.tool_functions[tool_call.name](**tool_call.args)
-                
-                # Create ToolCallResult
-                tool_result = ToolCallResult(
-                    tool_call_id=tool_call.id, 
-                    is_error=False, 
-                    content=f"Task {ctx.question} cancelled.",
                 )
                 # Log the tool call result
                 self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")

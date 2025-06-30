@@ -73,8 +73,6 @@ class QueueLLM(LLM):
         self.temperature = temperature
         self.custom_logger = custom_logger
         self.debug = debug
-        if self.debug:
-            self.custom_logger.enable("myagents.llms.queue")
         
         # Create a queue for transferring the messages
         self.request_queue = asyncio.Queue()

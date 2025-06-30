@@ -229,25 +229,29 @@ class TaskStatus(Enum):
     status of the task in the current work flow. If the answer is still None, the task is not done. 
     
     Attributes:
-        CREATED (int):
-            The task is created. This needs to be orchestrated by the workflow. 
-        PLANNING (int):
-            The task is planning. This is the status of the task in the current workflow. 
-        RUNNING (int):
-            The task is running. This is the status of the task in the current workflow.
-        FINISHED (int):
-            The task is finished. This means the task is finished and the answer is not None.
-        FAILED (int):
-            The task is failed. This means the task is failed.
-        CANCELLED (int):
-            The task is cancelled. This means the task is cancelled.
+        CREATED (str):
+            ` - [ ] ` This needs to be orchestrated by the workflow. 
+        PLANNING (str):
+            ` - [p] ` This Task is creating sub-tasks. If the planning is finished, the task will be set to `- [c]` checking status.
+        CHECKING (str):
+            ` - [c] ` This Task needs to be checked by the workflow or human. If the checking is finished, the task will be set to `- [r]` running status.
+        RUNNING (str):
+            ` - [r] ` This Task is running the sub-tasks. If the running is finished, the task will be set to `- [x]` finished status. 
+            If there is any error during the running, the task will be set to `- [e]` error status directly. 
+        FINISHED (str):
+            ` - [x] ` This means the task is finished. But the answer may be None. So it needs double check. 
+        ERROR (str):
+            ` - [e] ` This Task is error but could be recovered. If the error is not recovered, the task will be set to `- [k]` cancelled status.
+        CANCELLED (str):
+            ` - [k] ` This Task is cancelled and could not be recovered. This will cause an system error. 
     """
-    CREATED = 0
-    PLANNING = 1
-    RUNNING = 2
-    FINISHED = 3
-    FAILED = 4
-    CANCELLED = 5
+    CREATED     = " - [ ] "
+    PLANNING    = " - [p] "
+    CHECKING    = " - [c] "
+    RUNNING     = " - [r] "
+    FINISHED    = " - [x] "
+    ERROR       = " - [e] "
+    CANCELLED   = " - [k] "
     
     
 class TaskParallelStrategy(Enum):
@@ -328,6 +332,12 @@ class Task(Protocol):
                 The message to be updated.
         """
         pass
+    
+    @abstractmethod
+    def reset(self) -> None:
+        """Reset the task.
+        """
+        pass
 
 
 @runtime_checkable
@@ -385,7 +395,6 @@ class Workflow(Protocol):
             The workflows that will be orchestrated to process the task.
     """
     system_prompt: str
-    
     agent: 'Agent'
     debug: bool
     custom_logger: 'Logger'
@@ -668,6 +677,12 @@ class Environment(Workflow):
         Args:
             message (Union[CompletionMessage, ToolCallResult, ToolCallRequest]):
                 The message to update the environment.
+        """
+        pass
+    
+    @abstractmethod
+    def reset(self) -> None:
+        """Reset the environment.
         """
         pass
 

@@ -19,11 +19,17 @@ class StopReason(Enum):
             The stop reason of the message.
         TOOL_CALL (str):
             The tool call reason of the message.
+        LENGTH (str):
+            The length reason of the message.
+        CONTENT_FILTER (str):
+            The content filter reason of the message.
         NONE (str):
             The none reason of the message.
     """
     STOP = "stop"
     TOOL_CALL = "tool_call"
+    LENGTH = "length"
+    CONTENT_FILTER = "content_filter"
     NONE = "none"
     
 

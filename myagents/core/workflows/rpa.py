@@ -1,4 +1,3 @@
-import re
 from typing import Callable
 from traceback import format_exc
 
@@ -9,7 +8,6 @@ from myagents.core.envs.task import TaskContextView
 from myagents.core.interface import Agent, Task, TaskStatus, Logger, Workflow, Context
 from myagents.core.message import ToolCallRequest, ToolCallResult, MessageRole, CompletionMessage, StopReason
 from myagents.core.workflows.base import BaseWorkflow
-from myagents.core.workflows.act import TaskCancelledError
 from myagents.core.utils.tools import ToolView
 from myagents.core.utils.extractor import extract_by_label
 from myagents.prompts.workflows.rpa import RPA_CHECK_PROMPT, RPA_PLAN_PROMPT
@@ -34,6 +32,8 @@ class ReasonPlanActFlow(BaseWorkflow):
         3. Set the sub-tasks or modified task as the current task and go to step 1. 
         
     Attributes:
+        system_prompt (str):
+            The system prompt of the workflow. This is used to set the system prompt of the workflow. 
         agent (Agent): 
             The agent that is used to orchestrate the task.
         debug (bool): 
@@ -50,6 +50,7 @@ class ReasonPlanActFlow(BaseWorkflow):
         workflows (dict[str, Workflow]):
             The workflows that will be orchestrated to process the task. 
     """
+    system_prompt: str
     agent: Agent
     debug: bool
     custom_logger: Logger
@@ -109,7 +110,7 @@ class ReasonPlanActFlow(BaseWorkflow):
             
             # Find the first one of the sub-tasks that is failed
             for sub_task in task.sub_tasks.values():
-                if sub_task.status == TaskStatus.FAILED:
+                if sub_task.status == TaskStatus.ERROR:
                     # Retry the sub-task
                     sub_task = await self.__act(sub_task)
                     return
@@ -133,19 +134,20 @@ class ReasonPlanActFlow(BaseWorkflow):
                 None
             """
             task = self.context.get("task")
-            task.status = TaskStatus.RUNNING
+            # Set the task status to running recursively
+            self.__set_running(task)
             return
         
-        @self.register_tool("cancel_task")
-        async def cancel_task(question_path: list[str], reason: str) -> None:
+        @self.register_tool("remove_task")
+        async def remove_task(question_path: list[str], reason: str) -> None:
             """
-            取消当前任务特定路径指向的子任务。你仅需要在发现任何子任务的规划存在问题时，才需要调用这个工具。
+            删除当前任务特定路径指向的子任务。你仅需要在发现任何子任务的规划存在问题时，才需要调用这个工具。
             
             Args:
                 question_path (list[str]):
-                    错误任务的问答路径。这个路径将会被用于找到具有相同问题的子任务。第一个元素应该是根任务的问题，下一个元素应该是导航到子任务的下一个层级。
+                    需要删除的子任务的问答路径。这个路径将会被用于找到具有相同问题的子任务。第一个元素应该是根任务的问题，下一个元素应该是导航到子任务的下一个层级。
                 reason (str):
-                    取消任务的原因。
+                    删除子任务的原因。
             
             Returns:
                 None
@@ -168,15 +170,14 @@ class ReasonPlanActFlow(BaseWorkflow):
             
             # Get the parent task
             parent_task = task.parent
-            # Cancel the task
-            task.status = TaskStatus.CANCELLED
-            task.answer = reason
+            # Remove the task
+            del task.parent.sub_tasks[question]
             
-            """ [[ ## Announce the cancellation to the parent task ## ]] """
-            # Append the cancellation message to the task history
+            """ [[ ## Announce the removal to the parent task ## ]] """
+            # Append the removal message to the task history
             parent_task.update(TaskStatus.PLANNING, CompletionMessage(
                 role=MessageRole.USER, 
-                content=f"Error in the planning: {reason}, the sub-task {task.question} is cancelled.", 
+                content=f"Error in the planning: {reason}, the sub-task {task.question} is removed.", 
                 stop_reason=StopReason.NONE, 
             ))
             return
@@ -191,6 +192,17 @@ class ReasonPlanActFlow(BaseWorkflow):
         for tool in self.tools.values():
             tool_str += f"{ToolView(tool).format()}\n"
         self.custom_logger.debug(f"Tools: \n{tool_str}")
+        
+    def __set_running(self, task: Task) -> None:
+        """Set the task status to running recursively.
+        
+        Args:
+            task (Task):
+                The task to set the status to running.
+        """
+        task.status = TaskStatus.RUNNING
+        for sub_task in task.sub_tasks.values():
+            self.__set_running(sub_task)
         
     async def __reason(self, env: Task) -> Task:
         """Reason about the task. This is the pre step of the planning in order to inference the real 
@@ -245,9 +257,9 @@ class ReasonPlanActFlow(BaseWorkflow):
                 # Log the blueprint
                 self.custom_logger.info(f"规划蓝图: \n{blueprint}")
                 # Update the blueprint to the global context of react flow and all the sub-flows
-                self.context = self.context.create_next(blueprint=blueprint)
+                self.context = self.context.create_next(blueprint=blueprint, task=env)
                 for workflow in self.workflows.values():
-                    workflow.context = workflow.context.create_next(blueprint=blueprint)
+                    workflow.context = workflow.context.create_next(blueprint=blueprint, task=env)
                 break
             else:
                 # Update the current thinking
@@ -290,99 +302,111 @@ class ReasonPlanActFlow(BaseWorkflow):
             Task:
                 The task after planning.
         """
+        # Reset the current thinking
+        current_thinking = 0
+        max_thinking = 3
         
-        # Plan the current task
-        while env.status == TaskStatus.CREATED:
-            env = await self.workflows["plan"].run(env)
+        # Tools description
+        tool_str = ""
+        for tool in self.tools.values():
+            tool_str += f"{ToolView(tool).format()}\n"
+        
+        # Plan the current task and check whether the planning result is correct
+        while env.status in [TaskStatus.CREATED, TaskStatus.CHECKING]: 
+            if env.status == TaskStatus.CREATED:
+                # Reset the current thinking
+                current_thinking = 0
+                # Plan the task
+                env = await self.workflows["plan"].run(env)
             
-            """ [[ ## Check if the planning flow is finished properly ## ]] """
-            # Observe the task
-            observe = await self.agent.observe(env)
-            # Log the observation
-            self.custom_logger.info(f"当前观察: \n{observe}")
-            # Think about the env task
-            message = CompletionMessage(
-                role=MessageRole.USER, 
-                content=RPA_CHECK_PROMPT.format(task_context=observe), 
-                stop_reason=StopReason.NONE, 
-            )
-            # Append the message to the task history
-            env.update(TaskStatus.CREATED, message)
-            
-            # Call for completion
-            message: CompletionMessage = await self.agent.think(
-                env.history[TaskStatus.CREATED], 
-                allow_tools=False, 
-                external_tools=self.tools, 
-            )
-            # Log the message
-            self.custom_logger.info(f"模型回复: \n{message.content}")
-            # Record the completion message
-            env.update(TaskStatus.CREATED, message)
-            
-            # Reset the current thinking
-            current_thinking = 0
-            max_thinking = 3
-            
-            # Extract the finish flag from the message, this will not be used for tool calling.
-            finish_flag = extract_by_label(message.content, "finish_flag", "finish flag", "finish")
-            if finish_flag is not None:
-                # Check if the finish flag is True
-                if finish_flag == "True":
-                    finish_flag = True
-                else:
-                    finish_flag = False
-            else:
-                finish_flag = False
-            
-            # Check the stop reason
-            if message.stop_reason == StopReason.TOOL_CALL:
-                # Traverse all the tool calls
-                for tool_call in message.tool_calls:
-                    # Reset the current thinking due to tool calling
-                    current_thinking = 0
-                    
-                    try:
-                        # Call the tool
-                        result = await self.call_tool(env, tool_call)
-                    except Exception as e:
-                        # Handle the unexpected error
-                        self.custom_logger.error(f"工具调用中出现了未知异常: \n{e}")
-                        raise e
-                    # Append the result to the task history
-                    env.update(TaskStatus.CREATED, result)
-                    
-            elif finish_flag:
-                # Set the task status to running
-                env.status = TaskStatus.RUNNING
-                # Break the loop
-                break
-            else:
-                # Update the current thinking due to no tool calling
-                current_thinking += 1
-                
-                # Check if the current thinking is greater than the max thinking
-                if current_thinking > max_thinking:
-                    # Announce the idle thinking
-                    message = CompletionMessage(
-                        role=MessageRole.USER, 
-                        content=f"【注意】：你已经达到了 {max_thinking} 次思考上限，你将会被强制退出循环。", 
-                        stop_reason=StopReason.NONE, 
-                    )
-                    # Append the message to the task history
-                    env.update(TaskStatus.CREATED, message)
-                    # No more thinking is allowed, break the loop
-                    self.custom_logger.error(f"连续思考上限达到，强制退出循环: \n{TaskContextView(env).format()}")
-                    break
-                
-                # Announce the idle thinking
+            ## Check if the planning flow is finished properly ##
+            elif env.status == TaskStatus.CHECKING:
+                # Observe the task
+                observe = await self.agent.observe(env)
+                # Log the observation
+                self.custom_logger.info(f"当前观察: \n{observe}")
+                # Think about the env task
                 message = CompletionMessage(
                     role=MessageRole.USER, 
-                    content=f"【注意】：你已经思考了 {current_thinking} 次，但是没有找到任何工具调用。在思考 {max_thinking} 次后，你将会被强制退出循环。", 
+                    content=RPA_CHECK_PROMPT.format(task_context=observe, tools=tool_str), 
                     stop_reason=StopReason.NONE, 
                 )
                 # Append the message to the task history
                 env.update(TaskStatus.CREATED, message)
+                
+                # Call for completion
+                message: CompletionMessage = await self.agent.think(
+                    env.history[TaskStatus.CREATED], 
+                    allow_tools=False, 
+                    external_tools=self.tools, 
+                )
+                # Log the message
+                self.custom_logger.info(f"模型回复: \n{message.content}")
+                # Record the completion message
+                env.update(TaskStatus.CREATED, message)
+                
+                # Extract the finish flag from the message, this will not be used for tool calling.
+                finish_flag = extract_by_label(message.content, "finish_flag", "finish flag", "finish")
+                if finish_flag is not None:
+                    # Check if the finish flag is True
+                    if finish_flag == "True":
+                        finish_flag = True
+                    else:
+                        finish_flag = False
+                else:
+                    finish_flag = False
+                
+                # Check the stop reason
+                if message.stop_reason == StopReason.TOOL_CALL:
+                    # Traverse all the tool calls
+                    for tool_call in message.tool_calls:
+                        # Reset the current thinking due to tool calling
+                        current_thinking = 0
+                        
+                        try:
+                            # Call the tool
+                            result = await self.call_tool(env, tool_call)
+                        except Exception as e:
+                            # Handle the unexpected error
+                            self.custom_logger.warning(f"工具调用中出现了未知异常: \n{e}")
+                            raise e
+                        # Append the result to the task history
+                        env.update(TaskStatus.CREATED, result)
+                        
+                elif finish_flag:
+                    # Set the task status to running recursively
+                    self.__set_running(env)
+                    # Break the loop
+                    break
+                else:
+                    # Update the current thinking due to no tool calling
+                    current_thinking += 1
+                    
+                    # Check if the current thinking is greater than the max thinking
+                    if current_thinking > max_thinking:
+                        # Announce the idle thinking
+                        message = CompletionMessage(
+                            role=MessageRole.USER, 
+                            content=f"【注意】：你已经达到了 {max_thinking} 次思考上限，你将会被强制退出循环。", 
+                            stop_reason=StopReason.NONE, 
+                        )
+                        # Append the message to the task history
+                        env.update(TaskStatus.CREATED, message)
+                        # No more thinking is allowed, break the loop
+                        self.custom_logger.warning(f"连续思考上限达到，强制设置任务状态为运行并退出循环: \n{TaskContextView(env).format()}")
+                        # Force the task status to running
+                        self.__set_running(env)
+                        # Break the loop
+                        break
+                    
+                    # Announce the idle thinking
+                    message = CompletionMessage(
+                        role=MessageRole.USER, 
+                        content=f"【注意】：你已经思考了 {current_thinking} 次，但是没有找到任何工具调用。在思考 {max_thinking} 次后，你将会被强制退出循环。", 
+                        stop_reason=StopReason.NONE, 
+                    )
+                    # Append the message to the task history
+                    env.update(TaskStatus.CREATED, message)
 
         return env
     
@@ -397,9 +421,11 @@ class ReasonPlanActFlow(BaseWorkflow):
         if env.detail_level == 0: 
             # This is a leaf task, no need to reason and plan
             return env
-            
-        # Reason about the task
-        env = await self.__reason(env)
+        
+        if env.status == TaskStatus.CREATED:
+            # Reason about the task
+            env = await self.__reason(env)
+        
         # Plan the task
         env = await self.__plan(env)
         return env
@@ -415,31 +441,26 @@ class ReasonPlanActFlow(BaseWorkflow):
             Task: 
                 The task after orchestrating and acting.
         """
-        if env.status == TaskStatus.CREATED:
-            # Reason about the task and create the blueprint
-            env = await self.__reason_and_plan(env)
-        
-        while env.status not in [TaskStatus.FINISHED, TaskStatus.FAILED, TaskStatus.CANCELLED]: 
+        while env.status not in [TaskStatus.FINISHED, TaskStatus.ERROR, TaskStatus.CANCELLED]:  
+            if env.status == TaskStatus.CREATED:
+                # Reason about the task and create the blueprint
+                env = await self.__reason_and_plan(env)
+            
             # Log the current task
-            self.custom_logger.info(f"\nReAct 正在执行任务: {env.question}")
+            self.custom_logger.info(f"\nReason Plan Act Flow 正在执行任务: {env.question}")
             
             try:
                 # Act the task from root
                 await self.workflows["action"].run(env)
-            except TaskCancelledError as e:
-                # The re-planning is needed, continue and re-plan the task
-                current = self.workflows["action"].context.get("task")
-                # Resume the temporary task context of the action flow
-                self.workflows["action"].context = self.workflows["action"].context.done()
-                current = await self.__plan(current)
-                # Resume the temporary blueprint context of the action flow
-                self.workflows["action"].context = self.workflows["action"].context.done()
-                continue
             except Exception as e:
                 # Unexpected error
                 self.custom_logger.error(f"Unexpected error: {e}")
                 raise e
             
+            if env.status == TaskStatus.CREATED:
+                # Clean up the answer of the env
+                env.answer = ""
+        
         return env
     
     async def call_tool(self, ctx: Task, tool_call: ToolCallRequest, **kwargs: dict) -> ToolCallResult:
@@ -491,15 +512,15 @@ class ReasonPlanActFlow(BaseWorkflow):
                 content="The plan is finished.",
             )
             
-        elif tool_call.name == "error_in_plan":
+        elif tool_call.name == "remove_task":
             try:
-                await self.tool_functions["error_in_plan"](**tool_call.args)
-                content = "The error is raised in the plan. The task will be re-planned."
+                await self.tool_functions["remove_task"](**tool_call.args)
+                content = "The sub-task is removed in the plan. "
                 is_error = False
             except Exception as e:
                 # Unexpected error
                 self.custom_logger.error(f"Unexpected error: {e}")
-                content = f"There is an unexpected error while calling the error_in_plan tool: {e}"
+                content = f"There is an unexpected error while calling the remove_task tool: {e}"
                 is_error = True
                 
             # Create a new result

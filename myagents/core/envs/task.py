@@ -64,10 +64,10 @@ class BaseTask(BaseModel):
         default_factory=lambda: {
             TaskStatus.CREATED: [],
             TaskStatus.PLANNING: [],
+            TaskStatus.CHECKING: [],
             TaskStatus.RUNNING: [],
             TaskStatus.FINISHED: [],
-            TaskStatus.FAILED: [],
-            TaskStatus.CANCELLED: [],
+            TaskStatus.ERROR: [],
         },
         description="The history of the status of the task. The key is the status of the task, and it indicates the state of the task. The value is a list of the history messages.", 
     )
@@ -102,6 +102,22 @@ class BaseTask(BaseModel):
         else:
             # Append the message directly
             self.history[status].append(message)
+            
+    def reset(self) -> None:
+        """Reset the task.
+        """
+        self.status = TaskStatus.CREATED
+        self.answer = ""
+        self.history = {
+            TaskStatus.CREATED: [], 
+            TaskStatus.PLANNING: [],
+            TaskStatus.CHECKING: [],
+            TaskStatus.RUNNING: [],
+            TaskStatus.FINISHED: [],
+            TaskStatus.ERROR: [],
+        }
+        # Delete the sub-tasks
+        self.sub_tasks = OrderedDict()
 
     
 class OKRTask(BaseTask):
@@ -145,37 +161,14 @@ class TaskContextView:
         """
         sub_tasks = []
         
-        # Check if the status is not finished, failed, or cancelled
-        if self.model.status == TaskStatus.CREATED:
-            # Return a created task view
-            view = CreatedTaskView(self.model).format()
-        elif self.model.status == TaskStatus.PLANNING:
-            # Return a planning task view
-            view = PlanningTaskView(self.model).format()
-            # Process the sub-tasks
-            for sub_task in self.model.sub_tasks.values():
-                sub_task_info = TaskContextView(sub_task).format(layer=layer-1)
-                # Update the indentation 
-                sub_task_info = re.sub(r'^', f"\t" * (layer-1), sub_task_info, flags=re.MULTILINE)
-                sub_tasks.append(sub_task_info)
-        elif self.model.status == TaskStatus.RUNNING:
-            # Return a running task view
-            view = RunningTaskView(self.model).format()
-            # Process the sub-tasks
-            for sub_task in self.model.sub_tasks.values():
-                sub_task_info = TaskContextView(sub_task).format(layer=layer-1)
-                # Update the indentation 
-                sub_task_info = re.sub(r'^', f"\t" * (layer-1), sub_task_info, flags=re.MULTILINE)
-                sub_tasks.append(sub_task_info)
-        elif self.model.status == TaskStatus.FINISHED:
-            # Return a finished task view
-            view = FinishedTaskView(self.model).format()
-        elif self.model.status == TaskStatus.FAILED:
-            # Return a failed task view
-            view = FailedTaskView(self.model).format()
-        elif self.model.status == TaskStatus.CANCELLED:
-            # Return a cancelled task view
-            view = CancelledTaskView(self.model).format()
+        # Return a markdown task view
+        view = MarkdownTaskView(self.model).format()
+        # Process the sub-tasks
+        for sub_task in self.model.sub_tasks.values():
+            sub_task_info = TaskContextView(sub_task).format(layer=layer-1)
+            # Update the indentation 
+            sub_task_info = re.sub(r'^', f"\t" * (layer-1), sub_task_info, flags=re.MULTILINE)
+            sub_tasks.append(sub_task_info)
             
         # Check if the sub-tasks is not empty
         if len(sub_tasks) > 0:
@@ -188,9 +181,8 @@ class TaskContextView:
         return view
     
 
-class CreatedTaskView(TaskView):
-    """CreatedTaskView is the view of the created task. This view is used to format the created task to a string.
-    This view is used to show the task information when the task is created. 
+class MarkdownTaskView(TaskView):
+    """MarkdownTaskView is the markdown type view of the task. 
     
     Attributes:
         model (Task):
@@ -199,142 +191,18 @@ class CreatedTaskView(TaskView):
             The template of the task view.
     """
     model: Task
-    template: str = """ - [ ] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}"""
+    template: str = """{status_value}{question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}"""
     
     def __init__(self, model: Task) -> None:
         self.model = model
         
     def format(self) -> str:
         return self.template.format(
+            status_value=self.model.status.value,
             question=self.model.question, 
             description=self.model.description, 
             status=self.model.status, 
             is_leaf=self.model.is_leaf, 
-        )
-
-
-class PlanningTaskView(TaskView):
-    """PlanningTaskView is the view of the planning task. This view is used to format the planning task to a string.
-    This view is used to show the task information when the task is planning. 
-    
-    Attributes:
-        model (Task):
-            The task to be viewed.
-        template (str):
-            The template of the task view.
-    """
-    model: Task
-    template: str = """ - [p] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}"""
-    
-    def __init__(self, model: Task) -> None:
-        self.model = model
-        
-    def format(self) -> str:
-        return self.template.format(
-            question=self.model.question, 
-            description=self.model.description, 
-            status=self.model.status, 
-            is_leaf=self.model.is_leaf, 
-        )
-    
-    
-class RunningTaskView(TaskView):
-    """RunningTaskView is the view of the running task. This view is used to format the running task to a string.
-    This view is used to show the task information when the task is running. 
-    
-    Attributes:
-        model (Task):
-            The task to be viewed.
-        template (str):
-            The template of the task view.
-    """
-    model: Task
-    template: str = """ - [r] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}"""
-    
-    def __init__(self, model: Task) -> None:
-        self.model = model
-        
-    def format(self) -> str:
-        return self.template.format(
-            question=self.model.question, 
-            description=self.model.description, 
-            status=self.model.status, 
-            is_leaf=self.model.is_leaf, 
-        )
-
-
-class FinishedTaskView(TaskView):
-    """FinishedTaskView is the view of the finished task. This view is used to format the finished task to a string.
-    This view is used to show the task information when the task is finished. 
-    Attributes:
-        model (Task):
-            The task to be viewed.
-        template (str):
-            The template of the task view.
-    """
-    model: Task
-    template: str = """ - [x] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}\n\t - 答案: {answer}"""
-    
-    def __init__(self, model: Task) -> None:
-        self.model = model
-        
-    def format(self) -> str:
-        return self.template.format(
-            question=self.model.question, 
-            description=self.model.description, 
-            status=self.model.status, 
-            is_leaf=self.model.is_leaf, 
-            answer=self.model.answer, 
-        )
-
-    
-class FailedTaskView(TaskView):
-    """FailedTaskView is the view of the failed task. This view is used to format the failed task to a string.
-    
-    Attributes:
-        model (Task):
-            The task to be viewed.
-        template (str):
-            The template of the task view.
-    """
-    model: Task
-    template: str = """ - [f] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}\n\t - 失败原因: {failed_reason}"""
-    
-    def __init__(self, model: Task) -> None:
-        self.model = model
-        
-    def format(self) -> str:
-        return self.template.format(
-            question=self.model.question, 
-            description=self.model.description, 
-            status=self.model.status, 
-            is_leaf=self.model.is_leaf, 
-            failed_reason=self.model.answer, 
-        )
-
-
-class CancelledTaskView(TaskView):
-    """CancelledTaskView is the view of the cancelled task. This view is used to format the cancelled task to a string.
-    
-    Attributes:
-        model (Task):
-            The task to be viewed.
-        template (str):
-            The template of the task view.
-    """
-    model: Task
-    template: str = """ - [c] {question}\n\t - 描述: {description}\n\t - 任务状态: {status}\n\t - 是否叶子: {is_leaf}\n\t - 取消原因: {cancelled_reason}"""
-    
-    def __init__(self, model: Task) -> None:
-        self.model = model
-        
-    def format(self) -> str:
-        return self.template.format(
-            question=self.model.question, 
-            description=self.model.description, 
-            status=self.model.status, 
-            is_leaf=self.model.is_leaf, 
-            cancelled_reason=self.model.answer, 
         )
 
 
@@ -350,13 +218,24 @@ class TaskAnswerView(TaskView):
     def __init__(self, model: Task) -> None:
         self.model = model
         
-    def format(self) -> str:
-        # Concatenate the answer of the sub-tasks and questions directly
-        answer = [] 
-        for question, sub_task in self.model.sub_tasks.items():
-            answer.append(f"# {question}")
-            # Increase header level by adding one more # to existing headers
-            sub_answer = re.sub(r'^(#+)\s', r'#\1 ', sub_task.answer, flags=re.MULTILINE)
-            answer.append(sub_answer)
-        answer = "\n\n".join(answer)
+    def format(self, layer: int = 3) -> str:
+        answer = self.model.answer if self.model.answer else "The task is not finished."
+        # Add the question and answer of the current task
+        answer = f"# {self.model.question}\n\n{answer}"
+        
+        if not self.model.is_leaf and layer > 0:
+            sub_answers = [] 
+            
+            # Traverse the sub-tasks and format the question and answer of the sub-tasks
+            for sub_task in self.model.sub_tasks.values():
+                # Get the sub-task answer recursively
+                sub_answer = TaskAnswerView(sub_task).format(layer=layer-1)
+                # Increase header level by adding one more # to existing headers
+                sub_answer = re.sub(r'^(#+)', r'#\1', sub_answer, flags=re.MULTILINE)
+                sub_answers.append(sub_answer)
+
+            # Concatenate the answer of the sub-tasks and questions directly
+            sub_answer = "\n\n".join(sub_answers)
+            answer = f"{answer}\n\n{sub_answer}"
+        
         return answer

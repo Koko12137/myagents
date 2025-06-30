@@ -25,6 +25,8 @@ class BaseWorkflow(Workflow, metaclass=ABCMeta):
     """BaseWorkflow is the base class for all the workflows.
     
     Attributes:
+        system_prompt (str):
+            The system prompt of the workflow. This is used to set the system prompt of the workflow. 
         agent (Agent):
             The agent. 
         debug (bool, defaults to False):
@@ -41,6 +43,7 @@ class BaseWorkflow(Workflow, metaclass=ABCMeta):
         workflows (dict[str, Workflow]):
             The workflows of the workflow.
     """
+    system_prompt: str
     agent: Agent
     debug: bool
     custom_logger: Logger
@@ -83,6 +86,8 @@ class BaseWorkflow(Workflow, metaclass=ABCMeta):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # Initialize the workflow components
+        self.system_prompt = kwargs.get("system_prompt", "")
         self.agent = agent
         self.custom_logger = custom_logger
         self.debug = debug
