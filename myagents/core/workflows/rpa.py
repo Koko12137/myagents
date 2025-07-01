@@ -329,19 +329,21 @@ class ReasonPlanActFlow(BaseWorkflow):
                     # Announce the idle thinking
                     message = CompletionMessage(
                         role=MessageRole.USER, 
-                        content=f"【注意】：你已经达到了 {max_thinking} 次思考上限，你将会被强制退出循环。", 
+                        content=f"【注意】：你已经达到了 {max_thinking} 次思考上限，蓝图未找到，任务执行失败。", 
                         stop_reason=StopReason.NONE, 
                     )
                     # Append the message to the task history
                     env.update(TaskStatus.CREATED, message)
+                    # Log the message
+                    self.custom_logger.critical(f"模型的连续 {max_thinking} 次思考中没有找到规划蓝图，任务执行失败。")
                     # No more thinking is allowed, raise an error
                     raise RuntimeError("No orchestration blueprint was found in <orchestration> tags for 3 times thinking.")
                 
                 # No blueprint is found, create an error message
                 message = CompletionMessage(
                     role=MessageRole.USER, 
-                    content=f"没有在<orchestration>标签中找到规划蓝图。请重新规划。你已经思考了 {current_thinking} 次，" \
-                        f"在思考 {max_thinking} 次后，你将会被强制退出循环。下一步你必须给出规划蓝图，否则你将会被惩罚。", 
+                    content=f"没有在<orchestration>标签中找到规划蓝图。请将你的规划放到<orchestration>标签中。你已经思考了 {current_thinking} 次，" \
+                        f"在最多思考 {max_thinking} 次后，任务会直接失败。下一步你必须给出规划蓝图，否则你将会被惩罚。", 
                     stop_reason=StopReason.NONE, 
                 )
                 # Append the error message to the task history
@@ -453,7 +455,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                         # Announce the idle thinking
                         message = CompletionMessage(
                             role=MessageRole.USER, 
-                            content=f"【注意】：你已经达到了 {max_thinking} 次思考上限，你将会被强制退出循环。", 
+                            content=f"【注意】：你已经达到了 {max_thinking} 次思考上限，你将会被强制退出循环，并被惩罚。", 
                             stop_reason=StopReason.NONE, 
                         )
                         # Append the message to the task history
@@ -479,7 +481,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                     # Announce the error
                     message = CompletionMessage(
                         role=MessageRole.USER, 
-                        content=f"【注意】：你已经达到了 {max_error} 次错误上限，你将会被强制退出循环。", 
+                        content=f"【注意】：你已经达到了 {max_error} 次错误上限，你将会被强制退出循环，并被惩罚。", 
                         stop_reason=StopReason.NONE, 
                     )
                     # Append the message to the task history
@@ -534,7 +536,7 @@ class ReasonPlanActFlow(BaseWorkflow):
             
             try:
                 # Act the task from root
-                await self.workflows["action"].run(env)
+                env = await self.workflows["action"].run(env)
             except Exception as e:
                 # Unexpected error
                 self.custom_logger.error(f"Unexpected error: {e}")

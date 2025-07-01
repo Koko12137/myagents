@@ -119,6 +119,12 @@ class ActionFlow(BaseWorkflow):
             ValueError:
                 If more than one tool calling is required. 
         """
+        # Check if the task is RUNNING
+        if task.status != TaskStatus.RUNNING:
+            # The task is not running, return the task
+            self.custom_logger.warning(f"任务 {task.question} 不是运行状态，直接返回: \n{TaskContextView(task).format()}")
+            return task
+        
         # Get the blueprint from the context
         blueprint = self.context.get("blueprint")
         # Get the task from the context
@@ -356,8 +362,6 @@ class ActionFlow(BaseWorkflow):
         Returns:
             Task: The acted task.
         """
-        # Record the sub-tasks is finished
-        sub_tasks_finished = []
         # Unfinished sub-tasks
         unfinished_sub_tasks = iter(task.sub_tasks.values())
         # Get the first unfinished sub-task
@@ -444,8 +448,6 @@ class ActionFlow(BaseWorkflow):
             
             # Check if the sub-task is finished, if True, then summarize the result of the sub-task
             elif sub_task.status == TaskStatus.FINISHED:
-                # The sub-task is finished, then add the sub-task to the finished list
-                sub_tasks_finished.append(sub_task)
                 # Log the finished sub-task
                 self.custom_logger.info(f"子任务执行完成: \n{TaskContextView(sub_task).format()}")
                 # Get the next unfinished sub-task
@@ -455,13 +457,6 @@ class ActionFlow(BaseWorkflow):
             else:
                 # The sub-task is not created, running, failed, cancelled, or finished, then raise an error
                 raise ValueError(f"The status of the sub-task is invalid in action flow: {sub_task.status}")
-        
-        # There are some errors in the sub-tasks, then raise an error to call for re-planning
-        if len(sub_tasks_finished) == 0 and not task.is_leaf:
-            # No sub-tasks are finished, the task is cancelled
-            task.status = TaskStatus.CANCELLED
-            # Log the roll back
-            self.custom_logger.error(f"任务执行失败: \n{TaskContextView(task).format()}")
             
         # Post traverse the task
         # All the sub-tasks are finished, then call the action flow to act the task

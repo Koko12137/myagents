@@ -373,6 +373,13 @@ class Query(BaseEnvironment):
         # Run the react flow
         task = await self.workflows["rpa"].run(task)
         
+        # Check the task status
+        if task.status != TaskStatus.FINISHED:
+            # Log the error
+            self.custom_logger.critical(f"Task {task.question} is not finished.")
+            # Raise the error
+            raise RuntimeError(f"Task {task.question} is not finished.")
+        
         # Check the output type
         if output_type == OutputType.SUMMARY:
             # Set the answer view of the task as the output history
