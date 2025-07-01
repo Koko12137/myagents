@@ -1,6 +1,7 @@
 import os
 import getpass
 import json
+from asyncio import Queue
 from typing import Optional, Union
 
 from loguru import logger
@@ -121,6 +122,9 @@ class OpenAiLLM(LLM):
         messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
         available_tools: Optional[list[dict[str, str]]] = None, 
         tool_choice: Union[str, FastMcpTool] = "auto",
+        stream: bool = False, 
+        queue: Optional[Queue] = None, 
+        **kwargs, 
     ) -> CompletionMessage:
         """Completion the messages.
 
@@ -172,6 +176,7 @@ class OpenAiLLM(LLM):
             messages=history,
             temperature=self.temperature,
             tools=available_tools, 
+            parallel_tool_calls=True, 
             **kwargs, 
         )
         content = response.choices[0].message.content

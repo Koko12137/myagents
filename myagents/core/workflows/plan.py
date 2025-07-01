@@ -288,17 +288,6 @@ class PlanFlow(BaseWorkflow):
                     try:
                         # Call the tool
                         tool_result = await self.call_tool(task, tool_call)
-                        
-                    except ValueError as e:
-                        # Handle the error
-                        tool_result = ToolCallResult(
-                            tool_call_id=tool_call.id, 
-                            is_error=True, 
-                            content=f"工具调用 {tool_call.name} 失败: \n{e}", 
-                        )
-                        # Handle the error and update the task status
-                        self.custom_logger.warning(f"工具调用 {tool_call.name} 失败: \n{e}")
-                    
                     except Exception as e:
                         # Handle the unexpected error
                         self.custom_logger.error(f"工具调用中出现了未知异常: \n{e}")
@@ -315,6 +304,7 @@ class PlanFlow(BaseWorkflow):
             else:
                 # Update the current thinking
                 current_thinking += 1
+                self.custom_logger.info(f"当前思考次数: {current_thinking}/{max_thinking}")
             
                 # Check if the current thinking is greater than the max thinking
                 if current_thinking > max_thinking:
@@ -354,6 +344,8 @@ class PlanFlow(BaseWorkflow):
                 # Double check the planning result
                 if len(task.sub_tasks) == 0 and not task.is_leaf:
                     current_error += 1
+                    self.custom_logger.info(f"当前错误次数: {current_error}/{max_error}")
+                    
                     # Check if the current error is greater than the max error
                     if current_error >= max_error:
                         # The planning is error, roll back the task status to planning
@@ -563,7 +555,7 @@ class PlanFlow(BaseWorkflow):
                 self.custom_logger.info(f"Tool call {tool_call.name} finished.\n {tool_result.content}")
                 
             else:
-                # Error
+                # Unknown tool call name
                 raise ValueError(f"Unknown tool call name: {tool_call.name} in plan flow.")
         
         except Exception as e:
@@ -571,10 +563,10 @@ class PlanFlow(BaseWorkflow):
             tool_result = ToolCallResult(
                 tool_call_id=tool_call.id, 
                 is_error=True, 
-                content=f"Tool call {tool_call.name} failed with information: {e}", 
+                content=f"工具调用 {tool_call.name} 失败，错误信息: \n{e}", 
             )
-            # Log the error
-            self.custom_logger.error(f"Tool call {tool_call.name} failed with information: {e}")
+            # Handle the error and update the task status
+            self.custom_logger.warning(f"工具调用 {tool_call.name} 失败，错误信息: \n{e}")
         finally:
             # Done the current context
             self.context = self.context.done()

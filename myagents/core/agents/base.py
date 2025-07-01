@@ -1,7 +1,7 @@
 import traceback
 from uuid import uuid4
 from typing import overload, Union, Optional
-from asyncio import Lock
+from asyncio import Lock, Queue
 
 from loguru import logger
 from fastmcp import Client as MCPClient
@@ -567,7 +567,9 @@ class BaseAgent(Agent):
         observe: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
         allow_tools: bool, 
         external_tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
-        tool_choice: str = "auto",
+        tool_choice: str = "auto", 
+        stream: bool = False, 
+        queue: Optional[Queue] = None, 
         **kwargs, 
     ) -> CompletionMessage:
         """Think about the environment.
@@ -607,6 +609,8 @@ class BaseAgent(Agent):
             observe, 
             available_tools=available_tools, 
             tool_choice=tool_choice, 
+            stream=stream, 
+            queue=queue, 
             **kwargs
         )
         

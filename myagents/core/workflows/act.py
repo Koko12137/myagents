@@ -148,7 +148,6 @@ class ActionFlow(BaseWorkflow):
         max_thinking = 3
         current_thinking = 0
         
-        answer = ""
         while task.status == TaskStatus.RUNNING:
             # Observe the task
             observe = await self.agent.observe(task)
@@ -168,9 +167,6 @@ class ActionFlow(BaseWorkflow):
             self.custom_logger.info(f"模型回复: \n{message.content}")
             # Record the completion message
             task.update(TaskStatus.RUNNING, message)
-                
-            # Extract the answer from the message
-            answer = extract_by_label(message.content, "answer", "final answer", "final_answer")
             
             # Check the stop reason
             if message.stop_reason == StopReason.TOOL_CALL:
@@ -267,7 +263,7 @@ class ActionFlow(BaseWorkflow):
             
             # Extract the finish flag from the message, this will not be used for tool calling.
             finish_flag = extract_by_label(message.content, "finish_flag", "finish flag", "finish")
-            if finish_flag is not None:
+            if finish_flag != "":
                 # Check if the finish flag is True
                 if finish_flag == "True":
                     finish_flag = True
@@ -275,44 +271,40 @@ class ActionFlow(BaseWorkflow):
                     finish_flag = False
             else:
                 finish_flag = False
+            
+            # Extract the final output from the message
+            final_output = extract_by_label(message.content, "final_output", "final answer", "output", "answer")
+            if final_output != "":
+                # Set the answer of the task
+                task.answer = final_output
+            
+            # Check if the task is finished
+            if finish_flag:
+                # Set the task status to finished if the task is running else keep the status
+                task.status = TaskStatus.FINISHED if task.status == TaskStatus.RUNNING else task.status
+                # Force the loop to break
+                break
                 
-            if message.stop_reason == StopReason.TOOL_CALL:
+            elif message.stop_reason == StopReason.TOOL_CALL:
                 # Reset the current thinking
                 current_thinking = 0
                 # Get the first tool call
                 tool_call = message.tool_calls[0]
                 
-                try:
-                    # Call the tool
-                    tool_result = await self.call_tool(task, tool_call)
-                except Exception as e:
-                    # Error caused by the workflow tools. 
-                    tool_result = ToolCallResult(
-                        tool_call_id=tool_call.id, 
-                        is_error=True, 
-                        content=e
-                    )
-                    self.custom_logger.warning(f"工具调用 {tool_call.name} 失败: \n{tool_result.content}")
+                # Call the tool
+                tool_result = await self.call_tool(task, tool_call)
                 
                 # Update the messages
                 task.update(TaskStatus.RUNNING, tool_result)
             
             # Check if the task is cancelled
-            elif task.status == TaskStatus.CANCELLED:
+            if task.status == TaskStatus.CANCELLED:
                 # The task is cancelled, end the workflow
-                break
-                
-            elif finish_flag:
-                # Set the task status to finished if the task is running else keep the status
-                task.status = TaskStatus.FINISHED if task.status == TaskStatus.RUNNING else task.status
-                # Force the loop to break
                 break
         
         # Set the answer of the task
-        if not answer and not task.answer:
+        if not task.answer: 
             task.answer = "任务执行结束，但未提供答案，执行可能存在未知错误。"
-        elif not task.answer: 
-            task.answer = answer
             
         # Log the answer
         self.custom_logger.info(f"任务执行结束: \n{TaskContextView(task).format()}")

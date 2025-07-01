@@ -139,15 +139,18 @@ class ReasonPlanActFlow(BaseWorkflow):
             return
         
         @self.register_tool("remove_task")
-        async def remove_task(question_path: list[str], reason: str) -> None:
+        async def remove_task(question_path: list[str], reason: str, fuzzy_match: bool = True) -> None:
             """
             删除当前任务特定路径指向的子任务。你仅需要在发现任何子任务的规划存在问题时，才需要调用这个工具。
             
             Args:
                 question_path (list[str]):
-                    需要删除的子任务的问答路径。这个路径将会被用于找到具有相同问题的子任务。第一个元素应该是根任务的问题，下一个元素应该是导航到子任务的下一个层级。
+                    需要删除的子任务的问答路径。这个路径将会被用于找到具有相同问题的子任务。比如：
+                    ["目标Objective 1", "目标Objective 1.1", "目标Objective 1.1.1"]，这里"目标Objective 1.1.1"会被删除。
                 reason (str):
                     删除子任务的原因。
+                fuzzy_match (bool, optional):
+                    是否使用模糊匹配。默认为True。如果为True，会使用编辑距离计算每个子任务问题和question_path当前值的差异，选取编辑距离最小的进行删除。
             
             Returns:
                 None
@@ -155,29 +158,106 @@ class ReasonPlanActFlow(BaseWorkflow):
             Raises:
                 KeyError:
                     如果问答路径没有在任务中找到。
+                ValueError:
+                    如果问答路径的第一个问题与根任务的问题不一致。
+                IndexError:
+                    如果问答路径为空。
             """
-            task = self.context.get("task")
-            # Check if the length of the question path is greater than the detail level
-            if len(question_path) > task.detail_level:
-                raise ValueError(f"The length of the question path is greater than the detail level: {len(question_path)} > {task.detail_level}")
+            def levenshtein_distance(s1: str, s2: str) -> int:
+                """计算两个字符串的编辑距离（Levenshtein距离）"""
+                if len(s1) < len(s2):
+                    return levenshtein_distance(s2, s1)
+                
+                if len(s2) == 0:
+                    return len(s1)
+                
+                previous_row = list(range(len(s2) + 1))
+                for i, c1 in enumerate(s1):
+                    current_row = [i + 1]
+                    for j, c2 in enumerate(s2):
+                        insertions = previous_row[j + 1] + 1
+                        deletions = current_row[j] + 1
+                        substitutions = previous_row[j] + (c1 != c2)
+                        current_row.append(min(insertions, deletions, substitutions))
+                    previous_row = current_row
+                
+                return previous_row[-1]
             
+            def find_best_match(target: str, candidates: dict[str, Task]) -> tuple[str, Task]:
+                """在候选任务中找到与目标字符串编辑距离最小的任务"""
+                if not candidates:
+                    raise KeyError(f"No sub-tasks found to match with '{target}'")
+                
+                best_match = None
+                min_distance = float('inf')
+                
+                for question, task in candidates.items():
+                    distance = levenshtein_distance(target, question)
+                    if distance < min_distance:
+                        min_distance = distance
+                        best_match = (question, task)
+                
+                return best_match
+            
+            task = self.context.get("task")
+            
+            # Check if the first question is the root task question
             if question_path[0] == task.question:
                 question_path = question_path[1:]
-
+            elif len(question_path) == 0:
+                raise IndexError("The question path is empty.")
+            
+            # Store the actual matched questions for deletion
+            actual_matched_questions = []
+            
             # Traverse the question path and find the sub-task that has the same question
-            for question in question_path:
-                task = task.sub_tasks[question]
+            for i, question in enumerate(question_path):
+                if fuzzy_match and task.sub_tasks:
+                    # Use fuzzy matching to find the best match
+                    try:
+                        matched_question, matched_task = find_best_match(question, task.sub_tasks)
+                        self.custom_logger.info(f"模糊匹配: 目标='{question}', 最佳匹配='{matched_question}', 编辑距离={levenshtein_distance(question, matched_question)}")
+                        task = matched_task
+                        # Store the actual matched question for later deletion
+                        actual_matched_questions.append(matched_question)
+                    except KeyError:
+                        # If no sub-tasks found, fall back to exact matching
+                        if question not in task.sub_tasks:
+                            raise KeyError(f"Question '{question}' not found in sub-tasks and no fuzzy match available.")
+                        task = task.sub_tasks[question]
+                        actual_matched_questions.append(question)
+                else:
+                    # Use exact matching
+                    if question not in task.sub_tasks:
+                        raise KeyError(f"Question '{question}' not found in sub-tasks.")
+                    task = task.sub_tasks[question]
+                    actual_matched_questions.append(question)
+                
+                # Reset the status to created
+                task.status = TaskStatus.CREATED
             
             # Get the parent task
             parent_task = task.parent
-            # Remove the task
-            del task.parent.sub_tasks[question]
+            # Remove the task using the actual matched question
+            actual_question_to_remove = actual_matched_questions[-1]
+            del task.parent.sub_tasks[actual_question_to_remove]
             
             """ [[ ## Announce the removal to the parent task ## ]] """
             # Append the removal message to the task history
             parent_task.update(TaskStatus.PLANNING, CompletionMessage(
                 role=MessageRole.USER, 
-                content=f"Error in the planning: {reason}, the sub-task {task.question} is removed.", 
+                content=f"Error in the planning: {reason}, the sub-task {actual_question_to_remove} is removed.", 
+                stop_reason=StopReason.NONE, 
+            ))
+            
+            # Set the task to the current task
+            task = self.context.get("task")
+            # Reset the status to created
+            task.status = TaskStatus.CREATED
+            # Append the removal message to the task history
+            task.update(TaskStatus.CREATED, CompletionMessage(
+                role=MessageRole.USER, 
+                content=f"The sub-task {actual_question_to_remove} is removed. Reason: {reason}", 
                 stop_reason=StopReason.NONE, 
             ))
             return
@@ -302,14 +382,20 @@ class ReasonPlanActFlow(BaseWorkflow):
             Task:
                 The task after planning.
         """
-        # Reset the current thinking
+        # Record the current thinking and the max thinking
         current_thinking = 0
         max_thinking = 3
+        # Record the current error and the max error
+        current_error = 0
+        max_error = 3
         
         # Tools description
         tool_str = ""
-        for tool in self.tools.values():
+        for name, tool in self.tools.items():
+            if name == "retry_task": # NOTE: retry_task is not a tool for planning, it is a tool for acting.
+                continue
             tool_str += f"{ToolView(tool).format()}\n"
+        special_tools = {k: v for k, v in self.tools.items() if k != "retry_task"}
         
         # Plan the current task and check whether the planning result is correct
         while env.status in [TaskStatus.CREATED, TaskStatus.CHECKING]: 
@@ -338,7 +424,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                 message: CompletionMessage = await self.agent.think(
                     env.history[TaskStatus.CREATED], 
                     allow_tools=False, 
-                    external_tools=self.tools, 
+                    external_tools=special_tools, 
                 )
                 # Log the message
                 self.custom_logger.info(f"模型回复: \n{message.content}")
@@ -363,13 +449,13 @@ class ReasonPlanActFlow(BaseWorkflow):
                         # Reset the current thinking due to tool calling
                         current_thinking = 0
                         
-                        try:
-                            # Call the tool
-                            result = await self.call_tool(env, tool_call)
-                        except Exception as e:
-                            # Handle the unexpected error
-                            self.custom_logger.warning(f"工具调用中出现了未知异常: \n{e}")
-                            raise e
+                        # Call the tool
+                        result = await self.call_tool(env, tool_call)
+                        
+                        if result.is_error:
+                            # Update the current error
+                            current_error += 1
+                        
                         # Append the result to the task history
                         env.update(TaskStatus.CREATED, result)
                         
@@ -407,6 +493,23 @@ class ReasonPlanActFlow(BaseWorkflow):
                     )
                     # Append the message to the task history
                     env.update(TaskStatus.CREATED, message)
+                    
+                # Check if the current error is greater than the max error
+                if current_error > max_error:
+                    # Announce the error
+                    message = CompletionMessage(
+                        role=MessageRole.USER, 
+                        content=f"【注意】：你已经达到了 {max_error} 次错误上限，你将会被强制退出循环。", 
+                        stop_reason=StopReason.NONE, 
+                    )
+                    # Append the message to the task history
+                    env.update(TaskStatus.CREATED, message)
+                    # No more error is allowed, break the loop
+                    self.custom_logger.warning(f"连续错误上限达到，强制设置任务状态为运行并退出循环: \n{TaskContextView(env).format()}")
+                    # Force the task status to running
+                    self.__set_running(env)
+                    # Break the loop
+                    break
 
         return env
     
@@ -485,53 +588,51 @@ class ReasonPlanActFlow(BaseWorkflow):
         # Log the tool call
         self.custom_logger.info(f"Tool calling {tool_call.name} with arguments: {tool_call.args}.")
         
-        # Check if the tool is maintained by the workflow
-        if tool_call.name not in self.tools:
-            raise ValueError(f"Unknown tool call name: {tool_call.name}, react flow allow only react tools.")
-        
         # Create a new context
         self.context = self.context.create_next(task=ctx, **kwargs)
         
-        if tool_call.name == "retry_task":
-            await self.tool_functions["retry_task"]()
-        
-            # Create a new result
-            result = ToolCallResult(
-                tool_call_id=tool_call.id, 
-                is_error=False, 
-                content="The task is retried.",
-            )
+        try:
+            if tool_call.name == "retry_task":
+                await self.tool_functions["retry_task"]()
             
-        elif tool_call.name == "finish_plan":
-            await self.tool_functions["finish_plan"]()
-            
-            # Create a new result
-            result = ToolCallResult(
-                tool_call_id=tool_call.id, 
-                is_error=False, 
-                content="The plan is finished.",
-            )
-            
-        elif tool_call.name == "remove_task":
-            try:
-                await self.tool_functions["remove_task"](**tool_call.args)
-                content = "The sub-task is removed in the plan. "
-                is_error = False
-            except Exception as e:
-                # Unexpected error
-                self.custom_logger.error(f"Unexpected error: {e}")
-                content = f"There is an unexpected error while calling the remove_task tool: {e}"
-                is_error = True
+                # Create a new result
+                result = ToolCallResult(
+                    tool_call_id=tool_call.id, 
+                    is_error=False, 
+                    content="The task is retried.",
+                )
                 
-            # Create a new result
+            elif tool_call.name == "finish_plan":
+                await self.tool_functions["finish_plan"]()
+                
+                # Create a new result
+                result = ToolCallResult(
+                    tool_call_id=tool_call.id, 
+                    is_error=False, 
+                    content="The plan is finished.",
+                )
+                
+            elif tool_call.name == "remove_task":
+                await self.tool_functions["remove_task"](**tool_call.args)
+                    
+                # Create a new result
+                result = ToolCallResult(
+                    tool_call_id=tool_call.id, 
+                    is_error=False, 
+                    content="The sub-task is removed.",
+                )
+        
+        except Exception as e:
+            # Unexpected error
+            self.custom_logger.error(f"Unexpected error: {e}, traceback: \n{format_exc()}")
             result = ToolCallResult(
                 tool_call_id=tool_call.id, 
-                is_error=is_error, 
-                content=content,
+                is_error=True, 
+                content=f"Unexpected error: {e}",
             )
-            
-        # Done the current context
-        self.context = self.context.done()
+        finally:
+            # Done the current context
+            self.context = self.context.done()
         
         # Return the result
         return result

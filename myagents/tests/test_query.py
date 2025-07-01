@@ -35,8 +35,8 @@ async def test_async_query():
     
     # Run the query
     answer = await query.run(
-        question=data[0]["question"], 
-        description="请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A/B/C/D中的一个。", 
+        question="请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A,B,C,D中的一个", 
+        description=data[0]["question"],
         output_type=OutputType.SELECTION,
     )
     print("-" * 100)
