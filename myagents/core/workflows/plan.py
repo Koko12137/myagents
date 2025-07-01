@@ -11,6 +11,7 @@ from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.envs.task import BaseTask, TaskContextView
 from myagents.core.utils.tools import ToolView
 from myagents.core.utils.extractor import extract_by_label
+from myagents.core.utils.strings import normalize_string
 from myagents.prompts.workflows.plan import PLAN_ATTENTION_PROMPT, EXEC_PLAN_PROMPT, PLAN_SYSTEM_PROMPT
 
 
@@ -98,6 +99,9 @@ class PlanFlow(BaseWorkflow):
                 Task: 
                     已创建的子任务。 
             """
+            # Normalize the question and description
+            question = normalize_string(question)
+            description = normalize_string(description)
             
             # Get the parent task from the context
             parent = self.context.get("task")
@@ -268,7 +272,7 @@ class PlanFlow(BaseWorkflow):
             
             # Extract the finish flag from the message, this will not be used for tool calling.
             finish_flag = extract_by_label(message.content, "finish_flag", "finish flag", "finish")
-            if finish_flag is not None:
+            if finish_flag != "":
                 # Extract the finish flag
                 # Check if the finish flag is True
                 if finish_flag == "True":

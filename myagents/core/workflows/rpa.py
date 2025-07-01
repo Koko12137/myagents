@@ -10,6 +10,7 @@ from myagents.core.message import ToolCallRequest, ToolCallResult, MessageRole, 
 from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.utils.tools import ToolView
 from myagents.core.utils.extractor import extract_by_label
+from myagents.core.utils.strings import find_best_match, levenshtein_distance, safe_string_compare
 from myagents.prompts.workflows.rpa import RPA_CHECK_PROMPT, RPA_PLAN_PROMPT
 
 
@@ -150,7 +151,8 @@ class ReasonPlanActFlow(BaseWorkflow):
                 reason (str):
                     删除子任务的原因。
                 fuzzy_match (bool, optional):
-                    是否使用模糊匹配。默认为True。如果为True，会使用编辑距离计算每个子任务问题和question_path当前值的差异，选取编辑距离最小的进行删除。
+                    是否使用模糊匹配。默认为True。如果为True，会使用编辑距离计算每个子任务问题和question_path当前值的差异，
+                    选取编辑距离最小的进行删除。如果question_path中含有非法字符，一定要使用模糊匹配，否则无法删除。
             
             Returns:
                 None
@@ -163,42 +165,6 @@ class ReasonPlanActFlow(BaseWorkflow):
                 IndexError:
                     如果问答路径为空。
             """
-            def levenshtein_distance(s1: str, s2: str) -> int:
-                """计算两个字符串的编辑距离（Levenshtein距离）"""
-                if len(s1) < len(s2):
-                    return levenshtein_distance(s2, s1)
-                
-                if len(s2) == 0:
-                    return len(s1)
-                
-                previous_row = list(range(len(s2) + 1))
-                for i, c1 in enumerate(s1):
-                    current_row = [i + 1]
-                    for j, c2 in enumerate(s2):
-                        insertions = previous_row[j + 1] + 1
-                        deletions = current_row[j] + 1
-                        substitutions = previous_row[j] + (c1 != c2)
-                        current_row.append(min(insertions, deletions, substitutions))
-                    previous_row = current_row
-                
-                return previous_row[-1]
-            
-            def find_best_match(target: str, candidates: dict[str, Task]) -> tuple[str, Task]:
-                """在候选任务中找到与目标字符串编辑距离最小的任务"""
-                if not candidates:
-                    raise KeyError(f"No sub-tasks found to match with '{target}'")
-                
-                best_match = None
-                min_distance = float('inf')
-                
-                for question, task in candidates.items():
-                    distance = levenshtein_distance(target, question)
-                    if distance < min_distance:
-                        min_distance = distance
-                        best_match = (question, task)
-                
-                return best_match
-            
             task = self.context.get("task")
             
             # Check if the first question is the root task question
@@ -215,23 +181,37 @@ class ReasonPlanActFlow(BaseWorkflow):
                 if fuzzy_match and task.sub_tasks:
                     # Use fuzzy matching to find the best match
                     try:
-                        matched_question, matched_task = find_best_match(question, task.sub_tasks)
-                        self.custom_logger.info(f"模糊匹配: 目标='{question}', 最佳匹配='{matched_question}', 编辑距离={levenshtein_distance(question, matched_question)}")
+                        matched_question = find_best_match(question, task.sub_tasks.keys())
+                        matched_task = task.sub_tasks[matched_question]
+                        distance = levenshtein_distance(question, matched_question)
+                        self.custom_logger.info(f"模糊匹配: 目标='{question}', 最佳匹配='{matched_question}', 编辑距离={distance}")
+                        
+                        # 如果编辑距离过大，给出警告
+                        if distance > len(question) * 0.5:  # 如果编辑距离超过原字符串长度的一半
+                            self.custom_logger.warning(f"编辑距离较大 ({distance})，请确认匹配是否正确")
+                        
                         task = matched_task
                         # Store the actual matched question for later deletion
                         actual_matched_questions.append(matched_question)
-                    except KeyError:
+                    except KeyError as e:
                         # If no sub-tasks found, fall back to exact matching
+                        self.custom_logger.warning(f"模糊匹配失败: {e}, 尝试精确匹配")
                         if question not in task.sub_tasks:
                             raise KeyError(f"Question '{question}' not found in sub-tasks and no fuzzy match available.")
                         task = task.sub_tasks[question]
                         actual_matched_questions.append(question)
                 else:
-                    # Use exact matching
-                    if question not in task.sub_tasks:
+                    # Use exact matching with safe string comparison
+                    found = False
+                    for sub_question, sub_task in task.sub_tasks.items():
+                        if safe_string_compare(question, sub_question):
+                            task = sub_task
+                            actual_matched_questions.append(sub_question)
+                            found = True
+                            break
+                    
+                    if not found:
                         raise KeyError(f"Question '{question}' not found in sub-tasks.")
-                    task = task.sub_tasks[question]
-                    actual_matched_questions.append(question)
                 
                 # Reset the status to created
                 task.status = TaskStatus.CREATED
@@ -333,7 +313,7 @@ class ReasonPlanActFlow(BaseWorkflow):
             
             # Extract the orchestration blueprint from the task by regular expression
             blueprint = extract_by_label(message.content, "orchestration")
-            if blueprint is not None:
+            if blueprint != "":
                 # Log the blueprint
                 self.custom_logger.info(f"规划蓝图: \n{blueprint}")
                 # Update the blueprint to the global context of react flow and all the sub-flows
@@ -433,7 +413,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                 
                 # Extract the finish flag from the message, this will not be used for tool calling.
                 finish_flag = extract_by_label(message.content, "finish_flag", "finish flag", "finish")
-                if finish_flag is not None:
+                if finish_flag != "":
                     # Check if the finish flag is True
                     if finish_flag == "True":
                         finish_flag = True

@@ -16,6 +16,7 @@ def extract_by_label(content: str, *labels: str) -> str:
     """
     # Traverse all the labels
     for label in labels:
+        
         # Try with closing tag
         result = re.search(f"<{label}>\s*\n(.*)\n\s*</{label}>", content, re.DOTALL)
         if result:
