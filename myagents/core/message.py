@@ -1,5 +1,6 @@
 from enum import Enum
 from uuid import uuid4
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -57,13 +58,13 @@ class CompletionMessage(BaseModel):
             The unique id of the message.
         role (MessageRole): 
             The role of the message. 
-        content (str | None, defaults to None):
+        content (str, optional, defaults to None):
             The content of the message. 
-        tool_calls (list[MessageToolCallRequest] | None, defaults to None):
+        tool_calls (list[ToolCallRequest], optional, defaults to None):
             The tool calls of the message. 
         stop_reason (StopReason, defaults to StopReason.NONE):
             The stop reason of the message.
-        usage (CompletionUsage, defaults to None):
+        usage (CompletionUsage, optional, defaults to None):
             The usage of the message.
     """
     # The unique id of the message
@@ -71,13 +72,13 @@ class CompletionMessage(BaseModel):
     # The role of the message
     role: MessageRole = Field(description="The role of the message.")
     # The content of the message
-    content: str | None = Field(description="The content of the message.", default=None)
+    content: Optional[str] = Field(description="The content of the message.", default="")
     # The tool calls of the message
-    tool_calls: list['ToolCallRequest'] | None = Field(description="The tool calls of the message.", default=None)
+    tool_calls: Optional[list['ToolCallRequest']] = Field(description="The tool calls of the message.", default="")
     # The stop reason of the message
     stop_reason: StopReason = Field(description="The stop reason of the message.", default=StopReason.NONE)
     # Usage of the message
-    usage: CompletionUsage = Field(description="The usage of the message.", default=None)
+    usage: Optional[CompletionUsage] = Field(description="The usage of the message.", default=None)
 
 
 class ToolCallRequest(BaseModel):
@@ -123,4 +124,3 @@ class ToolCallResult(BaseModel):
     content: str = Field(description="The content of the tool call result.")
     # The error of the tool call result
     is_error: bool = Field(description="Whether the tool call result is an error.", default=False)
-    
