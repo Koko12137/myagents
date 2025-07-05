@@ -4,7 +4,7 @@ from asyncio import Lock
 
 from loguru import logger
 from myagents.core.interface import StepCounter, Logger
-from myagents.core.message import CompletionUsage
+from myagents.core.messages import CompletionUsage
 
 
 class MaxStepsError(Exception):

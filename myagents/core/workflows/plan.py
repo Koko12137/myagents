@@ -5,7 +5,7 @@ from traceback import format_exc
 from loguru import logger
 from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.core.message import CompletionMessage, MessageRole, StopReason, ToolCallRequest, ToolCallResult
+from myagents.core.messages import AssistantMessage, MessageRole, StopReason, ToolCallRequest, ToolCallResult
 from myagents.core.interface import Agent, Task, TaskStatus, Logger, Workflow
 from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.envs.task import BaseTask, TaskContextView
@@ -196,7 +196,7 @@ class PlanFlow(BaseWorkflow):
         # Check the history of the task, if the history is empty, then we need to set the system prompt
         if len(task.history[TaskStatus.PLANNING]) == 0:
             # Set the system prompt
-            task.update(TaskStatus.PLANNING, CompletionMessage(
+            task.update(TaskStatus.PLANNING, AssistantMessage(
                 role=MessageRole.SYSTEM, 
                 content=self.system_prompt.format(blueprint=self.context.get("blueprint")), 
             ))
@@ -209,7 +209,7 @@ class PlanFlow(BaseWorkflow):
         # Log the observation
         self.custom_logger.info(f"当前观察: \n{observe}")
         # Create a new message for the current observation
-        message = CompletionMessage(
+        message = AssistantMessage(
             role=MessageRole.USER, 
             content=PLAN_ATTENTION_PROMPT.format(
                 task_context=observe, 
@@ -221,7 +221,7 @@ class PlanFlow(BaseWorkflow):
         # Append for current task recording
         task.update(TaskStatus.PLANNING, message)
         # Call for completion
-        message: CompletionMessage = await self.agent.think(
+        message: AssistantMessage = await self.agent.think(
             task.history[TaskStatus.PLANNING], 
             allow_tools=False, 
             external_tools=self.tools, 
@@ -249,7 +249,7 @@ class PlanFlow(BaseWorkflow):
             self.custom_logger.info(f"当前观察: \n{observe}")
 
             # Create a new message for the current observation
-            message = CompletionMessage(
+            message = AssistantMessage(
                 role=MessageRole.USER, 
                 content=EXEC_PLAN_PROMPT.format(
                     task_context=observe, 
@@ -260,7 +260,7 @@ class PlanFlow(BaseWorkflow):
             # Update the task status
             task.update(TaskStatus.PLANNING, message)
             # Call for completion
-            message: CompletionMessage = await self.agent.think(
+            message: AssistantMessage = await self.agent.think(
                 task.history[TaskStatus.PLANNING], 
                 allow_tools=False, 
                 external_tools=self.tools, 
@@ -316,7 +316,7 @@ class PlanFlow(BaseWorkflow):
                     self.custom_logger.error(f"连续思考上限达到，将任务状态设置为运行状态，并强制退出循环: \n{TaskContextView(task).format()}")
                     task.status = TaskStatus.CHECKING
                     # Announce the idle thinking
-                    message = CompletionMessage(
+                    message = AssistantMessage(
                         role=MessageRole.USER, 
                         content=f"【注意】：你已经达到了 {max_thinking} 次思考上限，你将会被强制退出循环。", 
                         stop_reason=StopReason.NONE, 
@@ -335,7 +335,7 @@ class PlanFlow(BaseWorkflow):
                     break
                 
                 # Announce the idle thinking
-                message = CompletionMessage(
+                message = AssistantMessage(
                     role=MessageRole.USER, 
                     content=f"【注意】：你已经思考了 {current_thinking} 次，但是没有找到任何工具调用。在思考 {max_thinking} 次后，你将会被强制退出循环。", 
                     stop_reason=StopReason.NONE, 
@@ -357,7 +357,7 @@ class PlanFlow(BaseWorkflow):
                         task.is_leaf = True
                         task.status = TaskStatus.CHECKING
                         # Record the error to history and announce the penalty
-                        task.update(TaskStatus.PLANNING, CompletionMessage(
+                        task.update(TaskStatus.PLANNING, AssistantMessage(
                             role=MessageRole.USER, 
                             content=f"任务规划错误次数累计达到上限，将任务强制设为叶子任务，你将会被惩罚。", 
                             stop_reason=StopReason.NONE, 
@@ -369,7 +369,7 @@ class PlanFlow(BaseWorkflow):
                     self.custom_logger.error(f"任务规划执行错误，当前任务没有子任务，但是当前任务不是叶子任务，回滚到规划状态: \n{TaskContextView(task).format()}")
                     task.status = TaskStatus.PLANNING
                     # Record the error to history and announce the penalty
-                    task.update(TaskStatus.PLANNING, CompletionMessage(
+                    task.update(TaskStatus.PLANNING, AssistantMessage(
                         role=MessageRole.USER, 
                         content=f"任务规划错误，当前的任务没有子任务，但是当前的任务不是叶子任务，请重新执行规划拆解。" \
                             f"如果蓝图规划该任务为叶子任务，请调用 `set_as_leaf` 工具来将当前任务设置为叶子任务。累计错误次数上限为 {max_error} 次。", 

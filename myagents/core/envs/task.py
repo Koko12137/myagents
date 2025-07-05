@@ -5,8 +5,8 @@ from typing import Union
 
 from pydantic import BaseModel, Field, ConfigDict
 
-from myagents.core.message import CompletionMessage, ToolCallRequest, ToolCallResult, MessageRole, StopReason
-from myagents.core.interface import TaskStatus, TaskView, Task, TaskParallelStrategy
+from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, MessageRole
+from myagents.core.interface import TaskStatus, TaskView, Task
 
 
 class BaseTask(BaseModel):
@@ -29,14 +29,12 @@ class BaseTask(BaseModel):
             
         status (TaskStatus):
             The status of the current task.
-        parallel_strategy (TaskParallelStrategy):
-            The parallel strategy of the current task.
         is_leaf (bool):
             Whether the current task is a leaf task. If the task is a leaf task, the task will not be orchestrated by the workflow. 
         answer (str, optional):
             The answer to the question. If the task is not finished, the answer is None.
             
-        history (dict[TaskStatus, list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]]):
+        history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]):
             The history of the status of the task. The key is the status of the task, and it indicates the state of the task. 
             The value is a list of the history messages. 
     """
@@ -55,12 +53,11 @@ class BaseTask(BaseModel):
     
     # Status
     status: TaskStatus = Field(description="The status of the current task.", default=TaskStatus.CREATED)
-    parallel_strategy: TaskParallelStrategy = Field(description="The parallel strategy of the current task.", default=TaskParallelStrategy.SEQUENTIAL)
     is_leaf: bool = Field(description="Whether the current task is a leaf task.", default=False) 
     answer: str = Field(description="The answer to the question.", default="")
     
     # History Messages
-    history: dict[TaskStatus, list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]] = Field(
+    history: dict[TaskStatus, list[Union[AssistantMessage, ToolCallRequest, ToolCallResult]]] = Field(
         default_factory=lambda: {
             TaskStatus.CREATED: [],
             TaskStatus.PLANNING: [],
@@ -75,7 +72,7 @@ class BaseTask(BaseModel):
     def update(
         self, 
         status: TaskStatus, 
-        message: Union[CompletionMessage, ToolCallRequest, ToolCallResult], 
+        message: Union[AssistantMessage, ToolCallRequest, ToolCallResult], 
     ) -> None:
         """Update the task status. If the last message is the same role as the current message, the content will be 
         concatenated. Otherwise, the message will be appended directly. 
@@ -89,7 +86,7 @@ class BaseTask(BaseModel):
         Returns:
             None
         """
-        if len(self.history[status]) > 0 and isinstance(message, CompletionMessage) and message.role == MessageRole.USER:
+        if len(self.history[status]) > 0 and isinstance(message, AssistantMessage) and message.role == MessageRole.USER:
             last_message = self.history[status][-1]
             # Check if the last message is the same role as the current message
             if last_message.role == message.role:

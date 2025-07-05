@@ -3,7 +3,7 @@ from typing import Protocol, runtime_checkable, Optional, Union
 from enum import Enum
 from collections import OrderedDict
 
-from myagents.core.interface.message import Message
+from myagents.core.messages import ToolCallRequest, ToolCallResult, AssistantMessage, UserMessage, SystemMessage
 
 
 class TaskStatus(Enum):
@@ -77,7 +77,7 @@ class Task(Protocol):
         answer (str):
             The answer to the question. If the task is not finished, the answer is None.
             
-        history (dict[TaskStatus, list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]]):
+        history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
             The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
             The value is a list of the history messages. 
     """
@@ -97,20 +97,20 @@ class Task(Protocol):
     is_leaf: bool
     answer: Optional[str]
     
-    history: dict[TaskStatus, list[Message]]
+    history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
     
     @abstractmethod
     def update(
         self, 
         status: TaskStatus, 
-        message: Message, 
+        message: Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult], 
     ) -> None:
         """Update the task status.
         
         Args:
             status (TaskStatus):
                 The status of the task.
-            message (Message):
+            message (Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]):
                 The message to be updated.
         """
         pass

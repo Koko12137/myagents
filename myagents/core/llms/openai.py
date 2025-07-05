@@ -8,57 +8,9 @@ from loguru import logger
 from openai import AsyncOpenAI
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Logger
-from myagents.core.message import CompletionMessage, MessageRole, StopReason, ToolCallRequest, ToolCallResult, CompletionUsage
-from myagents.core.utils.tools import Provider
-
-
-def to_openai_dict(
-    messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]
-) -> list[dict[str, Union[str, dict]]]:
-    """Convert the message to the OpenAI compatible messages dictionaries.
-    
-    Args:
-        messages (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]): 
-            The messages to convert.
-            
-    Returns:
-        list[dict[str, Union[str, dict]]]: 
-            The OpenAI compatible messages dictionaries.
-    """
-    # Create the generation history
-    history = []
-    for message in messages: 
-        message_dict = {
-            "role": message.role.value,
-            "content": message.content
-        }
-        
-        # This is only for OpenAI. 
-        if isinstance(message, ToolCallResult):
-            if message_dict['role'] == "tool":
-                message_dict['tool_call_id'] = message.tool_call_id
-        
-        elif isinstance(message, CompletionMessage):
-            # If the message is a tool call, add the tool call to the history
-            if message.tool_calls != [] and message.tool_calls is not None:
-                message_dict["tool_calls"] = []
-                
-                for tool_call in message.tool_calls:
-                    message_dict["tool_calls"].append({
-                        "id": tool_call.id,
-                        "type": "function",
-                        "function": {
-                            "name": tool_call.name, 
-                            "arguments": json.dumps(tool_call.args, ensure_ascii=False), 
-                        }
-                    })
-        else:
-            raise ValueError(f"Unsupported message type: {type(message)}")
-            
-        history.append(message_dict)
-        
-    return history
+from myagents.core.interface import LLM, Logger, Provider
+from myagents.core.messages import ToolCallRequest, ToolCallResult, AssistantMessage, StopReason, CompletionUsage, MessageRole, UserMessage, SystemMessage
+from myagents.core.messages.openai_adapter import to_openai_dict
 
 
 class OpenAiLLM(LLM):
@@ -119,17 +71,17 @@ class OpenAiLLM(LLM):
     
     async def completion(
         self, 
-        messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
+        messages: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]], 
         available_tools: Optional[list[dict[str, str]]] = None, 
         tool_choice: Union[str, FastMcpTool] = "auto",
         stream: bool = False, 
         queue: Optional[Queue] = None, 
         **kwargs, 
-    ) -> CompletionMessage:
+    ) -> AssistantMessage:
         """Completion the messages.
 
         Args:
-            messages (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]): 
+            messages (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]): 
                 The messages to complete.
             available_tools (Optional[list[dict[str, str]]], optional): 
                 The available tools. Defaults to None.
@@ -142,7 +94,7 @@ class OpenAiLLM(LLM):
                 The value error raised by the unsupported message type.
 
         Returns:
-            CompletionMessage: 
+            AssistantMessage: 
                 The completed message.
         """
         kwargs = self.kwargs.copy()
@@ -221,7 +173,7 @@ class OpenAiLLM(LLM):
             stop_reason = StopReason.NONE
         
         # Return the response
-        return CompletionMessage(
+        return AssistantMessage(
             role=MessageRole.ASSISTANT, 
             content=content, 
             tool_calls=tool_calls, 

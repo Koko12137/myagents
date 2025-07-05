@@ -5,7 +5,7 @@ from typing import Callable
 from loguru import logger
 from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.core.message import CompletionMessage, StopReason, MessageRole, ToolCallRequest, ToolCallResult
+from myagents.core.messages import AssistantMessage, StopReason, MessageRole, ToolCallRequest, ToolCallResult
 from myagents.core.interface import Agent, Task, TaskStatus, Logger, Workflow
 from myagents.core.envs.task import TaskContextView, TaskAnswerView
 from myagents.core.utils.tools import ToolView
@@ -138,7 +138,7 @@ class ActionFlow(BaseWorkflow):
             task.history[TaskStatus.RUNNING][-1].content += f"\n\n{ACTION_SYSTEM_PROMPT.format(blueprint=blueprint, task_result=task_result)}"
         else:
             # Create a new message for the current blueprint
-            message = CompletionMessage(
+            message = AssistantMessage(
                 role=MessageRole.SYSTEM, 
                 content=ACTION_SYSTEM_PROMPT.format(blueprint=blueprint, task_result=task_result), 
                 stop_reason=StopReason.NONE, 
@@ -160,7 +160,7 @@ class ActionFlow(BaseWorkflow):
             # Log the observation
             self.custom_logger.info(f"当前观察: \n{observe}")
             # Create a new message for the action prompt
-            message = CompletionMessage(
+            message = AssistantMessage(
                 role=MessageRole.USER, 
                 content=ACTION_PROMPT.format(task_context=observe), 
                 stop_reason=StopReason.NONE, 
@@ -168,7 +168,7 @@ class ActionFlow(BaseWorkflow):
             # Append Action Prompt and Call for Completion
             task.update(TaskStatus.RUNNING, message)
             # Call for completion
-            message: CompletionMessage = await self.agent.think(task.history[TaskStatus.RUNNING], allow_tools=True)
+            message: AssistantMessage = await self.agent.think(task.history[TaskStatus.RUNNING], allow_tools=True)
             # Log the message
             self.custom_logger.info(f"模型回复: \n{message.content}")
             # Record the completion message
@@ -223,7 +223,7 @@ class ActionFlow(BaseWorkflow):
                     self.custom_logger.error(f"当前任务执行已达到最大思考次数，任务执行结束: \n{TaskContextView(task).format()}")
                     task.status = TaskStatus.FINISHED
                     # Announce the current thinking
-                    message = CompletionMessage(
+                    message = AssistantMessage(
                         role=MessageRole.USER, 
                         content=f"当前思考次数: {current_thinking}/{max_thinking}, 达到最大思考次数，任务执行结束，如果任务结束时没有提供答案，则你会被惩罚。", 
                         stop_reason=StopReason.NONE
@@ -233,7 +233,7 @@ class ActionFlow(BaseWorkflow):
                     break
                 
                 # Announce the current thinking
-                message = CompletionMessage(
+                message = AssistantMessage(
                     role=MessageRole.USER, 
                     content=f"当前思考次数: {current_thinking}/{max_thinking}，如果任务结束时没有提供答案，则你会被惩罚。", 
                     stop_reason=StopReason.NONE
@@ -246,7 +246,7 @@ class ActionFlow(BaseWorkflow):
             self.custom_logger.info(f"当前观察: \n{observe}")
             # If the stop reason is not tool call, answer the task directly
             # Create a new message for the reflection
-            message = CompletionMessage(
+            message = AssistantMessage(
                 role=MessageRole.USER, 
                 content=REFLECT_PROMPT.format(
                     tools=tools_str, 
@@ -257,7 +257,7 @@ class ActionFlow(BaseWorkflow):
             # Append Reflect Prompt and Call for Completion
             task.update(TaskStatus.RUNNING, message)
             # Call for completion
-            message: CompletionMessage = await self.agent.think(
+            message: AssistantMessage = await self.agent.think(
                 task.history[TaskStatus.RUNNING], 
                 allow_tools=False, 
                 external_tools=self.tools,
@@ -330,7 +330,7 @@ class ActionFlow(BaseWorkflow):
         """
         for i in range(max_retry_count):
             # Add a penalty announcement for error action.
-            message = CompletionMessage(
+            message = AssistantMessage(
                 role=MessageRole.USER, 
                 content=RETRY_PROMPT.format(i=i + 1, max_retry_count=max_retry_count), 
                 stop_reason=StopReason.NONE,
@@ -373,7 +373,7 @@ class ActionFlow(BaseWorkflow):
             # Check if the sub-task is created, if True, then raise an error to call for re-planning
             if sub_task.status == TaskStatus.CREATED:
                 # Append the error information to the planning history of the parent task
-                error_message = CompletionMessage(
+                error_message = AssistantMessage(
                     role=MessageRole.USER, 
                     content=f"子任务 {sub_task.question} 执行失败: {sub_task.answer}，所有的未执行或执行失败的子任务将被取消并删除。", 
                     stop_reason=StopReason.NONE,
@@ -420,7 +420,7 @@ class ActionFlow(BaseWorkflow):
             # Check if the sub-task is cancelled, if True, set the parent task status to created and stop the traverse
             elif sub_task.status == TaskStatus.CANCELLED:
                 # Append the error information to the planning history of the parent task
-                error_message = CompletionMessage(
+                error_message = AssistantMessage(
                     role=MessageRole.USER, 
                     content=f"子任务 {sub_task.question} 执行失败: {sub_task.answer}，所有的未执行或执行失败的子任务将被取消并删除。", 
                     stop_reason=StopReason.NONE,

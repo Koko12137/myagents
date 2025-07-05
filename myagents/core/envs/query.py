@@ -1,20 +1,36 @@
 import re
+import uuid
 import inspect
+from asyncio import Semaphore
+from collections import OrderedDict
 from enum import Enum
 from traceback import format_exc
-from typing import Callable, Union, OrderedDict
+from typing import Union
 
 from loguru import logger
-from mcp import Tool as MCPTool
-from fastmcp.tools import Tool as FastMcpTool
+from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.core.message import CompletionMessage, ToolCallRequest, ToolCallResult, MessageRole, StopReason
-from myagents.core.interface import Agent, Workflow, Logger, Task, Environment, Context, EnvironmentStatus, TaskStatus
+from myagents.core.messages.message import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, MessageRole, StopReason
+from myagents.core.interface import Agent, AgentType, Task, Environment, Context, EnvironmentStatus, TaskStatus
 from myagents.core.envs.task import BaseTask, TaskAnswerView
 from myagents.core.envs.base import BaseEnvironment
 from myagents.core.utils.tools import ToolView
 from myagents.tools.docs import DocumentLog, BaseDocument, FormatType
 from myagents.prompts.envs.query import QUERY_SYSTEM_PROMPT, QUERY_POST_PROCESS_PROMPT
+
+
+NAME = "基础多轮问答环境"
+
+
+PROFILE = """
+问答环境，用于回答问题。回复内容可以是以下的类型：
+- 总结：总结当前任务的答案。
+- 文档：修改当前任务的答案。
+- 选择：选择当前任务的答案。
+"""
+
+
+REQUIRED_AGENTS = [AgentType.ORCHESTRATOR, AgentType.REACTOR, AgentType.PLAN_AND_EXECUTOR]
 
 
 class OutputType(Enum):
@@ -30,78 +46,74 @@ class OutputType(Enum):
 
 
 class Query(BaseEnvironment):
-    """Query is the environment for the query and answer the question.
+    """Query is the environment for the multi-turn query and answer the question. The answer type can be:
+     - Summary: The summary of the answer.
+     - Document: The document of the answer.
+     - Selection: The selection of the answer.
     
     Attributes:
+        uid (str):
+            The unique identifier of the environment. 
+        name (str):
+            The name of the environment.
+        profile (str):
+            The profile of the environment. 
         system_prompt (str):
-            The system prompt of the environment.
-        
-        agent (Agent):
-            The agent that will be used to answer the question.
-        debug (bool):
-            The debug flag.
-        custom_logger (Logger):
-            The custom logger.
-        tools (dict[str, Union[FastMcpTool, MCPTool]]):
-            The tools of the environment.
-        tool_functions (dict[str, Callable]):
-            The functions of the tools.
-        workflows (dict[str, Workflow]):
-            The workflows of the environment. 
-        
-        sub_tasks (dict[str, Task]):
-            The sub-tasks of the environment. The key is the sub-task name and the value is the sub-task.  
-        history (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]):
-            The history of the environment.
-        answer (str):
-            The answer to the question.
+            The system prompt of the environment. 
+        leader (Agent):
+            The leader agent of the environment. 
+        agents (dict[str, Agent]):
+            The agents in the environment. The key is the agent name and the value is the agent. 
+        required_agents (list[AgentType]):
+            The agents in the list must be registered to the environment. 
+        agent_type_map (dict[AgentType, list[str]]):
+            The map of the agent type to the agent name. The key is the agent type and the value is the agent name list. 
+        agent_type_semaphore (dict[AgentType, Semaphore]):
+            The semaphore of the agent type. The key is the agent type and the value is the semaphore. 
+        tools (dict[str, FastMCPTool]):
+            The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
+        context (Context):
+            The context of the environment.
+        status (EnvironmentStatus):
+            The status of the environment.
+        history (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
+            The history messages of the environment. 
+        tasks (OrderedDict[str, Task]):
+            The tasks of the environment. The key is the task question and the value is the task. 
     """
+    # Basic information
+    uid: str = uuid.uuid4().hex
+    name: str = NAME
+    profile: str = PROFILE
     system_prompt: str = QUERY_SYSTEM_PROMPT
-    
-    agent: Agent
-    debug: bool
-    custom_logger: Logger
+    required_agents: list[AgentType] = REQUIRED_AGENTS
+    # Core components
+    leader: Agent
+    agents: dict[str, Agent]
+    agent_type_map: dict[AgentType, list[str]]
+    agent_type_semaphore: dict[AgentType, Semaphore]
+    # Tools
+    tools: dict[str, FastMCPTool]
+    # Context
     context: Context
-    
-    tools: dict[str, Union[FastMcpTool, MCPTool]]
-    tool_functions: dict[str, Callable]
-    workflows: dict[str, Workflow]
-    
-    tasks: OrderedDict[str, Task]
-    answers: OrderedDict[str, str]
+    # Status and history
     status: EnvironmentStatus
-    history: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]
+    history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
+    tasks: OrderedDict[str, Task]
     
-    def __init__(
-        self,
-        agent: Agent, 
-        custom_logger: Logger = logger, 
-        debug: bool = False, 
-        workflows: dict[str, Workflow] = {}, 
-        *args: tuple, 
-        **kwargs: dict, 
-    ) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         """Initialize the Query environment.
         
         Args:
-            agent (Agent):
-                The agent that will be used to answer the question.
-            custom_logger (Logger):
-                The custom logger.
-            debug (bool):
-                The debug flag.
-            workflows (dict[str, Workflow], optional):
-                The workflows that will be orchestrated to process the task.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        super().__init__(agent=agent, custom_logger=custom_logger, debug=debug, workflows=workflows, *args, **kwargs)
+        super().__init__(*args, **kwargs)
         
-        # Check the rpa workflow is in the workflows
-        if "rpa" not in self.workflows:
-            raise ValueError(f"The `rpa` workflow is not in the workflows.")
+        # Initialize the tasks
+        self.tasks = OrderedDict()
         
         # Post initialize
         self.post_init()
@@ -155,7 +167,7 @@ class Query(BaseEnvironment):
         
         # Check the registered tools count
         if len(self.tools) == 0:
-            self.custom_logger.error(f"Query 注册的工具为空: {format_exc()}")
+            logger.error(f"Query 注册的工具为空: {format_exc()}")
             raise RuntimeError("No tools registered for the query environment.")
         
         @self.register_tool("select_answer")
@@ -186,7 +198,7 @@ class Query(BaseEnvironment):
         tool_str = ""
         for tool in self.tools.values():
             tool_str += f"{ToolView(tool).format()}\n"
-        self.custom_logger.debug(f"Tools: \n{tool_str}")
+        logger.debug(f"Tools: \n{tool_str}")
 
     async def __post_process(self, task: Task, output_type: OutputType) -> str:
         """Post process the answer.
@@ -221,7 +233,7 @@ class Query(BaseEnvironment):
         
         while self.status == EnvironmentStatus.RUNNING:
             # Create a message for the post process
-            message = CompletionMessage(
+            message = AssistantMessage(
                 role=MessageRole.USER, 
                 content=QUERY_POST_PROCESS_PROMPT.format(
                     output_type=output_type, 
@@ -234,7 +246,7 @@ class Query(BaseEnvironment):
             # Record the post process message
             self.update(message)
             # Call for completion
-            message: CompletionMessage = await self.agent.think(
+            message: AssistantMessage = await self.agent.think(
                 self.history, 
                 allow_tools=False, 
                 external_tools=self.tools, 
@@ -243,7 +255,7 @@ class Query(BaseEnvironment):
             # Record the completion message
             self.update(message)
             # Log the message
-            self.custom_logger.info(f"模型回复: \n{message.content}")
+            logger.info(f"模型回复: \n{message.content}")
                 
             # Extract the finish flag
             finish_flag = re.search(r"<finish_flag>\s*\n(.*)\n\s*</finish_flag>", message.content, re.DOTALL)
@@ -278,12 +290,12 @@ class Query(BaseEnvironment):
                             is_error=True, 
                             content=e
                         )
-                        self.custom_logger.error(f"工具调用 {tool_call.name} 失败: \n{tool_result.content}")
+                        logger.error(f"工具调用 {tool_call.name} 失败: \n{tool_result.content}")
                     # Update the messages
                     self.update(tool_result)
                     
             elif finish_flag:
-                self.custom_logger.info(f"总结或修订任务执行完成: \n{task.question}") 
+                logger.info(f"总结或修订任务执行完成: \n{task.question}") 
                 # Set the status to finished
                 self.status = EnvironmentStatus.FINISHED
                 break
@@ -291,15 +303,15 @@ class Query(BaseEnvironment):
                 # Update the current thinking
                 current_thinking += 1
                 # Log the current thinking
-                self.custom_logger.warning(f"模型没有执行动作,当前思考次数: {current_thinking}")
+                logger.warning(f"模型没有执行动作,当前思考次数: {current_thinking}")
             
                 # Check if the current thinking is reached the limit
                 if current_thinking >= max_thinking:
                     # The current thinking is reached the limit, end the workflow
-                    self.custom_logger.error(f"当前任务执行已达到最大思考次数，总结或修订任务执行结束: \n{task.question}")
+                    logger.error(f"当前任务执行已达到最大思考次数，总结或修订任务执行结束: \n{task.question}")
                     self.status = EnvironmentStatus.FINISHED
                     # Announce the idle thinking
-                    message = CompletionMessage(
+                    message = AssistantMessage(
                         role=MessageRole.USER, 
                         content=f"你目前已经达到了最大思考次数，你将没有机会更新答案。",
                     )
@@ -308,7 +320,7 @@ class Query(BaseEnvironment):
                     break
                 
                 # Announce the idle thinking
-                message = CompletionMessage(
+                message = AssistantMessage(
                     role=MessageRole.USER, 
                     content=f"你目前已经思考了 {current_thinking} 次，最多思考 {max_thinking} 次后会被强制停止思考并退出循环，并且你将没有机会更新答案。",
                 )
@@ -349,6 +361,14 @@ class Query(BaseEnvironment):
             ValueError:
                 The detail level is not valid.
         """
+        # Check the required agents are registered
+        for agent_type in self.required_agents:
+            # Try to get the agent type from the agent type map
+            agent_names = self.agent_type_map.get(agent_type, [])
+            # Check if the agent type is registered
+            if len(agent_names) == 0 or agent_type not in self.agent_type_map:
+                raise ValueError(f"Agent type `{agent_type}` is not registered. Please register the agent type to the environment.")
+        
         # Check the detail level
         if detail_level < 1:
             raise ValueError("The detail level must be greater than 0.")
@@ -358,7 +378,7 @@ class Query(BaseEnvironment):
         # Set the status to running
         self.status = EnvironmentStatus.RUNNING
         # Record the question
-        self.history.append(CompletionMessage(role=MessageRole.USER, content=question))
+        self.history.append(AssistantMessage(role=MessageRole.USER, content=question))
         # Create a new Task
         task = BaseTask(
             question=question, 
@@ -367,16 +387,27 @@ class Query(BaseEnvironment):
         )
         # Set the task as the sub-task
         self.tasks[task.question] = task
-        task.parent = self.tasks[task.question]
         # Log the task
-        self.custom_logger.info(f"任务创建: \n{task.question}")
+        logger.info(f"任务创建: \n{task.question}")
+        
+        # Call for OKR orchestration
+        message: AssistantMessage = await self.leader.run(task)
+        # Update the environment history
+        self.update(message)
+        
+        # Call for react flow
+        message: AssistantMessage = await self.leader.run(task)
+        # Update the environment history
+        self.update(message)
         # Run the react flow
-        task = await self.workflows["rpa"].run(task)
+        message: AssistantMessage = await self.leader.run(task)
+        # Update the environment history
+        self.update(message)
         
         # Check the task status
         if task.status != TaskStatus.FINISHED:
             # Log the error
-            self.custom_logger.critical(f"Task {task.question} is not finished.")
+            logger.critical(f"Task {task.question} is not finished.")
             # Raise the error
             raise RuntimeError(f"Task {task.question} is not finished.")
         
@@ -384,14 +415,14 @@ class Query(BaseEnvironment):
         if output_type == OutputType.SUMMARY:
             # Set the answer view of the task as the output history
             # This is used for the summary output type. 
-            self.history.append(
-                CompletionMessage(
+            self.update(
+                AssistantMessage(
                     role=MessageRole.ASSISTANT, 
                     content=TaskAnswerView(task).format(),
                 )
             )
             # Log the content
-            self.custom_logger.info(f"最终答案: \n{task.answer}")
+            logger.info(f"最终答案: \n{task.answer}")
             # Record the answer
             self.answers[task.question] = task.answer
             # Return the answer
@@ -406,10 +437,10 @@ class Query(BaseEnvironment):
             # Format to line view
             line_view = document.format(FormatType.LINE)
             # Log the content
-            self.custom_logger.info(f"文档按[行号-内容]输出: \n{line_view}")
+            logger.info(f"文档按[行号-内容]输出: \n{line_view}")
             # Append as the assistant response
             self.update(
-                CompletionMessage(
+                AssistantMessage(
                     role=MessageRole.ASSISTANT, 
                     content=line_view,
                 )
@@ -422,7 +453,7 @@ class Query(BaseEnvironment):
             # Record the answer
             self.answers[task.question] = answer
             # Log the answer
-            self.custom_logger.info(f"最终文档: \n{answer}")
+            logger.info(f"最终文档: \n{answer}")
             # Resume the context
             self.context = self.context.done()
             # Return the answer
@@ -433,10 +464,10 @@ class Query(BaseEnvironment):
             # This is used for the selection output type. 
             content = TaskAnswerView(task).format()
             # Log the content
-            self.custom_logger.info(f"选择题分析过程: \n{content}")
+            logger.info(f"选择题分析过程: \n{content}")
             # Update the history
             self.update(
-                CompletionMessage(
+                AssistantMessage(
                     role=MessageRole.ASSISTANT, 
                     content=content,
                 )
@@ -449,7 +480,7 @@ class Query(BaseEnvironment):
             # Record the answer
             self.answers[task.question] = answer
             # Log the answer
-            self.custom_logger.info(f"最终答案: \n{answer}")
+            logger.info(f"最终答案: \n{answer}")
             # Resume the context
             self.context = self.context.done()
             # Return the answer
@@ -457,50 +488,3 @@ class Query(BaseEnvironment):
         
         else:
             raise ValueError(f"Unknown output type: {output_type}")
-    
-    async def call_tool(self, ctx: Union[Task, Environment], tool_call: ToolCallRequest, **kwargs: dict) -> ToolCallResult:
-        """Call a tool to modify the environment.
-        """
-        # Check the tool call name
-        if tool_call.name == "diff_modify":
-            # Modify the document
-            await self.tool_functions["diff_modify"](**tool_call.args)
-            return ToolCallResult(
-                tool_call_id=tool_call.id, 
-                is_error=False, 
-                content="The document is modified.",
-            )
-            # Log the result
-            self.custom_logger.info(f"文档修改完成: \n{tool_call.args}")
-        
-        elif tool_call.name == "finish_query":
-            # Finish the query
-            await self.tool_functions["finish_query"]()
-            return ToolCallResult(
-                tool_call_id=tool_call.id, 
-                is_error=False, 
-                content="The query is finished.",
-            )
-            # Log the result
-            self.custom_logger.info(f"任务完成: \n{tool_call.args}")
-            
-        elif tool_call.name == "select_answer":
-            # Select the answer
-            answer = await self.tool_functions["select_answer"](**tool_call.args)
-            return ToolCallResult(
-                tool_call_id=tool_call.id, 
-                is_error=False, 
-                content=f"The answer is selected: {answer}",
-            )
-            # Log the result
-            self.custom_logger.info(f"答案选择完成: \n{tool_call.args}")
-            
-        else:
-            raise ValueError(f"Unknown tool call name: {tool_call.name}.")
-        
-        # Done the current context
-        self.context = self.context.done()
-        
-        # Return the result
-        return ToolCallResult(tool_call_id=tool_call.id, content="No tool is available.", is_error=True)
-    

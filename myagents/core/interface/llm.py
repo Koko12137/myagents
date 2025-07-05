@@ -2,8 +2,7 @@ from abc import abstractmethod
 from enum import Enum
 from typing import Protocol, runtime_checkable, Any, Optional, Union, AsyncGenerator
 
-from myagents.core.message import CompletionMessage, ToolCallRequest, ToolCallResult
-from myagents.core.interface.logger import Logger
+from myagents.core.messages import ToolCallResult, AssistantMessage, UserMessage, SystemMessage
 
 
 @runtime_checkable
@@ -14,6 +13,7 @@ class Queue(Protocol):
         queue (Queue):
             The queue.
     """
+
     @abstractmethod
     async def put(self, *args, **kwargs) -> None:
         """Put an item into the queue.
@@ -58,10 +58,6 @@ class LLM(Protocol):
             The model of the LLM. 
         base_url (str) :
             The base URL of the LLM. 
-        custom_logger (Logger):
-            The custom logger. If not provided, the default loguru logger will be used. 
-        debug (bool):
-            The debug flag. 
     """
     provider: Provider
     model: str
@@ -70,23 +66,47 @@ class LLM(Protocol):
     @abstractmethod
     async def completion(
         self, 
-        messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
+        messages: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
         available_tools: Optional[list[dict[str, str]]] = None, 
+        tool_choice: Optional[str] = None, 
+        max_tokens: Optional[int] = None, 
+        temperature: Optional[float] = None, 
+        top_p: Optional[float] = None, 
+        stop: Optional[str] = None, 
+        stream: Optional[bool] = None, 
+        stream_options: Optional[dict] = None, 
+        response_format: Optional[dict] = None, 
         **kwargs: dict, 
-    ) -> CompletionMessage:
+    ) -> AssistantMessage:
         """Completion the messages.
         
         Args:
-            messages (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]) :
+            messages (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]) :
                 The messages to complete. 
             available_tools (list[dict[str, str]], optional) :
                 The available tools.
+            tool_choice (str, optional) :
+                The tool choice.
+            max_tokens (int, optional) :
+                The max tokens.
+            temperature (float, optional) :
+                The temperature.
+            top_p (float, optional) :
+                The top p.
+            stop (str, optional) :
+                The stop.
+            stream (bool, optional) :
+                The stream.
+            stream_options (dict, optional) :
+                The stream options.
+            response_format (dict, optional) :
+                The response format.
             **kwargs (dict) :
                 The additional keyword arguments.
 
         Returns:
-            CompletionMessage:
-                The completed message.
+            AssistantMessage:
+                The completed message named AssistantMessage from the LLM.
         """
         pass
 
@@ -101,17 +121,10 @@ class StreamLLM(LLM):
             The model of the LLM. 
         base_url (str) :
             The base URL of the LLM. 
-        custom_logger (Logger):
-            The custom logger. If not provided, the default loguru logger will be used. 
-        debug (bool):
-            The debug flag. 
     """
     provider: Provider
     model: str
     base_url: str
-    
-    # Stream queue
-    queue: Queue
     
     @abstractmethod
     async def stream(self, *args, **kwargs) -> AsyncGenerator[str, None]:

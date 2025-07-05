@@ -6,7 +6,7 @@ from fastmcp.tools import Tool as FastMCPTool
 
 from myagents.core.envs.task import TaskContextView
 from myagents.core.interface import Agent, Task, TaskStatus, Logger, Workflow, Context
-from myagents.core.message import ToolCallRequest, ToolCallResult, MessageRole, CompletionMessage, StopReason
+from myagents.core.messages import ToolCallRequest, ToolCallResult, MessageRole, AssistantMessage, StopReason
 from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.utils.tools import ToolView
 from myagents.core.utils.extractor import extract_by_label
@@ -14,8 +14,8 @@ from myagents.core.utils.strings import find_best_match, levenshtein_distance, s
 from myagents.prompts.workflows.rpa import RPA_CHECK_PROMPT, RPA_PLAN_PROMPT
 
 
-class ReasonPlanActFlow(BaseWorkflow):
-    """This is use for Reasoning, Planning and Acting about the task. This flow mainly controls the loop 
+class OrchestrateFlow(BaseWorkflow):
+    """This is use for Orchestrating the task. This flow mainly controls the loop 
     with following steps:
     
     - Execute the current context directly if the plans do not need to update. 
@@ -224,7 +224,7 @@ class ReasonPlanActFlow(BaseWorkflow):
             
             """ [[ ## Announce the removal to the parent task ## ]] """
             # Append the removal message to the task history
-            parent_task.update(TaskStatus.PLANNING, CompletionMessage(
+            parent_task.update(TaskStatus.PLANNING, AssistantMessage(
                 role=MessageRole.USER, 
                 content=f"Error in the planning: {reason}, the sub-task {actual_question_to_remove} is removed.", 
                 stop_reason=StopReason.NONE, 
@@ -235,7 +235,7 @@ class ReasonPlanActFlow(BaseWorkflow):
             # Reset the status to created
             task.status = TaskStatus.CREATED
             # Append the removal message to the task history
-            task.update(TaskStatus.CREATED, CompletionMessage(
+            task.update(TaskStatus.CREATED, AssistantMessage(
                 role=MessageRole.USER, 
                 content=f"The sub-task {actual_question_to_remove} is removed. Reason: {reason}", 
                 stop_reason=StopReason.NONE, 
@@ -288,7 +288,7 @@ class ReasonPlanActFlow(BaseWorkflow):
         # Log the observation
         self.custom_logger.info(f"当前观察: \n{observe}")
         # Create a new message for the current observation
-        message = CompletionMessage(
+        message = AssistantMessage(
             role=MessageRole.USER, 
             content=RPA_PLAN_PROMPT.format(
                 task_context=observe, 
@@ -301,7 +301,7 @@ class ReasonPlanActFlow(BaseWorkflow):
     
         while env.status == TaskStatus.CREATED:
             # Call for completion
-            message: CompletionMessage = await self.agent.think(
+            message: AssistantMessage = await self.agent.think(
                 env.history[TaskStatus.CREATED], 
                 allow_tools=False, 
                 external_tools=self.tools, 
@@ -327,7 +327,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                 # Check if the current thinking is greater than the max thinking
                 if current_thinking > max_thinking:
                     # Announce the idle thinking
-                    message = CompletionMessage(
+                    message = AssistantMessage(
                         role=MessageRole.USER, 
                         content=f"【注意】：你已经达到了 {max_thinking} 次思考上限，蓝图未找到，任务执行失败。", 
                         stop_reason=StopReason.NONE, 
@@ -340,7 +340,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                     raise RuntimeError("No orchestration blueprint was found in <orchestration> tags for 3 times thinking.")
                 
                 # No blueprint is found, create an error message
-                message = CompletionMessage(
+                message = AssistantMessage(
                     role=MessageRole.USER, 
                     content=f"没有在<orchestration>标签中找到规划蓝图。请将你的规划放到<orchestration>标签中。你已经思考了 {current_thinking} 次，" \
                         f"在最多思考 {max_thinking} 次后，任务会直接失败。下一步你必须给出规划蓝图，否则你将会被惩罚。", 
@@ -394,7 +394,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                 # Log the observation
                 self.custom_logger.info(f"当前观察: \n{observe}")
                 # Think about the env task
-                message = CompletionMessage(
+                message = AssistantMessage(
                     role=MessageRole.USER, 
                     content=RPA_CHECK_PROMPT.format(task_context=observe, tools=tool_str), 
                     stop_reason=StopReason.NONE, 
@@ -403,7 +403,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                 env.update(TaskStatus.CREATED, message)
                 
                 # Call for completion
-                message: CompletionMessage = await self.agent.think(
+                message: AssistantMessage = await self.agent.think(
                     env.history[TaskStatus.CREATED], 
                     allow_tools=False, 
                     external_tools=special_tools, 
@@ -453,7 +453,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                     # Check if the current thinking is greater than the max thinking
                     if current_thinking > max_thinking:
                         # Announce the idle thinking
-                        message = CompletionMessage(
+                        message = AssistantMessage(
                             role=MessageRole.USER, 
                             content=f"【注意】：你已经达到了 {max_thinking} 次思考上限，你将会被强制退出循环，并被惩罚。", 
                             stop_reason=StopReason.NONE, 
@@ -468,7 +468,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                         break
                     
                     # Announce the idle thinking
-                    message = CompletionMessage(
+                    message = AssistantMessage(
                         role=MessageRole.USER, 
                         content=f"【注意】：你已经思考了 {current_thinking} 次，但是没有找到任何工具调用。在思考 {max_thinking} 次后，你将会被强制退出循环。", 
                         stop_reason=StopReason.NONE, 
@@ -479,7 +479,7 @@ class ReasonPlanActFlow(BaseWorkflow):
                 # Check if the current error is greater than the max error
                 if current_error > max_error:
                     # Announce the error
-                    message = CompletionMessage(
+                    message = AssistantMessage(
                         role=MessageRole.USER, 
                         content=f"【注意】：你已经达到了 {max_error} 次错误上限，你将会被强制退出循环，并被惩罚。", 
                         stop_reason=StopReason.NONE, 

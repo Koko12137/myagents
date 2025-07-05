@@ -1,0 +1,107 @@
+import asyncio
+from threading import Thread
+
+from fastmcp import FastMCP, Client as FastMCPClient
+from fastapi import FastAPI
+import uvicorn
+
+
+class ProxyMCP:
+    """ProxyMCP is the proxy mcp server. It is used to proxy the mcp server to the client.
+    
+    Attributes:
+        config (dict):
+            The config of the proxy mcp server. 
+        mcp (FastMCP):
+            The mcp server.
+        app (FastAPI):
+            The REST API for register the mcp server dynamically.
+    """
+    config: dict
+    # The mcp server
+    mcp: FastMCP
+    # The REST API for register the mcp server dynamically
+    app: FastAPI
+    
+    def __init__(self, config: dict, *args, **kwargs) -> None:
+        self.config = config
+        self.mcp = FastMCP(
+            name=self.config.get("name", "ProxyMCP"),
+            instructions=self.config.get("instructions", "ProxyMCP is the proxy mcp server. It is used to proxy the mcp server to the client."),
+        )
+        self.app = FastAPI(
+            title=self.config.get("title", "ProxyMCP"),
+            description=self.config.get("description", "ProxyMCP is the proxy mcp server. It is used to proxy the mcp server to the client."),
+            version=self.config.get("version", "0.1.0"),
+            contact=self.config.get("contact", {}),
+            license=self.config.get("license", {}),
+            terms_of_service=self.config.get("terms_of_service", ""),
+            openapi_url=self.config.get("openapi_url", "/openapi.json"),
+        )
+        
+    def post_init(self) -> None:
+        
+        @self.app.post("/register/remote")
+        async def register(url: str, prefix: str) -> dict:
+            # Create a new client
+            client = FastMCPClient(url)
+            # Set as a proxy and mount
+            proxy = FastMCP.as_proxy(client)
+            # Mount the proxy to the mcp server
+            self.mcp.mount(proxy, prefix=prefix)
+            # Return the result
+            return {"message": "MCP server registered successfully."}
+        
+        @self.app.post("/register/local")
+        async def register(start_command: str, prefix: str = "") -> dict:
+            # Start the mcp server
+            process = await asyncio.create_subprocess_exec(
+                *start_command.split(),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            
+            # Wait for the process to start
+            await process.wait()
+            
+            # Get the stdout and stderr
+            stdout, stderr = await process.communicate()
+            
+            # Create a new client
+            client = FastMCPClient(stdout)
+            # Set as a proxy and mount
+            proxy = FastMCP.as_proxy(client)
+            # Mount the proxy to the mcp server
+            self.mcp.mount(proxy, prefix=prefix)
+            # Return the result
+            return {"message": "MCP server registered successfully."}
+        
+        @self.app.post("/unregister/remote")
+        async def unregister(url: str) -> dict:
+            # Unregister the mcp server
+            self.mcp.unregister(url)
+        
+        @self.app.post("/unregister/local")
+        async def unregister(url: str) -> dict:
+            # Unregister the mcp server
+            self.mcp.unregister(url, local=True)
+            
+    def run_restful(self, host: str = "0.0.0.0", port: int = 8000) -> None:
+        # Run the app
+        uvicorn.run(self.app, host=host, port=port)
+        
+    def run_mcp(self, host: str = "0.0.0.0", port: int = 8001) -> None:
+        # Run the mcp server
+        self.mcp.run(host=host, port=port)
+    
+    def run(self, host: str = "0.0.0.0", rest_port: int = 8000, mcp_port: int = 8001) -> None:
+        # Create a new thread for running the restful server
+        rest_thread = Thread(target=self.run_restful, args=(host, rest_port))
+        # Create a new thread for running the mcp server
+        mcp_thread = Thread(target=self.run_mcp, args=(host, mcp_port))
+        # Start the threads
+        rest_thread.start()
+        mcp_thread.start()
+        # Wait for the threads to finish
+        rest_thread.join()
+        mcp_thread.join()

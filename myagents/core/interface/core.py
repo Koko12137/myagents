@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from asyncio import Lock
-from typing import Protocol, runtime_checkable, Callable, Union, Optional, Awaitable
+from enum import Enum
+from typing import Protocol, runtime_checkable, Callable, Union, Optional, Awaitable, Any
 
 from mcp import Tool as MCPTool
 from fastmcp import Client as MCPClient
@@ -11,7 +12,7 @@ from myagents.core.interface.llm import LLM
 from myagents.core.interface.context import Context
 from myagents.core.interface.task import Task
 from myagents.core.interface.env import Environment
-from myagents.core.interface.message import Message, ToolCallRequest
+from myagents.core.messages.message import AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult
 
 
 class StepCounter(Protocol):
@@ -19,8 +20,8 @@ class StepCounter(Protocol):
     the same step counter for all agents. 
     
     Attributes:
-        uid (str):
-            The unique identifier of the step counter. 
+        uname (str):
+            The unique name of the step counter. 
         limit (Union[int, float]):
             The limit of the step counter. 
         current (Union[int, float]):
@@ -28,7 +29,7 @@ class StepCounter(Protocol):
         custom_logger (Logger):
             The custom logger to use for the step counter. 
     """
-    uid: str
+    uname: str
     limit: Union[int, float]
     current: Union[int, float]
     lock: Lock
@@ -135,7 +136,10 @@ class Workflow(Protocol):
     def add_tool(
         self, 
         name: str, 
-        tool: Callable[..., Awaitable[Message]], 
+        tool: Callable[..., Union[
+            Callable[..., Awaitable[ToolCallResult]], 
+            Callable[..., ToolCallResult], 
+        ]], 
         tags: list[str] = [],
     ) -> None:
         """Add a tool to the mixin.
@@ -143,8 +147,8 @@ class Workflow(Protocol):
         Args:
             name (str):
                 The name of the tool.
-            tool (Callable[..., Awaitable[Message]]):
-                The tool to add. This tool should return the message. 
+            tool (Callable[..., Union[Callable[..., Awaitable[ToolCallResult]], Callable[..., ToolCallResult]]]):
+                The tool to add. This tool should return the tool call result. 
             tags (list[str], optional):
                 The tags of the tool.
                 
@@ -159,8 +163,11 @@ class Workflow(Protocol):
         self, 
         name: str, 
         tags: list[str] = [], 
-    ) -> Callable[..., Awaitable[Message]]:
-        """This is a FastAPI like decorator to register a tool to the mixin.
+    ) -> Callable[..., Union[
+        Callable[..., Awaitable[ToolCallResult]], 
+        Callable[..., ToolCallResult], 
+    ]]:
+        """This is a FastAPI like decorator to register a tool to the workflow.
         
         Args:
             name (str):
@@ -169,8 +176,13 @@ class Workflow(Protocol):
                 The tags of the tool.
                 
         Returns:
-            Callable[..., Awaitable[Message]]:
-                The function registered.
+            Callable[..., Union[
+                Callable[..., Awaitable[ToolCallResult]], 
+                Callable[..., ToolCallResult], 
+            ]]:
+                If the tool is async, return the async function.
+            Callable[..., Callable[..., ToolCallResult]]:
+                If the tool is sync, return the sync function.
         """
         pass
     
@@ -194,7 +206,7 @@ class Workflow(Protocol):
         task: Task, 
         tool_call: ToolCallRequest, 
         **kwargs, 
-    ) -> Message:
+    ) -> ToolCallResult:
         """Call a tool to control the workflow.
         
         Args:
@@ -206,8 +218,8 @@ class Workflow(Protocol):
                 The additional keyword arguments for calling the tool.
                 
         Returns:
-            Message:
-                The message returned by the tool call. 
+            ToolCallResult:
+                The tool call result. 
                 
         Raises:
             ValueError:
@@ -246,6 +258,22 @@ class Workflow(Protocol):
         ```
         """
         pass
+    
+    
+class AgentType(Enum):
+    """The type of the agent.
+    
+    Attributes:
+        REACTOR (str):
+            The reason and act agent. This agent works on a basic reason and act workflow. 
+        ORCHESTRATOR (str):
+            The orchestrator agent. This agent works on an objective and key outputs orchestration workflow. 
+        PLAN_AND_EXECUTOR (str):
+            The plan and executor agent. This agent works on a plan and executor workflow. 
+    """
+    REACTOR = "reactor"
+    ORCHESTRATOR = "orchestrator"
+    PLAN_AND_EXECUTOR = "plan_and_executor"
 
 
 @runtime_checkable
@@ -257,6 +285,8 @@ class Agent(Protocol):
             The unique identifier of the agent.
         name (str):
             The name of the agent.
+        type (AgentType):
+            The type of the agent.
         profile (str):
             The profile of the agent.
         llm (LLM):
@@ -269,48 +299,61 @@ class Agent(Protocol):
             The environment to that the agent is running on.
         step_counters (dict[str, StepCounter]):
             The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
+        lock (Lock):
+            The synchronization lock of the agent. The agent can only work on one task at a time. 
     """
     # Basic information
     uid: str
     name: str
+    type: AgentType
     profile: str
     # LLM and MCP client
     llm: LLM
     mcp_client: MCPClient
-    # Workflow and environment
+    # Workflow and environment and running context
     workflow: Workflow
     env: Environment
     # Step counters for the agent
     step_counters: dict[str, StepCounter]
+    # Synchronization lock
+    lock: Lock
     
     @abstractmethod
-    async def observe(self, target: Union[Task, Environment], **kwargs) -> str:
-        """Observe the task or environment.
+    async def observe(
+        self, 
+        target: Union[Task, Environment, Any], 
+        observe_func: Optional[Callable[..., Awaitable[Union[str, list[dict]]]]] = None, 
+        **kwargs, 
+    ) -> Union[str, list[dict]]:
+        """Observe the target. If the target is not a task or environment, you should provide the observe 
+        function to get the string or list of dicts observation. 
         
         Args:
-            target (Union[Task, Environment]):
-                The task or environment to observe. 
+            target (Union[Task, Environment, Any]):
+                The target to observe. 
+            observe_func (Callable[..., Awaitable[Union[str, list[dict]]]], optional):
+                The function to observe the target. If not provided, the default observe function will be used. 
             **kwargs:
-                The additional keyword arguments for observing the task or environment. 
+                The additional keyword arguments for observing the target. 
 
         Returns:
-            str:
-                The up to date information observed from the task or environment.  
+            Union[str, list[dict]]:
+                The up to date information observed from the target.  
         """
         pass
     
     @abstractmethod
     async def think(
         self, 
-        observe: list[Message], 
+        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
         tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
         tool_choice: Optional[str] = 'none', 
         **kwargs, 
-    ) -> Message:
+    ) -> AssistantMessage:
         """Think about the observation of the task or environment.
         
         Args:
-            observe (list[Message]):
+            observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
                 The messages observed from the task or environment. 
             tools (Optional[dict[str, Union[FastMcpTool, MCPTool]]], defaults to {}):
                 The tools allowed to be used for the agent. 
@@ -323,26 +366,25 @@ class Agent(Protocol):
                 The additional keyword arguments for thinking about the task or environment. 
                 
         Returns:
-            Message:
+            AssistantMessage:
                 The completion message thought about by the LLM. 
         """
         pass
     
     @abstractmethod
-    async def act(self, target: Union[Task, Environment], tool_call: ToolCallRequest, **kwargs) -> Message:
-        """Act on the environment or task.
+    async def act(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
+        """Take an Action according to the tool call. Other arguments can be provided to the tool 
+        calling through the keyword arguments. 
         
         Args:
-            target (Union[Task, Environment]):
-                The task or environment to act on.
             tool_call (ToolCallRequest):
-                The tool call request to act on the environment.
+                The tool call request including the tool call id and the tool call arguments.
             **kwargs:
-                The additional keyword arguments for acting on the environment.
+                The additional keyword arguments for calling the tool.
                 
         Returns:
-            Message:
-                The message returned by the agent after acting on the environment or task.
+            ToolCallResult:
+                The tool call result returned by the agent after acting on the environment or task.
             
         Raises:
             ValueError:
@@ -351,8 +393,8 @@ class Agent(Protocol):
         pass
     
     @abstractmethod
-    async def run(self, target: Union[Task, Environment], **kwargs) -> Message:
-        """Run the agent on the task or environment.
+    async def run(self, target: Union[Task, Environment], **kwargs) -> AssistantMessage:
+        """Run the agent on the task or environment. Before running the agent, you should get the lock of the agent. 
         
         Args:
             target (Union[Task, Environment]):
@@ -361,8 +403,8 @@ class Agent(Protocol):
                 The additional keyword arguments for running the agent.
                 
         Returns:
-            Message:
-                The message returned by the agent after running on the environment or task.
+            AssistantMessage:
+                The assistant message returned by the agent after running on the environment or task.
         """
         pass
     
@@ -377,27 +419,11 @@ class Agent(Protocol):
         pass
 
 
-class ProxyAgent(Agent):
-    """ProxyAgent is a main agent that represent for other agents.
+class LeaderAgent(Agent):
+    """LeaderAgent is a main agent that represent for other agents.
     
     Attributes:
         out_env (Environment):
-            The outside environment that the proxy agent is running on.
+            The outside environment that the leader agent is running on.
     """
     out_env: Environment
-    
-    @abstractmethod
-    async def run(self, target: Union[Task, Environment], **kwargs) -> Message:
-        """Run the proxy agent on the task or environment.
-        
-        Args:
-            target (Union[Task, Environment]):
-                The task or environment to run the proxy agent on.
-            **kwargs:
-                The additional keyword arguments for running the proxy agent.
-                
-        Returns:
-            Message:
-                The message returned by the proxy agent after running on the environment or task.
-        """
-        pass

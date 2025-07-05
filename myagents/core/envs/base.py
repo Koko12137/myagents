@@ -1,126 +1,236 @@
-from typing import Callable, Union, OrderedDict
+import asyncio
+import random
+from abc import abstractmethod
+from asyncio import Semaphore
+from uuid import uuid4
+from typing import Union, Any
 
-from loguru import logger
 from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.core.message import CompletionMessage, ToolCallRequest, ToolCallResult, MessageRole
-from myagents.core.interface import Agent, Workflow, Environment, Logger, EnvironmentStatus, Task
-from myagents.core.workflows.base import BaseWorkflow
+from myagents.core.interface.core import AgentType
+from myagents.core.messages.message import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
+from myagents.core.interface import Agent, Environment, EnvironmentStatus, Context
 from myagents.core.utils.context import BaseContext
-from myagents.core.utils.logger import Logger
+from myagents.core.tools_mixin import ToolsMixin
 
 
-class BaseEnvironment(BaseWorkflow, Environment):
+
+class BaseEnvironment(Environment, ToolsMixin):
     """BaseEnvironment is the base class for all the environments.
     
     Attributes:
+        uid (str):
+            The unique identifier of the environment.
+        name (str):
+            The name of the environment.
+        profile (str):
+            The profile of the environment.
         system_prompt (str):
             The system prompt of the environment.
-            
-        agent (Agent):
-            The agent of the environment.
-        debug (bool):
-            Whether to enable the debug mode.
-        custom_logger (Logger):
-            The custom logger of the environment.
-        context (BaseContext):
-            The context of the environment.
-        
+        required_agents (list[AgentType]):
+            The required agents to work on the environment. The agents in the list must be registered to the environment. 
+        leader (Agent):
+            The leader agent of the environment.
+        agents (dict[str, Agent]):
+            The agents in the environment. The key is the agent name and the value is the agent. 
+        agent_type_map (dict[AgentType, str]):
+            The map of the agent type to the agent name. The key is the agent type and the value is the agent name. 
+        agent_type_semaphore (dict[AgentType, Semaphore]):
+            The semaphore of the agent type. The key is the agent type and the value is the semaphore. 
         tools (dict[str, FastMCPTool]):
-            The tools of the environment.
-        tool_functions (dict[str, Callable]):
-            The tool functions of the environment.
-        workflows (dict[str, Workflow]):
-            The workflows of the environment.
-            
-        tasks (OrderedDict[str, Task]):
-            The tasks of the environment.
-        answers (OrderedDict[str, str]):
-            The answers of the tasks.
+            The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
+        context (Context):
+            The context of the environment.
         status (EnvironmentStatus):
             The status of the environment.
-        history (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]):
+        history (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
             The history of the environment.
     """
+    # Basic information
+    uid: str
+    name: str
+    profile: str
     system_prompt: str
-    
-    agent: Agent
-    debug: bool
-    custom_logger: Logger
-    context: BaseContext
-    
+    required_agents: list[AgentType]
+    # Core components
+    leader: Agent
+    agents: dict[str, Agent]
+    agent_type_map: dict[AgentType, list[str]]
+    agent_type_semaphore: dict[AgentType, Semaphore]
+    # Tools
     tools: dict[str, FastMCPTool]
-    tool_functions: dict[str, Callable]
-    workflows: dict[str, Workflow]
-    
-    tasks: OrderedDict[str, Task]
-    answers: OrderedDict[str, str]
+    # Context
+    context: Context
+    # Status and history
     status: EnvironmentStatus
-    history: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]
+    history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
     
     def __init__(
         self, 
-        agent: Agent, 
-        custom_logger: Logger = logger, 
-        debug: bool = False, 
-        workflows: dict[str, Workflow] = {}, 
-        *args: tuple, 
-        **kwargs: dict, 
+        *args, 
+        **kwargs, 
     ) -> None:
         """Initialize the BaseEnvironment.
         
         Args:
-            agent (Agent):
-                The agent of the environment.
-            custom_logger (Logger):
-                The custom logger of the environment.
-            debug (bool):
-                Whether to enable the debug mode. 
-            workflows (dict[str, Workflow], optional):
-                The workflows that will be orchestrated to process the task.
+            name (str):
+                The name of the environment.
+            profile (str):
+                The profile of the environment.
+            required_agents (list[AgentType]):
+                The required agents to work on the environment. The agents in the list must be registered to the environment. 
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        super().__init__(agent=agent, custom_logger=custom_logger, debug=debug, workflows=workflows, *args, **kwargs)
+        # Initialize the parent class
+        super().__init__(*args, **kwargs)
         
-        # Initialize the tasks and answers
-        self.tasks = OrderedDict()
-        self.answers = OrderedDict()
-        # Initialize the status
+        # Initialize the basic information
+        self.name = None
+        self.profile = None
+        # Initialize the core components
+        self.leader = None
+        self.agents = {}
+        self.required_agents = []
+        self.agent_type_map = {}
+        self.agent_type_semaphore = {}
+        self.tools = {}
+        # Initialize the context
+        self.context = BaseContext()
+        # Initialize the status and history
         self.status = EnvironmentStatus.CREATED
-        # Initialize the history
         self.history = []
-
-    def update(
-        self, 
-        message: Union[CompletionMessage, ToolCallRequest, ToolCallResult], 
-    ) -> None:
-        """Update the environment status.
+        
+        # Initialize the tools
+        try:
+            loop = asyncio.get_running_loop()
+            # 如果已经有事件循环，创建任务并等待完成
+            task = loop.create_task(self.post_init())
+            loop.run_until_complete(task)  # 这行在已运行的loop下会报错
+        except RuntimeError:
+            # 没有事件循环，直接新建一个
+            asyncio.run(self.post_init())
+        
+    @abstractmethod
+    async def post_init(self) -> None:
+        """Post initialize the tools for the workflow.
+        This method should be called after the initialization of the workflow. And you should register the tools in this method. 
+        """
+        pass
+    
+    def register_agent(self, agent: Agent) -> None: 
+        """Register an agent to the environment.
         
         Args:
-            message (Union[CompletionMessage, ToolCallRequest, ToolCallResult]):
-                The message to be updated.
+            agent (Agent):
+                The agent to register.
+                
+        Raises:
+            ValueError:
+                If the agent name is already registered.
         """
-        if len(self.history) > 0 and isinstance(message, CompletionMessage) and message.role == MessageRole.USER:
-            last_message = self.history[-1]
-            # Check if the last message is the same role as the current message
-            if last_message.role == message.role:
-                # Concatenate the content of the last message and the current message
-                last_message.content = f"{last_message.content}\n{message.content}"
-                last_message.stop_reason = message.stop_reason
-            else:
-                # Append the message directly
-                self.history.append(message)
+        # Check if the agent name is already registered
+        if agent.name in self.agents:
+            raise ValueError(f"Agent {agent.name} is already registered.")
+        
+        # Register the agent to the environment
+        self.agents[agent.name] = agent
+        # Set the agent type map
+        if agent.type not in self.agent_type_map:
+            self.agent_type_map[agent.type] = []
+            # Initialize the semaphore
+            self.agent_type_semaphore[agent.type] = Semaphore(1)
         else:
-            # Append the message directly
-            self.history.append(message)
-
-    def reset(self) -> None:
-        """Reset the environment.
+            # Increase the semaphore
+            self.agent_type_semaphore[agent.type].release()
+        
+        self.agent_type_map[agent.type].append(agent.name)
+    
+    def set_leader(self, leader_agent: str) -> None:
+        """Set the leader agent to the environment.
+        
+        Args:
+            leader_agent (str):
+                The name of the leader agent to set.
+                
+        Raises:
+            ValueError:
+                If the leader agent name is not registered.
         """
-        self.status = EnvironmentStatus.CREATED
-        self.history = []
-        self.tasks = OrderedDict()
-        self.answers = OrderedDict()
+        # Check if the leader agent name is registered
+        if leader_agent not in self.agents:
+            raise ValueError(f"Leader agent {leader_agent} is not registered.")
+        
+        # Set the leader agent to the environment
+        self.leader = self.agents[leader_agent]
+    
+    async def call_agent(self, agent_type: AgentType, *args, **kwargs) -> AssistantMessage:
+        """Call an agent to work on the environment and return the message.
+        
+        Attention:
+            If any type of agent is registered more than one, be careful to the synchronization of the agent. 
+            One agent can only work on one task at a time. 
+        
+        Args:
+            agent_type (AgentType):
+                The type of the agent to call.
+            *args:
+                The additional arguments to pass to the agent.
+            **kwargs:
+                The additional keyword arguments to pass to the agent.
+                
+        Returns:
+            AssistantMessage:
+                The message returned by the agent.
+                
+        Raises:
+            ValueError:
+                If the type of this agent is not registered.
+        """
+        # Check if the agent type is registered
+        if agent_type not in self.agent_type_map:
+            raise ValueError(f"Agent type `{agent_type}` is not registered. Please register the agent type to the environment.")
+        
+        # Check if any agent is designed to work on the environment
+        designated_agent = kwargs.get("agent", None)
+        if designated_agent is not None:
+            # Check if the designated agent is registered
+            if designated_agent not in self.agents:
+                raise ValueError(f"Agent {designated_agent} is not registered. Please register the agent to the environment.")
+            # Check if the designated agent is of the same type
+            if self.agents[designated_agent].type != agent_type: 
+                raise ValueError(f"Agent {designated_agent} is not of type {agent_type}. Please register the agent to the environment.")
+            # Acquire the semaphore
+            await self.agent_type_semaphore[agent_type].acquire()
+            # Select the designated agent
+            agent = self.agents[designated_agent]
+        else:
+            # Try to get the agent type from the agent type map
+            agent_names = self.agent_type_map.get(agent_type, [])
+            # Acquire the semaphore
+            await self.agent_type_semaphore[agent_type].acquire()
+            # Select a random agent from the list of agents without locking
+            free_agents = [self.agents[agent_name] for agent_name in agent_names if self.agents[agent_name].lock.locked() is False]
+            agent: Agent = random.choice(free_agents)
+        
+        # Call the agent
+        message: AssistantMessage = await agent.run(self, *args, **kwargs)
+        # Release the semaphore
+        self.agent_type_semaphore[agent_type].release()
+        # Return the message
+        return message
+    
+    @abstractmethod
+    async def run(self, *args, **kwargs) -> Any:
+        """The main entrypoint of the environment. 
+        
+        Args:
+            *args:
+                The additional arguments to pass to the run method of the Environment.
+            **kwargs:
+                The additional keyword arguments to pass to the run method of the Environment.
+        """
+        pass
+    

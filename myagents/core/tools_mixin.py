@@ -1,9 +1,9 @@
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, Union
 
 from fastmcp.tools import Tool as FastMCPTool
 
 from myagents.core.interface import Context
-from myagents.core.message import ToolCallRequest, ToolCallResult
+from myagents.core.messages import ToolCallRequest, ToolCallResult
 
 
 class ToolsMixin:
@@ -21,7 +21,10 @@ class ToolsMixin:
     def add_tool(
         self, 
         name: str, 
-        tool: Callable[..., Awaitable[ToolCallResult]], 
+        tool: Callable[..., Union[
+            Callable[..., Awaitable[ToolCallResult]], 
+            Callable[..., ToolCallResult], 
+        ]], 
         tags: list[str] = [],
     ) -> None:
         """Add a tool to the mixin.
@@ -29,7 +32,7 @@ class ToolsMixin:
         Args:
             name (str):
                 The name of the tool.
-            tool (Callable[..., Awaitable[ToolCallResult]]):
+            tool (Callable[..., Union[Callable[..., Awaitable[ToolCallResult]], Callable[..., ToolCallResult],  ]]):
                 The tool to add. This tool should return the tool call result. 
             tags (list[str], optional):
                 The tags of the tool.
@@ -51,7 +54,10 @@ class ToolsMixin:
         self, 
         name: str, 
         tags: list[str] = [], 
-    ) -> Callable[..., Awaitable[ToolCallResult]]:
+    ) -> Callable[..., Union[
+        Callable[..., Awaitable[ToolCallResult]], 
+        Callable[..., ToolCallResult], 
+    ]]:
         """This is a FastAPI like decorator to register a tool to the mixin.
         
         Args:
@@ -61,22 +67,38 @@ class ToolsMixin:
                 The tags of the tool.
                 
         Returns:
-            Callable[..., Awaitable[ToolCallResult]]:
-                The function registered.
+            Callable[..., Callable[..., Awaitable[ToolCallResult]]]:
+                If the tool is async, return the async function.
+            Callable[..., Callable[..., ToolCallResult]]:
+                If the tool is sync, return the sync function.
         """
         # Define a wrapper function to register the tool
         def wrapper(
-            func: Callable[..., Awaitable[ToolCallResult]]
-        ) -> Callable[..., Awaitable[ToolCallResult]]:
+            func: Callable[..., Union[
+                Callable[..., Awaitable[ToolCallResult]], 
+                Callable[..., ToolCallResult], 
+            ]]
+        ) -> Callable[..., Union[
+            Callable[..., Awaitable[ToolCallResult]], 
+            Callable[..., ToolCallResult], 
+        ]]:
             """Wrapper function to call the tool.
             
             Args:
-                func (Callable[..., Awaitable[ToolCallResult]]):
+                func (Callable[..., Union[
+                    Callable[..., Awaitable[ToolCallResult]], 
+                    Callable[..., ToolCallResult], 
+                ]]):
                     The function to register.
 
             Returns:
-                Callable[..., Awaitable[ToolCallResult]]:
-                    The function registered.
+                Callable[..., Union[
+                    Callable[..., Awaitable[ToolCallResult]], 
+                    Callable[..., ToolCallResult], 
+                ]]:
+                    If the tool is async, return the async function.
+                Callable[..., Callable[..., ToolCallResult]]:
+                    If the tool is sync, return the sync function.
             """
             self.add_tool(name, func, tags=tags)
             return func
