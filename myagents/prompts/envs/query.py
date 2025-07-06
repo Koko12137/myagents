@@ -1,3 +1,14 @@
+NAME = "基础多轮问答环境"
+
+
+PROFILE = """
+问答环境，用于回答问题。回复内容可以是以下的类型：
+- 总结：总结当前任务的答案。
+- 文档：修改当前任务的答案。
+- 选择：选择当前任务的答案。
+"""
+
+
 QUERY_SYSTEM_PROMPT = """
 You are a helpful assistant. You are given a task and a response. You need to post process the response.
 """

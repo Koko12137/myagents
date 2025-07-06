@@ -2,20 +2,18 @@ import asyncio
 import random
 from abc import abstractmethod
 from asyncio import Semaphore
-from uuid import uuid4
 from typing import Union, Any
 
 from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.core.interface.core import AgentType
 from myagents.core.messages.message import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
-from myagents.core.interface import Agent, Environment, EnvironmentStatus, Context
+from myagents.core.interface import Agent, AgentType, Environment, EnvironmentStatus, Context, Stateful
 from myagents.core.utils.context import BaseContext
 from myagents.core.tools_mixin import ToolsMixin
+from myagents.core.state_mixin import StateMixin
 
 
-
-class BaseEnvironment(Environment, ToolsMixin):
+class BaseEnvironment(Environment, ToolsMixin, StateMixin):
     """BaseEnvironment is the base class for all the environments.
     
     Attributes:
@@ -57,11 +55,10 @@ class BaseEnvironment(Environment, ToolsMixin):
     agents: dict[str, Agent]
     agent_type_map: dict[AgentType, list[str]]
     agent_type_semaphore: dict[AgentType, Semaphore]
-    # Tools
+    # Tools Mixin
     tools: dict[str, FastMCPTool]
-    # Context
     context: Context
-    # Status and history
+    # Stateful Mixin
     status: EnvironmentStatus
     history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
     
@@ -112,13 +109,6 @@ class BaseEnvironment(Environment, ToolsMixin):
         except RuntimeError:
             # 没有事件循环，直接新建一个
             asyncio.run(self.post_init())
-        
-    @abstractmethod
-    async def post_init(self) -> None:
-        """Post initialize the tools for the workflow.
-        This method should be called after the initialization of the workflow. And you should register the tools in this method. 
-        """
-        pass
     
     def register_agent(self, agent: Agent) -> None: 
         """Register an agent to the environment.
@@ -126,14 +116,10 @@ class BaseEnvironment(Environment, ToolsMixin):
         Args:
             agent (Agent):
                 The agent to register.
-                
-        Raises:
-            ValueError:
-                If the agent name is already registered.
         """
         # Check if the agent name is already registered
         if agent.name in self.agents:
-            raise ValueError(f"Agent {agent.name} is already registered.")
+            return 
         
         # Register the agent to the environment
         self.agents[agent.name] = agent
@@ -166,7 +152,16 @@ class BaseEnvironment(Environment, ToolsMixin):
         # Set the leader agent to the environment
         self.leader = self.agents[leader_agent]
     
-    async def call_agent(self, agent_type: AgentType, *args, **kwargs) -> AssistantMessage:
+    async def call_agent(
+        self, 
+        agent_type: AgentType, 
+        target: Stateful, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        designated_agent: str = None, 
+        *args, 
+        **kwargs
+    ) -> AssistantMessage:
         """Call an agent to work on the environment and return the message.
         
         Attention:
@@ -176,11 +171,19 @@ class BaseEnvironment(Environment, ToolsMixin):
         Args:
             agent_type (AgentType):
                 The type of the agent to call.
+            target (Stateful):
+                The target to work on.
+            max_error_retry (int, optional):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int, optional):
+                The maximum number of times to idle thinking the agent.
+            designated_agent (str, optional):
+                The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:
                 The additional arguments to pass to the agent.
             **kwargs:
                 The additional keyword arguments to pass to the agent.
-                
+        
         Returns:
             AssistantMessage:
                 The message returned by the agent.
@@ -194,7 +197,6 @@ class BaseEnvironment(Environment, ToolsMixin):
             raise ValueError(f"Agent type `{agent_type}` is not registered. Please register the agent type to the environment.")
         
         # Check if any agent is designed to work on the environment
-        designated_agent = kwargs.get("agent", None)
         if designated_agent is not None:
             # Check if the designated agent is registered
             if designated_agent not in self.agents:
@@ -216,7 +218,13 @@ class BaseEnvironment(Environment, ToolsMixin):
             agent: Agent = random.choice(free_agents)
         
         # Call the agent
-        message: AssistantMessage = await agent.run(self, *args, **kwargs)
+        message: AssistantMessage = await agent.run(
+            target, 
+            max_error_retry, 
+            max_idle_thinking, 
+            *args, 
+            **kwargs,
+        )
         # Release the semaphore
         self.agent_type_semaphore[agent_type].release()
         # Return the message
@@ -234,3 +242,72 @@ class BaseEnvironment(Environment, ToolsMixin):
         """
         pass
     
+    def __str__(self) -> str:
+        """Get the string representation of the environment.
+        """
+        return f"BaseEnvironment(name={self.name}, profile={self.profile}, status={self.status})"
+    
+    def __repr__(self) -> str:
+        """Get the string representation of the environment.
+        """
+        return self.__str__()
+    
+    def to_created(self) -> None:
+        """Set the environment to created status.
+        """
+        self.status = EnvironmentStatus.CREATED
+        
+    def is_created(self) -> bool:
+        """Check if the environment is created.
+        """
+        return self.status == EnvironmentStatus.CREATED
+    
+    def to_planning(self) -> None:
+        """Set the environment to planning status.
+        """
+        self.status = EnvironmentStatus.PLANNING
+    
+    def is_planning(self) -> bool:
+        """Check if the environment is planning.
+        """
+        return self.status == EnvironmentStatus.PLANNING
+    
+    def to_running(self) -> None:
+        """Set the environment to running status.
+        """
+        self.status = EnvironmentStatus.RUNNING
+    
+    def is_running(self) -> bool:
+        """Check if the environment is running.
+        """
+        return self.status == EnvironmentStatus.RUNNING
+    
+    def to_finished(self) -> None:
+        """Set the environment to finished status.
+        """
+        self.status = EnvironmentStatus.FINISHED
+        
+    def is_finished(self) -> bool:
+        """Check if the environment is finished.
+        """
+        return self.status == EnvironmentStatus.FINISHED
+    
+    def to_error(self) -> None:
+        """Set the environment to error status.
+        """
+        self.status = EnvironmentStatus.ERROR
+        
+    def is_error(self) -> bool:
+        """Check if the environment is error.
+        """
+        return self.status == EnvironmentStatus.ERROR
+    
+    def to_cancelled(self) -> None:
+        """Set the environment to cancelled status.
+        """
+        self.status = EnvironmentStatus.CANCELLED
+
+    def is_cancelled(self) -> bool:
+        """Check if the environment is cancelled.
+        """
+        return self.status == EnvironmentStatus.CANCELLED

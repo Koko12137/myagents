@@ -1,9 +1,11 @@
 import asyncio
 from abc import abstractmethod
+from enum import Enum
+from typing import Union, Any, Awaitable
 
 from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.core.interface import Agent, Task, Workflow
+from myagents.core.interface import Agent, Workflow, Stateful
 from myagents.core.utils.context import BaseContext
 from myagents.core.tools_mixin import ToolsMixin
 
@@ -14,35 +16,30 @@ class BaseWorkflow(Workflow, ToolsMixin):
     Attributes:
         profile (str):
             The profile of the workflow.
+        system_prompt (str):
+            The system prompt of the workflow.
         agent (Agent):
-            The agent. 
+            The agent that is used to work with the workflow.
         context (BaseContext):
             The context of the tool call.
         tools (dict[str, FastMCPTool]):
             The tools of the workflow.
     """
     profile: str
+    system_prompt: str
     agent: Agent
+    # Tools Mixin
     context: BaseContext
     tools: dict[str, FastMCPTool]
     
-    def __init__(
-        self, 
-        profile: str = "", 
-        agent: Agent = None, 
-        *args, 
-        **kwargs, 
-    ) -> None:
-        """Initialize the BaseWorkflow. This will initialize the following components:
-        
-        - profile: The profile of the workflow.
-        - agent: The agent that is used to work with the workflow.
-        - context: The global context container of the workflow.
-        - tools: The tools' description that can be used for the workflow.
+    def __init__(self, *args, **kwargs) -> None:
+        """Initialize the BaseWorkflow. 
         
         Args:
             profile (str, optional):
                 The profile of the workflow.
+            system_prompt (str, optional):
+                The system prompt of the workflow.
             agent (Agent, optional):
                 The agent that is used to work with the workflow.
             *args:
@@ -54,16 +51,13 @@ class BaseWorkflow(Workflow, ToolsMixin):
         super().__init__(*args, **kwargs)
         
         # Initialize the workflow components
-        self.profile = profile
-        self.agent = agent
+        self.profile = None
+        self.system_prompt = None
+        self.agent = None
         
         # Initialize the tools and context
         self.tools = {}
-        self.context = BaseContext(
-            prev=None,
-            next=None,
-            key_values={}
-        )
+        self.context = BaseContext()
 
         # Post initialize
         try:
@@ -81,62 +75,93 @@ class BaseWorkflow(Workflow, ToolsMixin):
         Args:
             agent (Agent):
                 The agent to register.
-                
-        Raises:
-            ValueError:
-                If the workflow already has an agent.
         """
         # Check if the agent is registered
         if self.agent is not None:
-            raise ValueError("The workflow already has an agent.")
+            return 
         
         # Register the agent to the workflow
         self.agent = agent
-        
-    @abstractmethod
-    async def post_init(self) -> None:
-        """Post initialize the tools for the workflow.
-        This method should be called after the initialization of the workflow. And you should register the tools in this method. 
-        
-        Example:
-        ```python
-        async def post_init(self) -> None:
-            
-            @self.register_tool("tool_name")
-            def tool_function(self, *args, **kwargs) -> Any:
-                pass
-        ```
-        """
-        pass
     
     @abstractmethod
-    async def run(self, task: Task) -> Task:
+    async def run(
+        self, 
+        target: Union[Stateful, Any], 
+        running_status: Enum, 
+        finish_status: Enum, 
+        error_status: Enum, 
+        max_error_retry: int = 3, 
+        observe_func: Awaitable[Union[str, list[dict]]] = None,
+        process_error_func: Awaitable[None] = None,
+        *args, 
+        **kwargs,
+    ) -> Union[Stateful, Any]:
         """Run the workflow from the environment or task.
 
         Args:
-            task (Task): 
-                The task to run the workflow.
+            target (Union[Stateful, Any]): 
+                The stateful entity or any other entity to run the workflow.
+            running_status (Enum):
+                The status of the target, the workflow will stop running when the target status is the same as the 
+                running status.
+            finish_status (Enum):
+                The status of the target, the workflow will exit when the target status is the same as the finish status.
+            error_status (Enum):
+                The status of the target, the workflow will enter the error process when the target status is the same as the 
+                error status.
+            max_error_retry (int, optional, defaults to 3):
+                The maximum number of times to retry the workflow when the target is errored.
+            observe_func (Awaitable[Union[str, list[dict]]], optional):
+                The function to observe the target. If not provided, the default observe function will be used. 
+            process_error_func (Awaitable[None], optional):
+                The function to process the error of the target. If not provided, the default process error function will be used. 
+            *args:
+                The additional arguments for running the workflow.
+            **kwargs:
+                The additional keyword arguments for running the workflow.
 
         Returns:
-            Task: 
-                The task after running the workflow.
+            Union[Stateful, Any]: 
+                The stateful entity or any other entity after running the workflow.
                 
         Example:
         ```python
-        async def run(self, task: Task) -> Task:
+        async def run(
+            self, 
+            target: Stateful, 
+            running_status: Enum, 
+            finish_status: Enum, 
+            error_status: Enum, 
+            max_error_retry: int, 
+            *args, 
+            **kwargs,
+        ) -> Stateful:
+            # Update system prompt to history
+            message = SystemMessage(content=self.system_prompt)
             
             # A while loop to run the workflow until the task is finished.
-            while task.status != TaskStatus.FINISHED:
-                # 1. Observe the task
-                observe = await self.observe(task)
-                # 2. Think about the task
-                completion = await self.think(observe, allow_tools=True)
-                # 3. Act on the task
-                task = await self.act(task, completion.tool_calls)
-                # 4. Reflect the task
-                task = await self.reflect(task)
+            while target.status != running_status:
+            
+                # Check if the target is finished
+                if target.status == finish_status:
+                    return target
+                    
+                # Check if the target is errored
+                elif target.status == error_status:
+                    process_error(target, max_error_retry)
                 
-            return task
+                # Run the workflow
+                else:
+                    # Observe the task
+                    observe = await self.observe(target)
+                    # Think about the task
+                    completion = await self.think(observe, allow_tools=True)
+                    # Act on the task
+                    target = await self.act(target, completion.tool_calls)
+                    # Reflect the task
+                    target = await self.reflect(target)
+                
+            return target
         ```
         """
         pass

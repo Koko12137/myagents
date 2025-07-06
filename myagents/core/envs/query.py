@@ -1,4 +1,3 @@
-import re
 import uuid
 import inspect
 from asyncio import Semaphore
@@ -11,26 +10,15 @@ from loguru import logger
 from fastmcp.tools import Tool as FastMCPTool
 
 from myagents.core.messages.message import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, MessageRole, StopReason
-from myagents.core.interface import Agent, AgentType, Task, Environment, Context, EnvironmentStatus, TaskStatus
+from myagents.core.interface import Agent, AgentType, Task, Context, EnvironmentStatus, TaskStatus
 from myagents.core.envs.task import BaseTask, TaskAnswerView
 from myagents.core.envs.base import BaseEnvironment
 from myagents.core.utils.tools import ToolView
 from myagents.tools.docs import DocumentLog, BaseDocument, FormatType
-from myagents.prompts.envs.query import QUERY_SYSTEM_PROMPT, QUERY_POST_PROCESS_PROMPT
+from myagents.prompts.envs.query import QUERY_SYSTEM_PROMPT, QUERY_POST_PROCESS_PROMPT, NAME, PROFILE
 
 
-NAME = "基础多轮问答环境"
-
-
-PROFILE = """
-问答环境，用于回答问题。回复内容可以是以下的类型：
-- 总结：总结当前任务的答案。
-- 文档：修改当前任务的答案。
-- 选择：选择当前任务的答案。
-"""
-
-
-REQUIRED_AGENTS = [AgentType.ORCHESTRATOR, AgentType.REACTOR, AgentType.PLAN_AND_EXECUTOR]
+REQUIRED_AGENTS = [AgentType.ORCHESTRATE, AgentType.REACT, AgentType.PLAN_AND_EXECUTE]
 
 
 class OutputType(Enum):
@@ -39,6 +27,8 @@ class OutputType(Enum):
     - "summary": The output should be a summary of the answer. Only the summary would be output to user. 
     - "document": The output should be a document of the answer. This means that you can only modify 
     the content of the answer by `diff` command. And all the content would be output to user. 
+    - "selection": The output should be a selection of the answer. This means that you can only select 
+    the answer by `select_answer` command. 
     """
     SUMMARY = "summary"
     DOCUMENT = "document"
@@ -122,7 +112,7 @@ class Query(BaseEnvironment):
         """Post init is the method that will be called after the initialization of the workflow.
         """
         @self.register_tool("finish_query")
-        async def finish_query() -> None:
+        async def finish_query() -> ToolCallResult:
             """
             完成当前任务。当你认为当前任务已经完成时，你可以选择以下任一方式来完成任务：
             
@@ -133,13 +123,23 @@ class Query(BaseEnvironment):
                 None
                 
             Returns:
-                None
+                ToolCallResult:
+                    The tool call result.
             """
+            # Get the tool call
+            tool_call = self.context.get("tool_call")
             # Set the query status to finished
             self.status = EnvironmentStatus.FINISHED
+            # Create a new tool call result
+            result = ToolCallResult(
+                tool_call_id=tool_call.id, 
+                is_error=False, 
+                content=f"任务已设置为 {EnvironmentStatus.FINISHED.value} 状态。",
+            )
+            return result
             
         @self.register_tool("diff_modify")
-        async def diff_modify(action: str, line_num: int, content: str) -> None:
+        async def diff_modify(action: str, line_num: int, content: str) -> ToolCallResult:
             """
             修改当前任务的答案。
             
@@ -150,11 +150,15 @@ class Query(BaseEnvironment):
                     当前文档的行号。
                 content (str):
                     当前文档的修改内容。
+                
+            Returns:
+                ToolCallResult:
+                    The tool call result.
             """
+            # Get the tool call
+            tool_call = self.context.get("tool_call")
             # 获取当前文档对象
             document: BaseDocument = self.context.get("document")
-            if document is None:
-                raise ValueError("No document found in context for diff_modify.")
             # 解析diff字符串为DocumentLog列表
             logs = []
             logs.append(DocumentLog(action=action, line=line_num, content=content))
@@ -164,11 +168,14 @@ class Query(BaseEnvironment):
             document.modify(logs)
             # 更新当前文档对象
             self.context["document"] = document
-        
-        # Check the registered tools count
-        if len(self.tools) == 0:
-            logger.error(f"Query 注册的工具为空: {format_exc()}")
-            raise RuntimeError("No tools registered for the query environment.")
+            
+            # Create a new tool call result
+            result = ToolCallResult(
+                tool_call_id=tool_call.id, 
+                is_error=False, 
+                content=f"文档已修改。",
+            )
+            return result
         
         @self.register_tool("select_answer")
         async def select_answer(answer: str) -> str:
@@ -187,149 +194,30 @@ class Query(BaseEnvironment):
             """
             # Get the task
             task: Task = self.context.get("task")
+            # Get the tool call
+            tool_call = self.context.get("tool_call")
             # Set the answer to self.answers
             self.answers[task.question] = answer
             # Set the status to finished
             self.status = EnvironmentStatus.FINISHED
-            # Return the answer
-            return answer
+            # Create a new tool call result
+            result = ToolCallResult(
+                tool_call_id=tool_call.id, 
+                is_error=False, 
+                content=f"答案已选择。",
+            )
+            return result
+        
+        # Check the registered tools count
+        if len(self.tools) == 0:
+            logger.error(f"Query 注册的工具为空: {format_exc()}")
+            raise RuntimeError("No tools registered for the query environment.")
         
         # Check the tools
         tool_str = ""
         for tool in self.tools.values():
             tool_str += f"{ToolView(tool).format()}\n"
         logger.debug(f"Tools: \n{tool_str}")
-
-    async def __post_process(self, task: Task, output_type: OutputType) -> str:
-        """Post process the answer.
-        
-        Args:
-            task (Task):
-                The task to be post processed.
-            output_type (OutputType):
-                The type of the output.
-                
-        Returns:
-            str:
-                The answer to the question.
-        """
-        # Designate the tool choice
-        if output_type == OutputType.SELECTION:
-            tool_choice = self.tools["select_answer"]
-        else:
-            tool_choice = "auto"
-        
-        # Additional tools information for tool calling
-        tools_str = "\n".join([ToolView(tool).format() for tool in self.tools.values()])
-        # Get the command explanation
-        command_explanation = inspect.getdoc(OutputType)
-        # Get the context view of the task
-        context_view = await self.agent.observe(task)
-        
-        # This is used for no tool calling thinking limit.
-        # If the agent is thinking more than max_thinking times, the loop will be finished.
-        max_thinking = 3
-        current_thinking = 0
-        
-        while self.status == EnvironmentStatus.RUNNING:
-            # Create a message for the post process
-            message = AssistantMessage(
-                role=MessageRole.USER, 
-                content=QUERY_POST_PROCESS_PROMPT.format(
-                    output_type=output_type, 
-                    task=context_view,
-                    tools=tools_str,
-                    command_explanation=command_explanation,
-                ), 
-                stop_reason=StopReason.NONE, 
-            )
-            # Record the post process message
-            self.update(message)
-            # Call for completion
-            message: AssistantMessage = await self.agent.think(
-                self.history, 
-                allow_tools=False, 
-                external_tools=self.tools, 
-                tool_choice=tool_choice,
-            )
-            # Record the completion message
-            self.update(message)
-            # Log the message
-            logger.info(f"模型回复: \n{message.content}")
-                
-            # Extract the finish flag
-            finish_flag = re.search(r"<finish_flag>\s*\n(.*)\n\s*</finish_flag>", message.content, re.DOTALL)
-            if finish_flag:
-                # Extract the finish flag
-                finish_flag = finish_flag.group(1)
-                # Check if the finish flag is True
-                if finish_flag == "True":
-                    finish_flag = True
-                else:
-                    finish_flag = False
-            else:
-                finish_flag = False
-                
-            # Check the stop reason
-            if message.stop_reason == StopReason.TOOL_CALL:
-                # Reset the current thinking
-                current_thinking = 0
-                
-                # Traverse all the tool calls
-                for tool_call in message.tool_calls:
-                    try:
-                        # Call from the agent. 
-                        # If there is any error caused by the tool call, the flag `is_error` will be set to True. 
-                        # However, if there is any error caused by the MCP client connection, this should raise a RuntimeError. 
-                        tool_result = await self.agent.call_tool(task, tool_call)
-                        
-                    except Exception as e:
-                        # May be caused by the workflow tools. 
-                        tool_result = ToolCallResult(
-                            tool_call_id=tool_call.id, 
-                            is_error=True, 
-                            content=e
-                        )
-                        logger.error(f"工具调用 {tool_call.name} 失败: \n{tool_result.content}")
-                    # Update the messages
-                    self.update(tool_result)
-                    
-            elif finish_flag:
-                logger.info(f"总结或修订任务执行完成: \n{task.question}") 
-                # Set the status to finished
-                self.status = EnvironmentStatus.FINISHED
-                break
-            else:
-                # Update the current thinking
-                current_thinking += 1
-                # Log the current thinking
-                logger.warning(f"模型没有执行动作,当前思考次数: {current_thinking}")
-            
-                # Check if the current thinking is reached the limit
-                if current_thinking >= max_thinking:
-                    # The current thinking is reached the limit, end the workflow
-                    logger.error(f"当前任务执行已达到最大思考次数，总结或修订任务执行结束: \n{task.question}")
-                    self.status = EnvironmentStatus.FINISHED
-                    # Announce the idle thinking
-                    message = AssistantMessage(
-                        role=MessageRole.USER, 
-                        content=f"你目前已经达到了最大思考次数，你将没有机会更新答案。",
-                    )
-                    self.update(message)
-                    # Force the loop to break
-                    break
-                
-                # Announce the idle thinking
-                message = AssistantMessage(
-                    role=MessageRole.USER, 
-                    content=f"你目前已经思考了 {current_thinking} 次，最多思考 {max_thinking} 次后会被强制停止思考并退出循环，并且你将没有机会更新答案。",
-                )
-                self.update(message)
-        
-        # Set the answer
-        document: BaseDocument = self.context.get("document")
-        # Return the answer
-        return document.format(FormatType.ARTICLE)
                 
     async def run(
         self, 
@@ -390,17 +278,25 @@ class Query(BaseEnvironment):
         # Log the task
         logger.info(f"任务创建: \n{task.question}")
         
-        # Call for OKR orchestration
-        message: AssistantMessage = await self.leader.run(task)
+        # Call for global orchestration
+        message: AssistantMessage = await self.call_agent(
+            AgentType.ORCHESTRATE, 
+            task, 
+            running_status=TaskStatus.CREATED, 
+            finish_status=TaskStatus.PLANNING, 
+            error_status=TaskStatus.ERROR, 
+        )
         # Update the environment history
         self.update(message)
         
-        # Call for react flow
-        message: AssistantMessage = await self.leader.run(task)
-        # Update the environment history
-        self.update(message)
-        # Run the react flow
-        message: AssistantMessage = await self.leader.run(task)
+        # Call for plan and execute
+        message: AssistantMessage = await self.call_agent(
+            AgentType.PLAN_AND_EXECUTE, 
+            task, 
+            running_status=TaskStatus.PLANNING, 
+            finish_status=TaskStatus.FINISHED, 
+            error_status=TaskStatus.ERROR, 
+        )
         # Update the environment history
         self.update(message)
         
@@ -445,46 +341,46 @@ class Query(BaseEnvironment):
                     content=line_view,
                 )
             )
-            """ [[ ## Post process the answer ##]] """
-            # Set the document to the context
-            self.context = self.context.create_next(document=document, task=task)
-            # Post process the answer
-            answer = await self.__post_process(task, output_type)
-            # Record the answer
-            self.answers[task.question] = answer
+            """ [[ ## Post process the answer ## ]] """
+            # Call for react agent to modify the document or select the answer
+            message: AssistantMessage = await self.call_agent(
+                AgentType.REACT, 
+                target=task, 
+                document=document, 
+            )
+            # Update the environment history
+            self.update(message)
             # Log the answer
-            logger.info(f"最终文档: \n{answer}")
-            # Resume the context
-            self.context = self.context.done()
+            logger.info(f"模型回复: \n{message.content}")
             # Return the answer
-            return answer
+            return message.content
         
         elif output_type == OutputType.SELECTION:
             # Set the answer view of the task as the output history
             # This is used for the selection output type. 
             content = TaskAnswerView(task).format()
-            # Log the content
-            logger.info(f"选择题分析过程: \n{content}")
-            # Update the history
-            self.update(
-                AssistantMessage(
-                    role=MessageRole.ASSISTANT, 
-                    content=content,
-                )
+            # Create a new UserMessage
+            user_message = UserMessage(
+                role=MessageRole.USER, 
+                content=QUERY_POST_PROCESS_PROMPT.format(
+                    output_type=output_type.value, 
+                    command_explanation=inspect.getdoc(OutputType), 
+                    task=task.question, 
+                ),
             )
-            """ [[ ## Post process the answer ##]] """
-            # Set the task to the context
-            self.context = self.context.create_next(task=task)
-            # Post process the answer
-            answer = await self.__post_process(task, output_type)
-            # Record the answer
-            self.answers[task.question] = answer
+            # Update the environment history
+            self.update(user_message)
+            # Call for react agent to select the answer
+            message: AssistantMessage = await self.call_agent(
+                AgentType.REACT, 
+                target=task, 
+            )
+            # Update the environment history
+            self.update(message)
             # Log the answer
-            logger.info(f"最终答案: \n{answer}")
-            # Resume the context
-            self.context = self.context.done()
+            logger.info(f"模型回复: \n{message.content}")
             # Return the answer
-            return content
+            return message.content
         
         else:
             raise ValueError(f"Unknown output type: {output_type}")

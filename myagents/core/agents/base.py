@@ -1,19 +1,15 @@
 import traceback
 from asyncio import Queue, Lock
-from typing import overload, Union, Optional, Callable, Awaitable, Any
+from typing import Union, Optional, Callable, Awaitable, Any
 
-from loguru import logger
 from fastmcp import Client as MCPClient
 from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
 from mcp import Tool as MCPTool
 
-from myagents.core.interface.core import Workflow, AgentType
 from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult
-from myagents.core.interface import LLM, Agent, StepCounter, Task, Environment, Logger
-from myagents.core.envs.task import TaskContextView
+from myagents.core.interface import LLM, Agent, AgentType, StepCounter, Environment, Stateful, Workflow
 from myagents.core.utils.tools import tool_schema
-from myagents.core.utils.context import BaseContext
 from myagents.core.utils.step_counters import MaxStepsError
 
 
@@ -45,6 +41,7 @@ class BaseAgent(Agent):
             The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
         lock (Lock):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
+            If the agent is running concurrently, the global context may not be working properly.
     """
     # Basic information
     uid: str
@@ -87,18 +84,9 @@ class BaseAgent(Agent):
         # Initialize the parent class
         super().__init__(*args, **kwargs)
         
-        # Initialize the basic information
-        self.uid = None
-        self.name = None
-        self.type = None
-        self.profile = None
-        self.system_prompt = None
         # Initialize the LLM and MCP client
         self.llm = llm
         self.mcp_client = mcp_client
-        # Initialize the workflow and environment
-        self.workflow = None
-        self.env = None
         # Initialize the step counters
         self.step_counters = {counter.uname: counter for counter in step_counters}
         # Initialize the synchronization lock
@@ -106,7 +94,7 @@ class BaseAgent(Agent):
     
     async def observe(
         self, 
-        target: Union[Task, Environment, Any], 
+        target: Union[Stateful, Any], 
         observe_func: Optional[Callable[..., Awaitable[Union[str, list[dict]]]]] = None, 
         **kwargs, 
     ) -> Union[str, list[dict]]:
@@ -114,8 +102,8 @@ class BaseAgent(Agent):
         function to get the string or list of dicts observation. 
         
         Args:
-            target (Union[Task, Environment, Any]): 
-                The target to observe. 
+            target (Union[Stateful, Any]): 
+                The stateful entity or any other entity to observe. 
             observe_func (Callable[..., Awaitable[Union[str, list[dict]]]], optional):
                 The function to observe the target. If not provided, the default observe function will be used. 
             **kwargs:
@@ -123,22 +111,18 @@ class BaseAgent(Agent):
             
         Returns:
             Union[str, list[dict]]:
-                The up to date information observed from the target.  
+                The up to date information observed from the stateful entity or any other entity.  
         """
-        # If the observe function is provided, use it to observe the target directly
-        if observe_func is not None:
-            observation = await observe_func(target, **kwargs)
-            return observation
-        
-        # If the target is a task, use the TaskContextView to format the task
-        elif isinstance(target, Task):
-            observation = TaskContextView(target).format()
-        # If the target is a environment, use the TaskContextView to format the environment
-        elif isinstance(target, Environment):
-            raise NotImplementedError("Environment is not supported for observation.")
-        else:
-            raise ValueError(f"Unsupported target type: {type(target)}, please provide the observe function to observe the target.")
-        
+        # Check if the target is observable
+        if not isinstance(target, Stateful):
+            if observe_func is None:
+                raise ValueError("The target is not observable and the observe function is not provided.")
+            else:
+                observation = await observe_func(target, **kwargs)
+                return observation
+
+        # Call the observe function of the target
+        observation = await target.observe(**kwargs)
         return observation
         
     async def think(
@@ -233,6 +217,10 @@ class BaseAgent(Agent):
                 # Call the tool from the environment
                 result = await self.env.call_tool(tool_call, **kwargs)
                 return result
+            elif tool_call.name in self.workflow.tools:
+                # Call the tool from the workflow
+                result = await self.workflow.call_tool(tool_call, **kwargs)
+                return result
             else:
                 raise ValueError(f"Tool {tool_call.name} is not registered to the agent or environment.")
         
@@ -263,6 +251,49 @@ class BaseAgent(Agent):
             content=res.content, 
             is_error=res.is_error, 
         )
+
+    async def run(
+        self, 
+        target: Stateful, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        *args, 
+        **kwargs
+    ) -> AssistantMessage:
+        """Run the agent on the task or environment. Before running the agent, you should get the lock of the agent. 
+        
+        Args:
+            target (Stateful): 
+                The stateful entity to run the agent on. 
+            max_error_retry (int): 
+                The maximum number of times to retry the agent when the target is errored. 
+            max_idle_thinking (int): 
+                The maximum number of times to idle thinking the agent. 
+            *args:
+                The additional arguments for running the agent.
+            **kwargs:
+                The additional keyword arguments for running the agent.
+                
+        Returns:
+            AssistantMessage:
+                The assistant message returned by the agent after running on the stateful entity or any other entity.
+        """
+        # Get the lock of the agent
+        await self.lock.acquire()
+        
+        # Call for running the workflow
+        target = await self.workflow.run(
+            target, 
+            max_error_retry, 
+            max_idle_thinking, 
+            *args, 
+            **kwargs,
+        )
+        
+        # Release the lock of the agent
+        self.lock.release()
+        
+        return target
 
     def register_counter(self, counter: StepCounter) -> None:
         """Register a step counter to the base agent.

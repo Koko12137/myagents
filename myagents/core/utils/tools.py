@@ -1,8 +1,5 @@
-from typing import Any, Optional
-
 from mcp import Tool as MCPTool
 from fastmcp.tools import Tool as FastMcpTool
-from pydantic import BaseModel
 
 from myagents.core.interface import Provider
 
@@ -72,7 +69,7 @@ class ToolView:
     """
     tool: MCPTool | FastMcpTool
     template: str = """
-    ==== {name} ====
+    ==== Function: {name} ====
     {description}
     """
     
