@@ -32,24 +32,37 @@ class StateMixin(Stateful):
         Returns:
             None
         """
-        # Check if the history is empty
-        if (
-            len(self.history[self.status]) > 0 and 
-            isinstance(message, AssistantMessage) and 
-            message.role == MessageRole.USER
-        ):
+        if isinstance(message, SystemMessage) and len(self.history[self.status]) > 0:
+            # Convert the SystemMessage to a UserMessage
+            message = UserMessage(content=message.content)
+            return self.update(message)
+        
+        elif isinstance(message, UserMessage) and len(self.history[self.status]) > 0:
             last_message = self.history[self.status][-1]
-            # Check if the last message is the same role as the current message
-            if last_message.role == message.role:
-                # Concatenate the content of the last message and the current message
+            if last_message.role == MessageRole.USER:
                 last_message.content = f"{last_message.content}\n{message.content}"
                 last_message.stop_reason = message.stop_reason
             else:
-                # Append the message directly
                 self.history[self.status].append(message)
+        
+        elif isinstance(message, AssistantMessage):
+            if len(self.history[self.status]) == 0:
+                raise ValueError("The history is empty, but the message is an assistant message.")
+            elif self.history[self.status][-1].role == MessageRole.ASSISTANT:
+                raise ValueError("The last message is an assistant message, but another new assistant message is coming.")
+            else:
+                self.history[self.status].append(message)
+        
+        elif isinstance(message, ToolCallResult):
+            if len(self.history[self.status]) == 0:
+                raise ValueError("The history is empty, but the message is a tool call result.")
+            elif self.history[self.status][-1].role == MessageRole.USER:
+                raise ValueError("The last message is a user message, but a tool call result is coming.")
+            else:
+                self.history[self.status].append(message)
+            
         else:
-            # Append the message directly
-            self.history[self.status].append(message)
+            raise ValueError(f"The message is not a valid message: {type(message)}")
             
     def get_history(self) -> list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]:
         """Get the history of the stateful entity according to the current status.

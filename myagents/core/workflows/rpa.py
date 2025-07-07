@@ -1,103 +1,66 @@
-from typing import Callable
 from traceback import format_exc
 
 from loguru import logger
-from fastmcp.tools import Tool as FastMCPTool
+from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.envs.task import TaskContextView
-from myagents.core.interface import Agent, Task, TaskStatus, Logger, Workflow, Context
+from myagents.core.interface import Agent, Task, TaskStatus, Stateful
+from myagents.core.utils.context import BaseContext
 from myagents.core.messages import ToolCallRequest, ToolCallResult, MessageRole, AssistantMessage, StopReason
 from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.utils.tools import ToolView
 from myagents.core.utils.extractor import extract_by_label
 from myagents.core.utils.strings import find_best_match, levenshtein_distance, safe_string_compare
-from myagents.prompts.workflows.rpa import RPA_CHECK_PROMPT, RPA_PLAN_PROMPT
+from myagents.prompts.workflows.orchestarte import RPA_CHECK_PROMPT, RPA_PLAN_PROMPT, PROFILE, SYSTEM_PROMPT
 
 
 class OrchestrateFlow(BaseWorkflow):
-    """This is use for Orchestrating the task. This flow mainly controls the loop 
-    with following steps:
-    
-    - Execute the current context directly if the plans do not need to update. 
-        1. Check the strategy of the task and the status of the sub-tasks.
-            - If the strategy is ALL, continue step 1 until all the sub-tasks are finished.
-            - If the strategy is ANY, continue step 1 until one of the sub-tasks is finished.
-        2. Execute the task that without sub-tasks and the status is RUNNING. 
-        3. Update the current context with the result of the execution. 
-        4. Go back to previous call, then turn to step 1.
-        5. If there is no parent_task, end the recursive loop.
-        
-    - Split the task into sub-tasks if the plans need to update.
-        1. Decide to split the current task into sub-tasks or modify the current task.
-        2. Split the current task into sub-tasks or modify the current task.
-        3. Set the sub-tasks or modified task as the current task and go to step 1. 
+    """This is use for Orchestrating the task. This workflow will not design any detailed plans, it will 
+    only orchestrate the key objectives of the task. 
         
     Attributes:
+        profile (str):
+            The profile of the workflow.
         system_prompt (str):
             The system prompt of the workflow. This is used to set the system prompt of the workflow. 
         agent (Agent): 
             The agent that is used to orchestrate the task.
-        debug (bool): 
-            Whether to enable the debug mode.
-        custom_logger (Logger, defaults to logger): 
-            The custom logger. If not provided, the default loguru logger will be used. 
-        context (ToolCallContext):
-            The context of the tool call.
-            
-        tools (dict[str, FastMCPTool]): 
+        context (BaseContext):
+            The context of the workflow.
+        tools (dict[str, FastMcpTool]):
             The tools can be used for the agent. 
-        tool_functions (dict[str, Callable]):
-            The functions of the tools provided by the workflow. These functions can be used to control the workflow. 
-        workflows (dict[str, Workflow]):
-            The workflows that will be orchestrated to process the task. 
     """
+    # Basic information
+    profile: str
     system_prompt: str
     agent: Agent
-    debug: bool
-    custom_logger: Logger
-    context: Context
-    
-    tools: dict[str, FastMCPTool]
-    tool_functions: dict[str, Callable]
-    workflows: dict[str, Workflow]
+    # Context and tools
+    context: BaseContext
+    tools: dict[str, FastMcpTool]
 
-    def __init__(
-        self, 
-        agent: Agent, 
-        custom_logger: Logger = logger, 
-        debug: bool = False, 
-        workflows: dict[str, Workflow] = {}, 
-        *args: tuple, 
-        **kwargs: dict, 
-    ) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         """Initialize the ReActFlow.
-        
+
         Args:
-            agent (Agent): 
-                The agent that is used to orchestrate the task.
-            custom_logger (Logger, optional): 
-                The custom logger. If not provided, the default loguru logger will be used. 
-            debug (bool, optional): 
-                Whether to enable the debug mode.
-            workflows (dict[str, Workflow], optional):
-                The workflows that will be orchestrated to process the task.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        super().__init__(agent=agent, custom_logger=custom_logger, debug=debug, workflows=workflows, *args, **kwargs)
+        super().__init__(*args, **kwargs)
         
-        # Post initialize to initialize the tools
-        self.post_init()
+        # Initialize the workflow components
+        self.profile = PROFILE
+        self.system_prompt = SYSTEM_PROMPT
+        self.agent = None
         
-    def post_init(self) -> None:
+    async def post_init(self) -> None:
         """Post init is the method that will be called after the initialization of the workflow.
         
         This method will be called after the initialization of the workflow.
         """
         @self.register_tool("retry_task")
-        async def retry_task() -> None:
+        async def retry_task() -> ToolCallResult:
             """
             如果当前任务在执行阶段中出现任何你认为重试的任务，你可以调用这个工具来重试该任务。
             
@@ -105,20 +68,34 @@ class OrchestrateFlow(BaseWorkflow):
                 None
             
             Returns: 
-                None
+                ToolCallResult:
+                    The tool call result.
             """
+            # Get the task
             task = self.context.get("task")
+            # Get the tool call
+            tool_call: ToolCallRequest = self.context.get("tool_call")
             
             # Find the first one of the sub-tasks that is failed
             for sub_task in task.sub_tasks.values():
                 if sub_task.status == TaskStatus.ERROR:
                     # Retry the sub-task
                     sub_task = await self.__act(sub_task)
-                    return
+                    return ToolCallResult(
+                        tool_call_id=tool_call.id, 
+                        is_error=False, 
+                        content="The task is retried.",
+                    )
             
             # No failed sub-task, then update the task status
             task.status = TaskStatus.RUNNING
-            return
+            # Create a new tool call result
+            result = ToolCallResult(
+                tool_call_id=tool_call.id, 
+                is_error=False, 
+                content="The task is retried.",
+            )
+            return result
         
         @self.register_tool("finish_plan")
         async def finish_plan() -> None:
@@ -515,7 +492,16 @@ class OrchestrateFlow(BaseWorkflow):
         env = await self.__plan(env)
         return env
         
-    async def run(self, env: Task) -> Task:
+    async def run(
+        self, 
+        target: Stateful, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        tool_choice: str = None, 
+        exclude_tools: list[str] = [], 
+        *args, 
+        **kwargs,
+    ) -> Stateful:
         """Orchestrate the task and act the task.
 
         Args:
@@ -547,74 +533,3 @@ class OrchestrateFlow(BaseWorkflow):
                 env.answer = ""
         
         return env
-    
-    async def call_tool(self, ctx: Task, tool_call: ToolCallRequest, **kwargs: dict) -> ToolCallResult:
-        """Call a tool to control the workflow.
-        
-        Args:
-            ctx (Task):
-                The task to be executed.
-            tool_call (ToolCallRequest):
-                The tool call request.
-            **kwargs (dict):
-                The additional keyword arguments for calling the tool.
-                
-        Returns:
-            ToolCallResult:
-                The tool call result.
-                
-        Raises:
-            ValueError:
-                If the tool call name is unknown. 
-        """
-        # Log the tool call
-        self.custom_logger.info(f"Tool calling {tool_call.name} with arguments: {tool_call.args}.")
-        
-        # Create a new context
-        self.context = self.context.create_next(task=ctx, **kwargs)
-        
-        try:
-            if tool_call.name == "retry_task":
-                await self.tool_functions["retry_task"]()
-            
-                # Create a new result
-                result = ToolCallResult(
-                    tool_call_id=tool_call.id, 
-                    is_error=False, 
-                    content="The task is retried.",
-                )
-                
-            elif tool_call.name == "finish_plan":
-                await self.tool_functions["finish_plan"]()
-                
-                # Create a new result
-                result = ToolCallResult(
-                    tool_call_id=tool_call.id, 
-                    is_error=False, 
-                    content="The plan is finished.",
-                )
-                
-            elif tool_call.name == "remove_task":
-                await self.tool_functions["remove_task"](**tool_call.args)
-                    
-                # Create a new result
-                result = ToolCallResult(
-                    tool_call_id=tool_call.id, 
-                    is_error=False, 
-                    content="The sub-task is removed.",
-                )
-        
-        except Exception as e:
-            # Unexpected error
-            self.custom_logger.error(f"Unexpected error: {e}, traceback: \n{format_exc()}")
-            result = ToolCallResult(
-                tool_call_id=tool_call.id, 
-                is_error=True, 
-                content=f"Unexpected error: {e}",
-            )
-        finally:
-            # Done the current context
-            self.context = self.context.done()
-        
-        # Return the result
-        return result

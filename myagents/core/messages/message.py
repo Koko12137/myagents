@@ -78,8 +78,8 @@ class ToolCallResult(BaseModel):
     
     Attributes:
         id (str, defaults to uuid4().hex):
-            The unique id of the message.
-        role (MessageRole):
+            The unique id of the message. Do not specify this field. 
+        role (MessageRole, defaults to MessageRole.TOOL):
             The role of the tool call result. Do not specify this field. 
         tool_call_id (str):
             The id of the tool call request.
@@ -93,7 +93,7 @@ class ToolCallResult(BaseModel):
     # The role of the tool call result
     role: MessageRole = Field(
         description="The role of the tool call result. Do not specify this field.", 
-        default_factory=lambda: MessageRole.TOOL
+        default=MessageRole.TOOL
     )
     # The id of the tool call request
     tool_call_id: str = Field(description="The id of the tool call request.")
@@ -108,9 +108,9 @@ class AssistantMessage(BaseModel):
     
     Attributes:
         id (str, defaults to uuid4().hex): 
-            The unique id of the message.
-        role (MessageRole): 
-            The role of the message. 
+            The unique id of the message. Do not specify this field. 
+        role (MessageRole, defaults to MessageRole.ASSISTANT): 
+            The role of the message. Do not specify this field. 
         content (str, optional, defaults to None):
             The content of the message. 
         tool_calls (list[ToolCallRequest], optional, defaults to None):
@@ -123,7 +123,7 @@ class AssistantMessage(BaseModel):
     # The unique id of the message
     id: str = Field(default_factory=lambda: uuid4().hex)
     # The role of the message
-    role: MessageRole = Field(description="The role of the message.")
+    role: MessageRole = Field(description="The role of the message.", default=MessageRole.ASSISTANT)
     # The content of the message
     content: Optional[str] = Field(description="The content of the message.", default="")
     # The tool calls of the message
@@ -140,8 +140,8 @@ class UserMessage(BaseModel):
     Attributes:
         id (str, defaults to uuid4().hex):
             The unique id of the message.
-        role (MessageRole):
-            The role of the user message.
+        role (MessageRole, defaults to MessageRole.USER):
+            The role of the user message. Do not specify this field. 
         content (Union[str, list[dict]]):
             The content of the user message. 
     """
@@ -159,8 +159,8 @@ class SystemMessage(BaseModel):
     Attributes:
         id (str, defaults to uuid4().hex):
             The unique id of the message.
-        role (MessageRole):
-            The role of the system message.
+        role (MessageRole, defaults to MessageRole.SYSTEM):
+            The role of the system message. Do not specify this field. 
         content (str):
             The content of the system message.
     """

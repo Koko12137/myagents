@@ -284,7 +284,7 @@ class ToolsCaller(Protocol):
         context (Context):
             The context of the caller.
     """
-    # Tools and context
+    # Tools and global context container
     tools: dict[str, Union[FastMcpTool, MCPTool]]
     context: Context
     

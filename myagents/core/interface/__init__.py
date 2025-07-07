@@ -1,7 +1,7 @@
 from .llm import LLM, Provider
 from .logger import Logger
 from .task import Task, TaskView, TaskStatus
-from .core import Stateful, Context, ToolsCaller
+from .core import Stateful, Context, ToolsCaller, Status
 from .base import StepCounter, Agent, AgentType, Workflow, Environment
 
 
@@ -19,5 +19,6 @@ __all__ = [
     "Environment", 
     "StepCounter", 
     "Stateful", 
+    "Status", 
     "ToolsCaller", 
 ]

@@ -2,15 +2,27 @@ import asyncio
 import random
 from abc import abstractmethod
 from asyncio import Semaphore
+from enum import Enum
 from typing import Union, Any
 
 from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.core.messages.message import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
-from myagents.core.interface import Agent, AgentType, Environment, EnvironmentStatus, Context, Stateful
+from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
+from myagents.core.interface import Agent, AgentType, Environment, Context, Stateful, Status
 from myagents.core.utils.context import BaseContext
 from myagents.core.tools_mixin import ToolsMixin
 from myagents.core.state_mixin import StateMixin
+
+
+class EnvironmentStatus(Enum):
+    """EnvironmentStatus is the status of the environment.
+    """
+    CREATED = "created"
+    PLANNING = "planning"
+    RUNNING = "running"
+    FINISHED = "finished"
+    ERROR = "error"
+    CANCELLED = "cancelled"
 
 
 class BaseEnvironment(Environment, ToolsMixin, StateMixin):
@@ -97,7 +109,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         # Initialize the context
         self.context = BaseContext()
         # Initialize the status and history
-        self.status = EnvironmentStatus.CREATED
+        self.status = self.to_created()
         self.history = []
         
         # Initialize the tools
@@ -158,6 +170,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
+        tool_choice: str = None, 
+        exclude_tools: list[str] = [], 
         designated_agent: str = None, 
         *args, 
         **kwargs
@@ -177,6 +191,10 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional):
                 The maximum number of times to idle thinking the agent.
+            tool_choice (str, optional):
+                The designated tool choice to use for the agent. 
+            exclude_tools (list[str], optional):
+                The tools to exclude from the tool choice. 
             designated_agent (str, optional):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:
@@ -222,6 +240,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             target, 
             max_error_retry, 
             max_idle_thinking, 
+            tool_choice, 
+            exclude_tools, 
             *args, 
             **kwargs,
         )

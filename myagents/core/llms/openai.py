@@ -8,7 +8,7 @@ from loguru import logger
 from openai import AsyncOpenAI
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Logger, Provider
+from myagents.core.interface import LLM, Provider
 from myagents.core.messages import ToolCallRequest, ToolCallResult, AssistantMessage, StopReason, CompletionUsage, MessageRole, UserMessage, SystemMessage
 from myagents.core.messages.openai_adapter import to_openai_dict
 
@@ -18,16 +18,12 @@ class OpenAiLLM(LLM):
     model: str
     base_url: str
     temperature: float
-    custom_logger: Logger
-    debug: bool
     
     def __init__(
         self, 
         model: str, 
         base_url: str, 
         temperature: float = 1.0, 
-        custom_logger: Logger = logger, 
-        debug: bool = False, 
         **kwargs
     ) -> None:
         """Initialize the OpenAiLLM.
@@ -51,16 +47,12 @@ class OpenAiLLM(LLM):
         self.model = model
         self.base_url = base_url
         self.temperature = temperature
-        self.custom_logger = custom_logger
-        self.debug = debug
-        if self.debug:
-            self.custom_logger.enable("myagents.llms.openai")
         
         # Initialize the client
         api_key_field = kwargs.get("api_key_field", "OPENAI_KEY")
         self.client = AsyncOpenAI(
             base_url=self.base_url,
-            api_key=os.getenv(api_key_field) or getpass.getpass("Enter your OpenAI API key: "), 
+            api_key=os.getenv(api_key_field) or getpass.getpass(f"Enter your {api_key_field}: "), 
         )
         
         # Check extra keyword arguments for requests
@@ -97,38 +89,14 @@ class OpenAiLLM(LLM):
             AssistantMessage: 
                 The completed message.
         """
-        kwargs = self.kwargs.copy()
-        
-        # Check tools are provided
-        if available_tools is not None and len(available_tools) == 0:
-            available_tools = None
-        else:
-            if isinstance(tool_choice, FastMcpTool):
-                # Set the tool choice
-                kwargs["tool_choice"] = {
-                    "type": "function",
-                    "function": {
-                        "name": tool_choice.name, 
-                        "arguments": tool_choice.parameters['properties'], 
-                        "required": tool_choice.parameters['required'],
-                    }
-                }
-            else:
-                # Set the tool choice
-                kwargs["tool_choice"] = tool_choice
-            # Log the tool choice
-            self.custom_logger.debug(f"Tool choice: {kwargs['tool_choice']}")
+        kwargs = self.__prepare_kwargs(available_tools, tool_choice, **kwargs)
         
         # Create the generation history
         history = to_openai_dict(messages)
             
         # Call for the completion
         response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=history,
-            temperature=self.temperature,
-            tools=available_tools, 
-            parallel_tool_calls=True, 
+            messages=history, 
             **kwargs, 
         )
         content = response.choices[0].message.content
@@ -180,3 +148,64 @@ class OpenAiLLM(LLM):
             stop_reason=stop_reason, 
             usage=usage, 
         )
+
+    def __prepare_kwargs(self, **kwargs) -> dict:
+        """Prepare the kwargs for the completion.
+        
+        Args:
+            **kwargs:
+                The additional keyword arguments.
+                
+        Returns:
+            dict:
+                The prepared kwargs.
+        """
+        arguments = {
+            "model": self.model, 
+            "temperature": kwargs.get("temperature", self.temperature), 
+            "parallel_tool_calls": kwargs.get("parallel_tool_calls", True), 
+        }
+        
+        # Check output format
+        response_format = kwargs.get("response_format", None)
+        if response_format is not None:
+            arguments["response_format"] = {
+                "type": "json_object",
+            }
+            # Log the response format
+            logger.warning(f"Response format is set to {response_format}")
+            
+        # Check the output token limit
+        max_tokens = kwargs.get("max_tokens", None)
+        if max_tokens is not None:
+            arguments["max_tokens"] = max_tokens
+            # Log the max tokens
+            logger.info(f"Max tokens is set to {max_tokens}")
+        
+        # Check tools are provided
+        available_tools = kwargs.get("available_tools", None)
+        if available_tools is not None and len(available_tools) == 0:
+            available_tools = None
+        else:
+            arguments["tools"] = available_tools
+        
+        tool_choice = kwargs.get("tool_choice", None)
+        if tool_choice is not None:
+            if isinstance(tool_choice, FastMcpTool):
+                # Set the tool choice
+                arguments["tool_choice"] = {
+                    "type": "function",
+                    "function": {
+                        "name": tool_choice.name, 
+                        "arguments": tool_choice.parameters['properties'], 
+                        "required": tool_choice.parameters['required'],
+                    }
+                }
+                # Log the tool choice
+                logger.warning(f"Tool choice: {arguments['tool_choice']}")
+            else:
+                logger.critical(f"Unsupported tool choice type: {type(tool_choice)}")
+                # Raise an error for the unsupported tool choice type
+                raise ValueError(f"Unsupported tool choice type: {type(tool_choice)}")
+        
+        return arguments

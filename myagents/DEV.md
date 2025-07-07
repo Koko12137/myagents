@@ -1,6 +1,5 @@
 # MyAgents 开发者指南
 
-
 ## 技术栈
 
 - 后端框架：FastAPI
@@ -57,6 +56,7 @@
   - [ ] 规划模型SFT/DPO/KTO结果对比
 
 - 开发
+- [ ] ⭐⭐⭐ 创建一个拓扑排序的DAG任务管理器
 - [ ] MCP 服务代理
 - [ ] 人类与 Agent 交互式意图识别与任务确定
   - [ ] 增加Agent2Agent支持，并以此作为multi-agents的交互基础

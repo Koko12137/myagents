@@ -1,7 +1,15 @@
-from myagents.prompts.envs.query import QUERY_SYSTEM_PROMPT
-from myagents.prompts.envs.query import QUERY_POST_PROCESS_PROMPT
+from myagents.prompts.envs.query import (
+    QUERY_SYSTEM_PROMPT, QUERY_DOC_PROMPT, QUERY_TASK_PROMPT, 
+    QUERY_PLAN_AND_EXECUTE_PROMPT, QUERY_SELECT_PROMPT,
+    NAME, PROFILE,
+)
 
 __all__ = [
     "QUERY_SYSTEM_PROMPT",
-    "QUERY_POST_PROCESS_PROMPT",
+    "QUERY_DOC_PROMPT",
+    "QUERY_TASK_PROMPT",
+    "QUERY_PLAN_AND_EXECUTE_PROMPT",
+    "QUERY_SELECT_PROMPT",
+    "NAME",
+    "PROFILE",
 ]

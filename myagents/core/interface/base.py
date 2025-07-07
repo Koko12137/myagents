@@ -230,6 +230,8 @@ class Agent(Protocol):
         target: Stateful, 
         max_error_retry: int, 
         max_idle_thinking: int, 
+        tool_choice: str = None, 
+        exclude_tools: list[str] = [],  
         *args, 
         **kwargs
     ) -> AssistantMessage:
@@ -241,7 +243,11 @@ class Agent(Protocol):
             max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int):
-                The maximum number of times to idle thinking the agent.
+                The maximum number of times to idle thinking the agent. 
+            tool_choice (str, optional, defaults to None):
+                The designated tool choice to use for the agent. 
+            exclude_tools (list[str], optional, defaults to []):
+                The tools to exclude from the tool choice. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -314,6 +320,8 @@ class Workflow(ToolsCaller):
         target: Stateful, 
         max_error_retry: int, 
         max_idle_thinking: int, 
+        tool_choice: str = None, 
+        exclude_tools: list[str] = [],  
         *args, 
         **kwargs, 
     ) -> Stateful:
@@ -326,6 +334,10 @@ class Workflow(ToolsCaller):
                 The maximum number of times to retry the workflow when the target is errored.
             max_idle_thinking (int):
                 The maximum number of times to idle thinking the workflow.
+            tool_choice (str, optional, defaults to None):
+                The designated tool choice to use for the agent. 
+            exclude_tools (list[str], optional, defaults to []):
+                The tools to exclude from the tool choice. 
             *args:
                 The additional arguments for running the workflow.
             **kwargs:
@@ -462,6 +474,10 @@ class Environment(Stateful, ToolsCaller):
         self, 
         agent_type: AgentType, 
         target: Stateful, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        tool_choice: str = None, 
+        exclude_tools: list[str] = [], 
         designated_agent: str = None, 
         *args, 
         **kwargs, 
@@ -477,6 +493,14 @@ class Environment(Stateful, ToolsCaller):
                 The type of the agent to call.
             target (Stateful):
                 The target to pass to the agent. 
+            max_error_retry (int, optional, defaults to 3):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int, optional, defaults to 1):
+                The maximum number of times to idle thinking the agent. 
+            tool_choice (str, optional, defaults to None):
+                The designated tool choice to use for the agent. 
+            exclude_tools (list[str], optional, defaults to []):
+                The tools to exclude from the tool choice. 
             designated_agent (str, optional, defaults to None):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:

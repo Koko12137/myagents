@@ -130,7 +130,7 @@ class BaseAgent(Agent):
         observe: list[Union[AssistantMessage, ToolCallRequest, ToolCallResult]], 
         allow_tools: bool, 
         external_tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
-        tool_choice: str = "auto", 
+        tool_choice: str = None, 
         stream: bool = False, 
         queue: Optional[Queue] = None, 
         **kwargs, 
@@ -145,9 +145,8 @@ class BaseAgent(Agent):
                 external tools provided by the workflow. 
             external_tools (dict[str, Union[FastMcpTool, MCPTool]]):
                 The external tools to use for the agent.  
-            tool_choice (str, defaults to "auto"):
-                The tool choice to use for the agent. This is used to control the tool calling. 
-                - "auto": The agent will automatically choose the tool to use. 
+            tool_choice (str, optional, defaults to None):
+                The designated tool choice to use for the agent. 
             **kwargs: 
                 The additional keyword arguments for thinking about the observed messages. 
 
@@ -257,6 +256,8 @@ class BaseAgent(Agent):
         target: Stateful, 
         max_error_retry: int, 
         max_idle_thinking: int, 
+        tool_choice: str = None, 
+        exclude_tools: list[str] = [], 
         *args, 
         **kwargs
     ) -> AssistantMessage:
@@ -269,6 +270,10 @@ class BaseAgent(Agent):
                 The maximum number of times to retry the agent when the target is errored. 
             max_idle_thinking (int): 
                 The maximum number of times to idle thinking the agent. 
+            tool_choice (str, optional, defaults to None):
+                The designated tool choice to use for the agent. 
+            exclude_tools (list[str], optional, defaults to []):
+                The tools to exclude from the tool choice. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -286,6 +291,8 @@ class BaseAgent(Agent):
             target, 
             max_error_retry, 
             max_idle_thinking, 
+            tool_choice, 
+            exclude_tools, 
             *args, 
             **kwargs,
         )

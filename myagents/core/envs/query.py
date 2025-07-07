@@ -9,13 +9,13 @@ from typing import Union
 from loguru import logger
 from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.core.messages.message import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, MessageRole, StopReason
-from myagents.core.interface import Agent, AgentType, Task, Context, EnvironmentStatus, TaskStatus
-from myagents.core.envs.task import BaseTask, TaskAnswerView
-from myagents.core.envs.base import BaseEnvironment
+from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
+from myagents.core.interface import Agent, AgentType, Task, Context, TaskStatus
+from myagents.core.envs.task import BaseTask, TaskAnswerView, TaskContextView
+from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
 from myagents.core.utils.tools import ToolView
 from myagents.tools.docs import DocumentLog, BaseDocument, FormatType
-from myagents.prompts.envs.query import QUERY_SYSTEM_PROMPT, QUERY_POST_PROCESS_PROMPT, NAME, PROFILE
+from myagents.prompts.envs.query import QUERY_SYSTEM_PROMPT, QUERY_DOC_PROMPT, QUERY_TASK_PROMPT, QUERY_SELECT_PROMPT, NAME, PROFILE
 
 
 REQUIRED_AGENTS = [AgentType.ORCHESTRATE, AgentType.REACT, AgentType.PLAN_AND_EXECUTE]
@@ -265,38 +265,33 @@ class Query(BaseEnvironment):
         
         # Set the status to running
         self.status = EnvironmentStatus.RUNNING
-        # Record the question
-        self.history.append(AssistantMessage(role=MessageRole.USER, content=question))
+        # Append the system prompt to the history
+        self.update(SystemMessage(content=self.system_prompt.format(
+            profile=self.profile, 
+            question_type=output_type.value, 
+        )))
         # Create a new Task
         task = BaseTask(
             question=question, 
             description=description, 
-            detail_level=detail_level,
+            detail_level=detail_level, 
         )
         # Set the task as the sub-task
         self.tasks[task.question] = task
         # Log the task
         logger.info(f"任务创建: \n{task.question}")
-        
+        # Record the question
+        self.update(UserMessage(content=QUERY_TASK_PROMPT.format(task=TaskContextView(task).format())))
         # Call for global orchestration
-        message: AssistantMessage = await self.call_agent(
-            AgentType.ORCHESTRATE, 
-            task, 
-            running_status=TaskStatus.CREATED, 
-            finish_status=TaskStatus.PLANNING, 
-            error_status=TaskStatus.ERROR, 
-        )
+        message: AssistantMessage = await self.call_agent(AgentType.ORCHESTRATE, target=task)
         # Update the environment history
         self.update(message)
-        
+        # Create a new UserMessage
+        user_message = UserMessage(content=QUERY_TASK_PROMPT.format(task=TaskContextView(task).format()))
+        # Update the environment history
+        self.update(user_message)
         # Call for plan and execute
-        message: AssistantMessage = await self.call_agent(
-            AgentType.PLAN_AND_EXECUTE, 
-            task, 
-            running_status=TaskStatus.PLANNING, 
-            finish_status=TaskStatus.FINISHED, 
-            error_status=TaskStatus.ERROR, 
-        )
+        message: AssistantMessage = await self.call_agent(AgentType.PLAN_AND_EXECUTE, target=task)
         # Update the environment history
         self.update(message)
         
@@ -309,14 +304,6 @@ class Query(BaseEnvironment):
         
         # Check the output type
         if output_type == OutputType.SUMMARY:
-            # Set the answer view of the task as the output history
-            # This is used for the summary output type. 
-            self.update(
-                AssistantMessage(
-                    role=MessageRole.ASSISTANT, 
-                    content=TaskAnswerView(task).format(),
-                )
-            )
             # Log the content
             logger.info(f"最终答案: \n{task.answer}")
             # Record the answer
@@ -335,18 +322,15 @@ class Query(BaseEnvironment):
             # Log the content
             logger.info(f"文档按[行号-内容]输出: \n{line_view}")
             # Append as the assistant response
-            self.update(
-                AssistantMessage(
-                    role=MessageRole.ASSISTANT, 
-                    content=line_view,
-                )
-            )
+            self.update(UserMessage(content=QUERY_DOC_PROMPT.format(task_lines=line_view)))
+            
             """ [[ ## Post process the answer ## ]] """
             # Call for react agent to modify the document or select the answer
             message: AssistantMessage = await self.call_agent(
                 AgentType.REACT, 
                 target=task, 
                 document=document, 
+                exclude_tools=["select_answer"], 
             )
             # Update the environment history
             self.update(message)
@@ -360,20 +344,14 @@ class Query(BaseEnvironment):
             # This is used for the selection output type. 
             content = TaskAnswerView(task).format()
             # Create a new UserMessage
-            user_message = UserMessage(
-                role=MessageRole.USER, 
-                content=QUERY_POST_PROCESS_PROMPT.format(
-                    output_type=output_type.value, 
-                    command_explanation=inspect.getdoc(OutputType), 
-                    task=task.question, 
-                ),
-            )
+            user_message = UserMessage(content=QUERY_SELECT_PROMPT.format(task=content))
             # Update the environment history
             self.update(user_message)
             # Call for react agent to select the answer
             message: AssistantMessage = await self.call_agent(
                 AgentType.REACT, 
                 target=task, 
+                tool_choice="select_answer", 
             )
             # Update the environment history
             self.update(message)

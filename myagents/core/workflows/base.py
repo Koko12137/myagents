@@ -1,7 +1,5 @@
 import asyncio
 from abc import abstractmethod
-from enum import Enum
-from typing import Union, Any, Awaitable
 
 from fastmcp.tools import Tool as FastMCPTool
 
@@ -33,15 +31,9 @@ class BaseWorkflow(Workflow, ToolsMixin):
     tools: dict[str, FastMCPTool]
     
     def __init__(self, *args, **kwargs) -> None:
-        """Initialize the BaseWorkflow. 
+        """Initialize the BaseWorkflow. This will run the post_init method automatically. 
         
         Args:
-            profile (str, optional):
-                The profile of the workflow.
-            system_prompt (str, optional):
-                The system prompt of the workflow.
-            agent (Agent, optional):
-                The agent that is used to work with the workflow.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
@@ -86,53 +78,45 @@ class BaseWorkflow(Workflow, ToolsMixin):
     @abstractmethod
     async def run(
         self, 
-        target: Union[Stateful, Any], 
-        running_status: Enum, 
-        finish_status: Enum, 
-        error_status: Enum, 
+        target: Stateful, 
         max_error_retry: int = 3, 
-        observe_func: Awaitable[Union[str, list[dict]]] = None,
-        process_error_func: Awaitable[None] = None,
+        max_idle_thinking: int = 1, 
+        tool_choice: str = None, 
+        exclude_tools: list[str] = [], 
         *args, 
         **kwargs,
-    ) -> Union[Stateful, Any]:
+    ) -> Stateful:
         """Run the workflow from the environment or task.
 
         Args:
-            target (Union[Stateful, Any]): 
-                The stateful entity or any other entity to run the workflow.
-            running_status (Enum):
-                The status of the target, the workflow will stop running when the target status is the same as the 
-                running status.
-            finish_status (Enum):
-                The status of the target, the workflow will exit when the target status is the same as the finish status.
-            error_status (Enum):
-                The status of the target, the workflow will enter the error process when the target status is the same as the 
-                error status.
+            target (Stateful): 
+                The stateful entity to run the workflow.
             max_error_retry (int, optional, defaults to 3):
                 The maximum number of times to retry the workflow when the target is errored.
-            observe_func (Awaitable[Union[str, list[dict]]], optional):
-                The function to observe the target. If not provided, the default observe function will be used. 
-            process_error_func (Awaitable[None], optional):
-                The function to process the error of the target. If not provided, the default process error function will be used. 
+            max_idle_thinking (int, optional, defaults to 1):
+                The maximum number of times to idle thinking the workflow. 
+            tool_choice (str, optional, defaults to None):
+                The designated tool choice to use for the workflow. 
+            exclude_tools (list[str], optional, defaults to []):
+                The tools to exclude from the tool choice. 
             *args:
                 The additional arguments for running the workflow.
             **kwargs:
                 The additional keyword arguments for running the workflow.
 
         Returns:
-            Union[Stateful, Any]: 
-                The stateful entity or any other entity after running the workflow.
+            Stateful: 
+                The stateful entity after running the workflow.
                 
         Example:
         ```python
         async def run(
             self, 
             target: Stateful, 
-            running_status: Enum, 
-            finish_status: Enum, 
-            error_status: Enum, 
             max_error_retry: int, 
+            max_idle_thinking: int, 
+            tool_choice: str, 
+            exclude_tools: list[str], 
             *args, 
             **kwargs,
         ) -> Stateful:
@@ -140,14 +124,14 @@ class BaseWorkflow(Workflow, ToolsMixin):
             message = SystemMessage(content=self.system_prompt)
             
             # A while loop to run the workflow until the task is finished.
-            while target.status != running_status:
+            while target.is_running():
             
                 # Check if the target is finished
-                if target.status == finish_status:
+                if target.is_finished():
                     return target
                     
                 # Check if the target is errored
-                elif target.status == error_status:
+                elif target.is_errored():
                     process_error(target, max_error_retry)
                 
                 # Run the workflow
