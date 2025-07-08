@@ -119,14 +119,12 @@ class Status(Protocol):
     
     Attributes:
         CREATED (Union[str, int]): The created status.
-        PLANNING (Union[str, int]): The planning status.
         RUNNING (Union[str, int]): The running status.
         FINISHED (Union[str, int]): The finished status.
         ERROR (Union[str, int]): The error status.
         CANCELLED (Union[str, int]): The cancelled status.
     """
     CREATED: Union[str, int]
-    PLANNING: Union[str, int]
     RUNNING: Union[str, int]
     FINISHED: Union[str, int]
     ERROR: Union[str, int]
@@ -141,23 +139,25 @@ class Stateful(Protocol):
     Attributes:
         status (Status):
             The status of the stateful entity.
-        history (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
+        history (dict[Status, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]):
             The history of the stateful entity.
     """
     status: Status
-    history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
+    history: dict[Status, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]
     
     @abstractmethod
-    def observe(self, format: str) -> Union[str, list[dict]]:
+    def observe(self, format: str, **kwargs) -> str:
         """Observe the state of the stateful entity according to the current status and the 
         format of the observation.
         
         Args:
             format (str):
                 The format of the observation.
+            **kwargs:
+                The additional keyword arguments for the observation.
                 
         Returns:
-            Union[str, list[dict]]:
+            str:
                 The observation of the stateful entity.
         """
         pass
@@ -210,18 +210,6 @@ class Stateful(Protocol):
     @abstractmethod
     def is_created(self) -> bool:
         """Check if the current status of the stateful entity is created.
-        """
-        pass
-    
-    @abstractmethod
-    def to_planning(self) -> None:
-        """Set the current status of the stateful entity to planning.
-        """
-        pass
-    
-    @abstractmethod
-    def is_planning(self) -> bool:
-        """Check if the current status of the stateful entity is planning.
         """
         pass
     

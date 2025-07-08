@@ -18,7 +18,6 @@ class EnvironmentStatus(Enum):
     """EnvironmentStatus is the status of the environment.
     """
     CREATED = "created"
-    PLANNING = "planning"
     RUNNING = "running"
     FINISHED = "finished"
     ERROR = "error"
@@ -281,16 +280,6 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         """Check if the environment is created.
         """
         return self.status == EnvironmentStatus.CREATED
-    
-    def to_planning(self) -> None:
-        """Set the environment to planning status.
-        """
-        self.status = EnvironmentStatus.PLANNING
-    
-    def is_planning(self) -> bool:
-        """Check if the environment is planning.
-        """
-        return self.status == EnvironmentStatus.PLANNING
     
     def to_running(self) -> None:
         """Set the environment to running status.

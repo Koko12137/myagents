@@ -1,9 +1,11 @@
 import asyncio
 from abc import abstractmethod
+from typing import Callable
 
-from fastmcp.tools import Tool as FastMCPTool
+from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.interface import Agent, Workflow, Stateful
+from myagents.core.messages import ToolCallResult, ToolCallRequest
 from myagents.core.utils.context import BaseContext
 from myagents.core.tools_mixin import ToolsMixin
 
@@ -20,7 +22,7 @@ class BaseWorkflow(Workflow, ToolsMixin):
             The agent that is used to work with the workflow.
         context (BaseContext):
             The context of the tool call.
-        tools (dict[str, FastMCPTool]):
+        tools (dict[str, FastMcpTool]):
             The tools of the workflow.
     """
     profile: str
@@ -28,7 +30,7 @@ class BaseWorkflow(Workflow, ToolsMixin):
     agent: Agent
     # Tools Mixin
     context: BaseContext
-    tools: dict[str, FastMCPTool]
+    tools: dict[str, FastMcpTool]
     
     def __init__(self, *args, **kwargs) -> None:
         """Initialize the BaseWorkflow. This will run the post_init method automatically. 
@@ -60,6 +62,44 @@ class BaseWorkflow(Workflow, ToolsMixin):
         except RuntimeError:
             # 没有事件循环，直接新建一个
             asyncio.run(self.post_init())
+        
+    async def post_init(self) -> None:
+        """Post init is the method that will be called after the initialization of the workflow.
+        
+        This method will be called after the initialization of the workflow.
+        """
+        # Register the finish tool
+        @self.register_tool("finish")
+        def finish() -> ToolCallResult:
+            """
+            完成当前任务，使用这个工具来结束工作流。
+            
+            Args:
+                None
+            
+            Returns:
+                ToolCallResult:
+                    The tool call result.
+            """
+            # Get the target
+            target: Stateful = self.context.get("target")
+            # Get the tool call
+            tool_call: ToolCallRequest = self.context.get("tool_call")
+            # Get the finish callback
+            finish_callback: Callable = self.context.get("finish_callback", None)
+            # Call the finish callback
+            if finish_callback is not None:
+                finish_callback()
+            else:
+                # Set the task status to finished
+                target.to_finished()
+            # Create a new tool call result
+            result = ToolCallResult(
+                tool_call_id=tool_call.id, 
+                is_error=False, 
+                content=f"任务已设置为 {target.get_status().value} 状态。",
+            )
+            return result
             
     def register_agent(self, agent: Agent) -> None:
         """Register an agent to the workflow.

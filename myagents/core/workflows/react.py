@@ -3,7 +3,7 @@ from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.interface import Agent, Stateful
 from myagents.core.workflows.base import BaseWorkflow
-from myagents.core.messages import SystemMessage, UserMessage, ToolCallResult, ToolCallRequest, StopReason
+from myagents.core.messages import SystemMessage, UserMessage, StopReason
 from myagents.core.utils.context import BaseContext
 from myagents.core.utils.extractor import extract_by_label
 from myagents.prompts.workflows.react import PROFILE, SYSTEM_PROMPT, THINK_PROMPT, REFLECT_PROMPT
@@ -33,41 +33,21 @@ class ReActFlow(BaseWorkflow):
     tools: dict[str, FastMcpTool]
     
     def __init__(self, *args, **kwargs) -> None:
+        """Initialize the ReActFlow.
+
+        Args:
+            *args:
+                The arguments to be passed to the parent class.
+            **kwargs:
+                The keyword arguments to be passed to the parent class.
+        """
         super().__init__(*args, **kwargs)
         
         # Initialize the workflow components
         self.profile = PROFILE
         self.system_prompt = SYSTEM_PROMPT
         self.agent = None
-        
-    async def post_init(self) -> None:
-        
-        @self.register_tool("finish")
-        def finish() -> ToolCallResult:
-            """
-            完成当前任务，使用这个工具来结束工作流。
-            
-            Args:
-                None
-            
-            Returns:
-                ToolCallResult:
-                    The tool call result.
-            """
-            # Get the target
-            target: Stateful = self.context.get("target")
-            # Get the tool call
-            tool_call: ToolCallRequest = self.context.get("tool_call")
-            # Set the task status to finished
-            target.to_finished()
-            # Create a new tool call result
-            result = ToolCallResult(
-                tool_call_id=tool_call.id, 
-                is_error=False, 
-                content=f"任务已设置为 {target.get_status().value} 状态。",
-            )
-            return result
-        
+    
     async def run(
         self, 
         target: Stateful, 
@@ -103,18 +83,14 @@ class ReActFlow(BaseWorkflow):
         """
 
         # A while loop to run the workflow until the task is finished.
-        while target.is_running():
-            
-            # Check if the target is finished
-            if target.is_finished():
-                return target
+        while not target.is_finished():
             
             # Check if the target is errored
-            elif target.is_error():
+            if target.is_error():
                 # Set the target to cancelled
                 target.to_cancelled()
-                # Return the target
-                return target
+                # Force the react loop to finish
+                break
                 
             # Run the workflow
             else:
@@ -128,6 +104,7 @@ class ReActFlow(BaseWorkflow):
                     **kwargs,
                 )
                 
+        # Return the target
         return target
 
     async def __reason_and_act(
@@ -187,7 +164,7 @@ class ReActFlow(BaseWorkflow):
             # Prepare the thinking kwargs
             kwargs = self.__prepare_thinking_kwargs(tool_choice, exclude_tools, *args, **kwargs)
             # Think about the target
-            message = await self.agent.think(observe, **kwargs)
+            message = await self.agent.think(target.get_history(), **kwargs)
             # Log the assistant message
             logger.info(f"Assistant Message: \n{message}")
             # Update the target with the assistant message
@@ -250,7 +227,7 @@ class ReActFlow(BaseWorkflow):
             # Update the target with the user message
             target.update(message)
             # Reflect the action taken on the target
-            message = await self.agent.think(observe, tools=self.tools)
+            message = await self.agent.think(target.get_history(), tools=self.tools)
             # Log the assistant message
             logger.info(f"Assistant Message: \n{message}")
             # Update the target with the assistant message

@@ -27,7 +27,6 @@ class TaskStatus(Enum):
             ` - [c] ` This Task is cancelled and could not be recovered. This will cause an system error. 
     """
     CREATED     = " - [ ] "
-    PLANNING    = " - [p] "
     RUNNING     = " - [r] "
     FINISHED    = " - [x] "
     ERROR       = " - [e] "
@@ -35,77 +34,87 @@ class TaskStatus(Enum):
 
 
 class Task(Stateful):
-    """Task is the protocol for all the tasks.
+    """Task is the protocol for all the tasks. It is a general task that can be used for the workflow.
+    
+    Attributes:
+        uid (str):
+            The unique identifier of the task. Do not specify this field. It will be automatically generated.
+    """
+    uid: str
+    question: str
+    description: str
+    # Status and history
+    status: TaskStatus
+    history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
+
+
+class TreeTaskNode(Task):
+    """TreeTaskNode is the protocol for all the tasks. It is a tree structure of the tasks.
     
     Attributes:
         uid (str): 
             The unique identifier of the task. Do not specify this field. It will be automatically generated.
-            
         question (str): 
             The question to be answered. 
         description (str):
             The detail information and limitation of the task. 
-        detail_level (int):
-            The detail level is the number of layers of sub-question layers that can be split from the question.
-        parent (Task):
+        status (TaskStatus):
+            The status of the current task.
+        history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
+            The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
+            The value is a list of the history messages. 
+        parent (TreeTaskNode):
             The parent task of the current task. If the task does not have a parent task, the parent is None.
-        sub_tasks (OrderedDict[str, Task]):
+        sub_tasks (OrderedDict[str, TreeTaskNode]):
             The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
-            
-        is_leaf (bool):
-            Whether the current task is a leaf task. If the task is a leaf task, the task will not be orchestrated by the workflow.
+        sub_task_depth (int):
+            The sub task depth is the number of layers of sub-question layers that can be split from the question.
+        answer (str):
+            The answer to the question. If the task is not finished, the answer is None
+    """
+    parent: 'TreeTaskNode'
+    # NOTE: The key should be the question of the sub-task, the value should be the sub-task instance. 
+    sub_tasks: OrderedDict[str, 'TreeTaskNode']
+    sub_task_depth: int
+    answer: str
+
+
+@runtime_checkable
+class GraphTaskNode(Task):
+    """GraphTaskNode is the protocol for all the tasks. It is a graph structure of the tasks.
+    
+    Attributes:
+        uid (str):
+            The unique identifier of the task. Do not specify this field. It will be automatically generated.
+        question (str):
+            The question to be answered. 
+        description (str):
+            The detail information and limitation of the task. 
+        dependencies (OrderedDict[str, GraphTaskNode]):
+            The dependencies of the task. The key is the unique identifier of the dependency task, and the value is the dependency task.
         answer (str):
             The answer to the question. If the task is not finished, the answer is None.
-            
         status (TaskStatus):
             The status of the current task.
         history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
             The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
             The value is a list of the history messages. 
     """
-    uid: str
-    
-    # Context
-    question: str
-    description: str
-    detail_level: int
-    parent: 'Task'
-    # NOTE: The key should be the question of the sub-task, the value should be the sub-task instance. 
-    sub_tasks: OrderedDict[str, 'Task']
-    
-    # Status
-    status: TaskStatus
-    is_leaf: bool
+    dependencies: OrderedDict[str, 'GraphTaskNode']
     answer: Optional[str]
-    
+    status: TaskStatus
     history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
-    
-    @abstractmethod
-    def update(
-        self, 
-        message: Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult], 
-    ) -> None:
-        """Update the history of the task according to the current status.
-        
-        Args:
-            message (Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]):
-                The message to be updated.
-        """
-        pass
 
 
 @runtime_checkable
 class TaskView(Protocol):
-    """TaskView is the view of the task. This view is used to format the task for the running task. 
+    """TaskView defines the format protocol for the task. 
     
     Attributes:
-        model (Task):
+        task (Task):
             The task to be viewed.
-        template (str):
-            The template of the task view.
     """
-    model: Task
-    template: str
+    task: Task
     
     @abstractmethod
     def format(self, *args, **kwargs) -> str:

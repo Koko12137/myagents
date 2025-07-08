@@ -7,11 +7,11 @@ from traceback import format_exc
 from typing import Union
 
 from loguru import logger
-from fastmcp.tools import Tool as FastMCPTool
+from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
-from myagents.core.interface import Agent, AgentType, Task, Context, TaskStatus
-from myagents.core.envs.task import BaseTask, TaskAnswerView, TaskContextView
+from myagents.core.interface import Agent, AgentType, TreeTaskNode, Context, TaskStatus
+from myagents.core.tasks.task import BaseTreeTaskNode, DocumentTaskView, ToDoTaskView
 from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
 from myagents.core.utils.tools import ToolView
 from myagents.tools.docs import DocumentLog, BaseDocument, FormatType
@@ -60,7 +60,7 @@ class Query(BaseEnvironment):
             The map of the agent type to the agent name. The key is the agent type and the value is the agent name list. 
         agent_type_semaphore (dict[AgentType, Semaphore]):
             The semaphore of the agent type. The key is the agent type and the value is the semaphore. 
-        tools (dict[str, FastMCPTool]):
+        tools (dict[str, FastMcpTool]):
             The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
         context (Context):
             The context of the environment.
@@ -83,13 +83,14 @@ class Query(BaseEnvironment):
     agent_type_map: dict[AgentType, list[str]]
     agent_type_semaphore: dict[AgentType, Semaphore]
     # Tools
-    tools: dict[str, FastMCPTool]
+    tools: dict[str, FastMcpTool]
     # Context
     context: Context
     # Status and history
     status: EnvironmentStatus
     history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
-    tasks: OrderedDict[str, Task]
+    # Additional components
+    tasks: OrderedDict[str, TreeTaskNode]
     
     def __init__(self, *args, **kwargs) -> None:
         """Initialize the Query environment.
@@ -193,7 +194,7 @@ class Query(BaseEnvironment):
                     选项（不允许包含除选项外的任何字符）或者填空的内容。
             """
             # Get the task
-            task: Task = self.context.get("task")
+            task: TreeTaskNode = self.context.get("task")
             # Get the tool call
             tool_call = self.context.get("tool_call")
             # Set the answer to self.answers
@@ -271,7 +272,7 @@ class Query(BaseEnvironment):
             question_type=output_type.value, 
         )))
         # Create a new Task
-        task = BaseTask(
+        task = BaseTreeTaskNode(
             question=question, 
             description=description, 
             detail_level=detail_level, 
@@ -281,13 +282,13 @@ class Query(BaseEnvironment):
         # Log the task
         logger.info(f"任务创建: \n{task.question}")
         # Record the question
-        self.update(UserMessage(content=QUERY_TASK_PROMPT.format(task=TaskContextView(task).format())))
+        self.update(UserMessage(content=QUERY_TASK_PROMPT.format(task=ToDoTaskView(task).format())))
         # Call for global orchestration
         message: AssistantMessage = await self.call_agent(AgentType.ORCHESTRATE, target=task)
         # Update the environment history
         self.update(message)
         # Create a new UserMessage
-        user_message = UserMessage(content=QUERY_TASK_PROMPT.format(task=TaskContextView(task).format()))
+        user_message = UserMessage(content=QUERY_TASK_PROMPT.format(task=ToDoTaskView(task).format()))
         # Update the environment history
         self.update(user_message)
         # Call for plan and execute
@@ -314,7 +315,7 @@ class Query(BaseEnvironment):
         elif output_type == OutputType.DOCUMENT:
             # Set the answer view of the task as the output history
             # This is used for the document output type. 
-            content = TaskAnswerView(task).format()
+            content = DocumentTaskView(task).format()
             # Create a new document
             document = BaseDocument(original_content=content)
             # Format to line view
@@ -342,7 +343,7 @@ class Query(BaseEnvironment):
         elif output_type == OutputType.SELECTION:
             # Set the answer view of the task as the output history
             # This is used for the selection output type. 
-            content = TaskAnswerView(task).format()
+            content = DocumentTaskView(task).format()
             # Create a new UserMessage
             user_message = UserMessage(content=QUERY_SELECT_PROMPT.format(task=content))
             # Update the environment history
