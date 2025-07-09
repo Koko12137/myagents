@@ -839,6 +839,15 @@ wheels = [
 ]
 
 [[package]]
+name = "json-repair"
+version = "0.47.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/9e/e8bcda4fd47b16fcd4f545af258d56ba337fa43b847beb213818d7641515/json_repair-0.47.6.tar.gz", hash = "sha256:4af5a14b9291d4d005a11537bae5a6b7912376d7584795f0ac1b23724b999620", size = 34400, upload-time = "2025-07-01T15:42:07.458Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bb/f8/f464ce2afc4be5decf53d0171c2d399d9ee6cd70d2273b8e85e7c6d00324/json_repair-0.47.6-py3-none-any.whl", hash = "sha256:1c9da58fb6240f99b8405f63534e08f8402793f09074dea25800a0b232d4fb19", size = 25754, upload-time = "2025-07-01T15:42:06.418Z" },
+]
+
+[[package]]
 name = "jsonschema"
 version = "4.24.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1132,6 +1141,7 @@ dependencies = [
     { name = "fastapi-mcp" },
     { name = "fastmcp" },
     { name = "huggingface-hub" },
+    { name = "json-repair" },
     { name = "loguru" },
     { name = "mcp" },
     { name = "megatron-core" },
@@ -1163,6 +1173,7 @@ requires-dist = [
     { name = "fastapi-mcp", specifier = ">=0.3.3" },
     { name = "fastmcp", specifier = ">=2.3.3" },
     { name = "huggingface-hub", specifier = ">=0.33.0" },
+    { name = "json-repair", specifier = ">=0.47.6" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "mcp", specifier = ">=1.8.0" },
     { name = "megatron-core", specifier = ">=0.12.1" },

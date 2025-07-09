@@ -16,18 +16,18 @@ class BaseWorkflow(Workflow, ToolsMixin):
     Attributes:
         profile (str):
             The profile of the workflow.
-        system_prompt (str):
-            The system prompt of the workflow.
         agent (Agent):
             The agent that is used to work with the workflow.
+        prompts (dict[str, str]):
+            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
         context (BaseContext):
             The context of the tool call.
         tools (dict[str, FastMcpTool]):
             The tools of the workflow.
     """
     profile: str
-    system_prompt: str
     agent: Agent
+    prompts: dict[str, str]
     # Tools Mixin
     context: BaseContext
     tools: dict[str, FastMcpTool]
@@ -46,8 +46,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
         
         # Initialize the workflow components
         self.profile = None
-        self.system_prompt = None
         self.agent = None
+        self.prompts = {}
         
         # Initialize the tools and context
         self.tools = {}
@@ -123,6 +123,7 @@ class BaseWorkflow(Workflow, ToolsMixin):
         max_idle_thinking: int = 1, 
         tool_choice: str = None, 
         exclude_tools: list[str] = [], 
+        running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
     ) -> Stateful:
@@ -139,6 +140,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
                 The designated tool choice to use for the workflow. 
             exclude_tools (list[str], optional, defaults to []):
                 The tools to exclude from the tool choice. 
+            running_checker (Callable[[Stateful], bool], optional, defaults to None):
+                The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the workflow.
             **kwargs:
@@ -157,34 +160,31 @@ class BaseWorkflow(Workflow, ToolsMixin):
             max_idle_thinking: int, 
             tool_choice: str, 
             exclude_tools: list[str], 
+            running_checker: Callable[[Stateful], bool], 
             *args, 
             **kwargs,
         ) -> Stateful:
             # Update system prompt to history
-            message = SystemMessage(content=self.system_prompt)
+            message = SystemMessage(content=self.prompts["system"])
             
-            # A while loop to run the workflow until the task is finished.
-            while target.is_running():
-            
-                # Check if the target is finished
-                if target.is_finished():
-                    return target
-                    
-                # Check if the target is errored
-                elif target.is_errored():
-                    process_error(target, max_error_retry)
-                
+            # Check if the target is running
+            if running_checker(target):
                 # Run the workflow
-                else:
-                    # Observe the task
-                    observe = await self.observe(target)
-                    # Think about the task
-                    completion = await self.think(observe, allow_tools=True)
-                    # Act on the task
-                    target = await self.act(target, completion.tool_calls)
-                    # Reflect the task
-                    target = await self.reflect(target)
-                
+                # Observe the task
+                observe = await self.observe(target)
+                # Think about the task
+                completion = await self.think(observe, allow_tools=True)
+                # Act on the task
+                target = await self.act(target, completion.tool_calls)
+                # Reflect the task
+                target = await self.reflect(target)
+            else:
+                # Log the error
+                logger.error("The target is not running, the workflow is not executed.")
+                # Set the target to error
+                target.to_error()
+            
+            # Return the target
             return target
         ```
         """

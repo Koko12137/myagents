@@ -1,3 +1,5 @@
+from typing import Callable
+
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
@@ -15,10 +17,10 @@ class ReActFlow(BaseWorkflow):
     Attributes:
         profile (str):
             The profile of the workflow.
-        system_prompt (str):
-            The system prompt of the workflow.
         agent (Agent):
             The agent that is used to reason and act. 
+        prompts (dict[str, str]):
+            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
         context (BaseContext):
             The context of the workflow.
         tools (dict[str, FastMcpTool]):
@@ -26,16 +28,32 @@ class ReActFlow(BaseWorkflow):
     """
     # Basic information
     profile: str
-    system_prompt: str
     agent: Agent
+    prompts: dict[str, str]
     # Context and tools
     context: BaseContext
     tools: dict[str, FastMcpTool]
     
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(
+        self, 
+        profile: str = "", 
+        system_prompt: str = "", 
+        think_prompt: str = "", 
+        reflect_prompt: str = "", 
+        *args, 
+        **kwargs,
+    ) -> None:
         """Initialize the ReActFlow.
 
         Args:
+            profile (str, optional, defaults to ""):
+                The profile of the workflow.
+            system_prompt (str, optional, defaults to ""):
+                The system prompt of the workflow.
+            think_prompt (str, optional, defaults to ""):
+                The think prompt of the workflow.
+            reflect_prompt (str, optional, defaults to ""):
+                The reflect prompt of the workflow.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
@@ -44,9 +62,14 @@ class ReActFlow(BaseWorkflow):
         super().__init__(*args, **kwargs)
         
         # Initialize the workflow components
-        self.profile = PROFILE
-        self.system_prompt = SYSTEM_PROMPT
+        self.profile = profile if profile != "" else PROFILE
         self.agent = None
+        # Update the prompts
+        self.prompts = {
+            "react_system": system_prompt if system_prompt != "" else SYSTEM_PROMPT.format(profile=self.profile),
+            "react_think": think_prompt if think_prompt != "" else THINK_PROMPT,
+            "react_reflect": reflect_prompt if reflect_prompt != "" else REFLECT_PROMPT,
+        }
     
     async def run(
         self, 
@@ -55,15 +78,15 @@ class ReActFlow(BaseWorkflow):
         max_idle_thinking: int = 1, 
         tool_choice: str = None, 
         exclude_tools: list[str] = [], 
+        running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
     ) -> Stateful:
-        
-        """Run the agent on the task or environment. Before running the agent, you should get the lock of the agent. 
+        """Run the agent on the target. Before running the agent, you should get the lock of the agent. 
         
         Args:
             target (Stateful):
-                The task or environment to run the agent on.
+                The target to run the agent on.
             max_error_retry (int, optional, defaults to 3):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
@@ -72,6 +95,8 @@ class ReActFlow(BaseWorkflow):
                 The designated tool choice to use for the agent. 
             exclude_tools (list[str], optional, defaults to []):
                 The tools to exclude from the tool choice. 
+            running_checker (Callable[[Stateful], bool], optional, defaults to None):
+                The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -79,31 +104,32 @@ class ReActFlow(BaseWorkflow):
                 
         Returns:
             Stateful:
-                The task or environment after working with the workflow.
+                The target after working with the workflow.
         """
-
-        # A while loop to run the workflow until the task is finished.
-        while not target.is_finished():
+        # Check if the running checker is provided
+        if running_checker is None:
+            # Set the running checker to the default checker
+            running_checker = lambda target: target.is_running()
+        
+        # Run the workflow
+        if running_checker(target):
+            # Reason and act on the target
+            await self.__reason_and_act(
+                target, 
+                max_error_retry, 
+                max_idle_thinking, 
+                tool_choice, 
+                exclude_tools, 
+                running_checker, 
+                *args, 
+                **kwargs,
+            )
+        else:
+            # Log the error
+            logger.error("The target is not running, the workflow is not executed.")
+            # Set the target to error
+            target.to_error()
             
-            # Check if the target is errored
-            if target.is_error():
-                # Set the target to cancelled
-                target.to_cancelled()
-                # Force the react loop to finish
-                break
-                
-            # Run the workflow
-            else:
-                await self.__reason_and_act(
-                    target, 
-                    max_error_retry, 
-                    max_idle_thinking, 
-                    tool_choice, 
-                    exclude_tools, 
-                    *args, 
-                    **kwargs,
-                )
-                
         # Return the target
         return target
 
@@ -114,14 +140,15 @@ class ReActFlow(BaseWorkflow):
         max_idle_thinking: int = 1, 
         tool_choice: str = None, 
         exclude_tools: list[str] = [], 
+        running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
     ) -> None:
-        """Reason and act on the task or environment.
+        """Reason and act on the target.
         
         Args:
             target (Stateful):
-                The task or environment to reason and act on.
+                The target to reason and act on.
             max_error_retry (int, optional, defaults to 3):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
@@ -130,11 +157,18 @@ class ReActFlow(BaseWorkflow):
                 The designated tool choice to use for the agent. 
             exclude_tools (list[str], optional, defaults to []):
                 The tools to exclude from the tool choice. 
+            running_checker (Callable[[Stateful], bool], optional, defaults to None):
+                The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the agent.
             **kwargs:
                 The additional keyword arguments for running the agent.
         """
+        # Check if the running checker is provided
+        if running_checker is None:
+            # Set the running checker to the default checker
+            running_checker = lambda target: target.is_running()
+        
         # Check whether the target is observable or the `observe` function is provided
         if not hasattr(target, "observe"):
             # Log the critical error
@@ -142,15 +176,18 @@ class ReActFlow(BaseWorkflow):
             # Raise the error
             raise ValueError("The target is not observable.")
         
+        # Prepare external tools
+        external_tools = {**self.agent.tools, **self.env.tools}
+        
         # Update system prompt to history
-        message = SystemMessage(content=self.system_prompt.format(profile=self.profile))
+        message = SystemMessage(content=self.prompts["react_system"])
         target.update(message)
         
         # Error and idle thinking control
         current_thinking = 0
         current_error = 0
         
-        while target.is_running():
+        while running_checker(target):
         
             # === Reason Stage ===
             # Observe the target
@@ -158,13 +195,19 @@ class ReActFlow(BaseWorkflow):
             # Log the observe
             logger.info(f"Observe: \n{observe}")
             # Create new user message
-            message = UserMessage(content=THINK_PROMPT.format(observe=observe))
+            message = UserMessage(content=self.prompts["react_think"].format(observe=observe))
             # Update the target with the user message
             target.update(message)
             # Prepare the thinking kwargs
-            kwargs = self.__prepare_thinking_kwargs(tool_choice, exclude_tools, *args, **kwargs)
+            think_kwargs = self.__prepare_thinking_kwargs(
+                tools=external_tools, 
+                tool_choice=tool_choice, 
+                exclude_tools=exclude_tools, 
+                *args, 
+                **kwargs,
+            )
             # Think about the target
-            message = await self.agent.think(target.get_history(), **kwargs)
+            message = await self.agent.think(target.get_history(), **think_kwargs)
             # Log the assistant message
             logger.info(f"Assistant Message: \n{message}")
             # Update the target with the assistant message
@@ -223,7 +266,7 @@ class ReActFlow(BaseWorkflow):
             # Log the observe
             logger.info(f"Observe: \n{observe}")
             # Create new user message
-            message = UserMessage(content=REFLECT_PROMPT.format(observe=observe))
+            message = UserMessage(content=self.prompts["react_reflect"].format(observe=observe))
             # Update the target with the user message
             target.update(message)
             # Reflect the action taken on the target
@@ -242,6 +285,7 @@ class ReActFlow(BaseWorkflow):
 
     def __prepare_thinking_kwargs(
         self, 
+        tools: dict[str, FastMcpTool] = {}, 
         tool_choice: str = None, 
         exclude_tools: list[str] = [], 
         *args, 
@@ -250,6 +294,8 @@ class ReActFlow(BaseWorkflow):
         """Prepare the thinking kwargs.
         
         Args:
+            tools (dict[str, FastMcpTool], optional, defaults to {}):
+                The tools to use for the agent. 
             tool_choice (str, optional, defaults to None):
                 The designated tool choice to use for the agent. 
             exclude_tools (list[str], optional, defaults to []):
@@ -266,18 +312,16 @@ class ReActFlow(BaseWorkflow):
         # Prepare the thinking kwargs
         arguments = {}
         
-        # External tools including the tools from the agent and the environment
-        external_tools = {**self.agent.tools, **self.env.tools}
         # Exclude the tools
-        external_tools = {tool_name: tool for tool_name, tool in external_tools.items() if tool_name not in exclude_tools}
+        tools = {tool_name: tool for tool_name, tool in tools.items() if tool_name not in exclude_tools}
         
         # Set the tool choice
         if tool_choice is not None:
             # Convert the tool choice to a FastMcpTool
-            tool = external_tools.get(tool_choice, tool_choice)
+            tool = tools.get(tool_choice, tool_choice)
             arguments["tool_choice"] = tool
             arguments["tools"] = [tool]
         else:
-            arguments["tools"] = external_tools
+            arguments["tools"] = tools
         
         return arguments

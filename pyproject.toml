@@ -16,6 +16,7 @@ dependencies = [
     "fastapi-mcp>=0.3.3",
     "fastmcp>=2.3.3",
     "huggingface-hub>=0.33.0",
+    "json-repair>=0.47.6",
     "loguru>=0.7.3",
     "mcp>=1.8.0",
     "megatron-core>=0.12.1",

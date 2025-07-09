@@ -7,7 +7,7 @@ from fastmcp.tools import Tool as FastMCPTool
 from fastmcp import Client as MCPClient
 from mcp import Tool as MCPTool
 
-from myagents.core.interface.core import Stateful, ToolsCaller
+from myagents.core.interface.core import Stateful, Status, ToolsCaller
 from myagents.core.interface.llm import LLM
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
@@ -287,18 +287,18 @@ class Workflow(ToolsCaller):
     Attributes:
         profile (str):
             The profile of the workflow.
-        system_prompt (str):
-            The system prompt of the workflow.
         agent (Agent):
             The agent that is used to work with the workflow.
+        prompts (dict[str, str]):
+            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
         context (Context):
             The context of the workflow.
         tools (dict[str, FastMCPTool]):
             The tools provided by the workflow. These tools can be used to control the workflow. 
     """
     profile: str
-    system_prompt: str
     agent: Agent
+    prompts: dict[str, str]
     
     @abstractmethod
     def register_agent(self, agent: Agent) -> None:
@@ -320,8 +320,9 @@ class Workflow(ToolsCaller):
         target: Stateful, 
         max_error_retry: int, 
         max_idle_thinking: int, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [],  
+        tool_choice: str, 
+        exclude_tools: list[str], 
+        running_checker: Callable[[Stateful], bool], 
         *args, 
         **kwargs, 
     ) -> Stateful:
@@ -334,10 +335,12 @@ class Workflow(ToolsCaller):
                 The maximum number of times to retry the workflow when the target is errored.
             max_idle_thinking (int):
                 The maximum number of times to idle thinking the workflow.
-            tool_choice (str, optional, defaults to None):
+            tool_choice (str):
                 The designated tool choice to use for the agent. 
-            exclude_tools (list[str], optional, defaults to []):
+            exclude_tools (list[str]):
                 The tools to exclude from the tool choice. 
+            running_checker (Callable[[Stateful], bool]):
+                The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the workflow.
             **kwargs:
@@ -354,34 +357,31 @@ class Workflow(ToolsCaller):
             target: Stateful, 
             max_error_retry: int, 
             max_idle_thinking: int, 
+            tool_choice: str, 
+            exclude_tools: list[str], 
+            running_checker: Callable[[Stateful], bool], 
             *args, 
             **kwargs,
         ) -> Stateful:
             # Update system prompt to history
             message = SystemMessage(content=self.system_prompt)
             
-            # A while loop to run the workflow until the task is finished.
-            while target.status != Status.RUNNING:
-            
-                # Check if the target is finished
-                if target.status == Status.FINISHED:
-                    return target
-                
-                # Check if the target is errored
-                elif target.status == Status.ERROR:
-                    await process_error_func(target, max_error_retry)
-                
+            # Check if the target is running
+            if running_checker(target):
                 # Run the workflow
-                else:
-                    # Observe the task
-                    observe = await self.observe(target)
-                    # Think about the task
-                    completion = await self.think(observe)
-                    # Act on the task
-                    target = await self.act(target, completion)
-                    # Reflect the task
-                    target = await self.reflect(target)
+                # Observe the task
+                observe = await self.observe(target)
+                # Think about the task
+                completion = await self.think(observe)
+                # Act on the task
+                target = await self.act(target, completion)
+                # Reflect the task
+                target = await self.reflect(target)
+            else:
+                # Set the target to error
+                target.to_error()
                 
+            # Return the target
             return target
         ```
         """
