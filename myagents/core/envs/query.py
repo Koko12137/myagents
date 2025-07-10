@@ -10,7 +10,7 @@ from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
-from myagents.core.interface import Agent, AgentType, TreeTaskNode, Context, TaskStatus
+from myagents.core.interface import Agent, AgentType, TreeTaskNode, Context, TaskStatus, Stateful
 from myagents.core.tasks.task import BaseTreeTaskNode, DocumentTaskView, ToDoTaskView
 from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
 from myagents.core.utils.tools import ToolView
@@ -72,11 +72,11 @@ class Query(BaseEnvironment):
             The tasks of the environment. The key is the task question and the value is the task. 
     """
     # Basic information
-    uid: str = uuid.uuid4().hex
-    name: str = NAME
-    profile: str = PROFILE
-    system_prompt: str = QUERY_SYSTEM_PROMPT
-    required_agents: list[AgentType] = REQUIRED_AGENTS
+    uid: str
+    name: str
+    profile: str
+    prompts: dict[str, str]
+    required_agents: list[AgentType]
     # Core components
     leader: Agent
     agents: dict[str, Agent]
@@ -92,16 +92,45 @@ class Query(BaseEnvironment):
     # Additional components
     tasks: OrderedDict[str, TreeTaskNode]
     
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(
+        self, 
+        profile: str = "", 
+        system_prompt: str = "", 
+        doc_prompt: str = "", 
+        task_prompt: str = "", 
+        select_prompt: str = "", 
+        *args, 
+        **kwargs,
+    ) -> None:
         """Initialize the Query environment.
         
         Args:
+            profile (str, optional, defaults to ""):
+                The profile of the environment.
+            system_prompt (str, optional, defaults to ""):
+                The system prompt of the environment.
+            doc_prompt (str, optional, defaults to ""):
+                The document prompt of the environment.
+            task_prompt (str, optional, defaults to ""):
+                The task prompt of the environment.
+            select_prompt (str, optional, defaults to ""):
+                The select prompt of the environment.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
         super().__init__(*args, **kwargs)
+        
+        # Initialize the basic information
+        self.profile = profile if profile != "" else PROFILE
+        # Update the prompts
+        self.prompts.update({
+            "system": system_prompt if system_prompt != "" else QUERY_SYSTEM_PROMPT,
+            "doc": doc_prompt if doc_prompt != "" else QUERY_DOC_PROMPT,
+            "task": task_prompt if task_prompt != "" else QUERY_TASK_PROMPT,
+            "select": select_prompt if select_prompt != "" else QUERY_SELECT_PROMPT,
+        })
         
         # Initialize the tasks
         self.tasks = OrderedDict()
@@ -112,32 +141,8 @@ class Query(BaseEnvironment):
     def post_init(self) -> None:
         """Post init is the method that will be called after the initialization of the workflow.
         """
-        @self.register_tool("finish_query")
-        async def finish_query() -> ToolCallResult:
-            """
-            完成当前任务。当你认为当前任务已经完成时，你可以选择以下任一方式来完成任务：
-            
-            - 调用这个工具来完成任务。
-            - 在消息中设置完成标志为 True，并且不要调用这个工具。 
-            
-            Args:
-                None
-                
-            Returns:
-                ToolCallResult:
-                    The tool call result.
-            """
-            # Get the tool call
-            tool_call = self.context.get("tool_call")
-            # Set the query status to finished
-            self.status = EnvironmentStatus.FINISHED
-            # Create a new tool call result
-            result = ToolCallResult(
-                tool_call_id=tool_call.id, 
-                is_error=False, 
-                content=f"任务已设置为 {EnvironmentStatus.FINISHED.value} 状态。",
-            )
-            return result
+        # Initialize the tools of parent class
+        super().post_init()
             
         @self.register_tool("diff_modify")
         async def diff_modify(action: str, line_num: int, content: str) -> ToolCallResult:
@@ -200,7 +205,7 @@ class Query(BaseEnvironment):
             # Set the answer to self.answers
             self.answers[task.question] = answer
             # Set the status to finished
-            self.status = EnvironmentStatus.FINISHED
+            self.to_finished()
             # Create a new tool call result
             result = ToolCallResult(
                 tool_call_id=tool_call.id, 
@@ -224,7 +229,7 @@ class Query(BaseEnvironment):
         self, 
         question: str, 
         description: str, 
-        detail_level: int = 3, 
+        sub_task_depth: int = 3, 
         output_type: OutputType = OutputType.SUMMARY,
     ) -> str:
         """Run the query and answer the question.
@@ -234,9 +239,9 @@ class Query(BaseEnvironment):
                 The question to be answered.
             description (str):
                 The detail information and limitation of the task.
-            detail_level (int):
+            sub_task_depth (int):
                 The max number of layers of sub-question layers that can be split from the question. 
-                The detail level should be greater than 0 and less than 5.
+                The sub task depth should be greater than 0 and less than 5.
             output_type (OutputType):
                 The type of the output. 
                 - OutputType.SUMMARY: The summary of the answer.
@@ -259,15 +264,15 @@ class Query(BaseEnvironment):
                 raise ValueError(f"Agent type `{agent_type}` is not registered. Please register the agent type to the environment.")
         
         # Check the detail level
-        if detail_level < 1:
-            raise ValueError("The detail level must be greater than 0.")
-        elif detail_level > 5:
-            raise ValueError("The detail level must be less than 5.")
+        if sub_task_depth < 1:
+            raise ValueError("The sub task depth must be greater than 0.")
+        elif sub_task_depth > 5:
+            raise ValueError("The sub task depth must be less than 5.")
         
         # Set the status to running
-        self.status = EnvironmentStatus.RUNNING
+        self.to_running()
         # Append the system prompt to the history
-        self.update(SystemMessage(content=self.system_prompt.format(
+        self.update(SystemMessage(content=self.prompts["system"].format(
             profile=self.profile, 
             question_type=output_type.value, 
         )))
@@ -275,7 +280,7 @@ class Query(BaseEnvironment):
         task = BaseTreeTaskNode(
             question=question, 
             description=description, 
-            detail_level=detail_level, 
+            sub_task_depth=sub_task_depth, 
         )
         # Set the task as the sub-task
         self.tasks[task.question] = task
@@ -284,17 +289,15 @@ class Query(BaseEnvironment):
         # Record the question
         self.update(UserMessage(content=QUERY_TASK_PROMPT.format(task=ToDoTaskView(task).format())))
         # Call for global orchestration
-        message: AssistantMessage = await self.call_agent(AgentType.ORCHESTRATE, target=task)
+        message: AssistantMessage = await self.call_agent(
+            AgentType.ORCHESTRATE, 
+            target=task, 
+            tool_choice="create_task", 
+        )
         # Update the environment history
         self.update(message)
-        # Create a new UserMessage
-        user_message = UserMessage(content=QUERY_TASK_PROMPT.format(task=ToDoTaskView(task).format()))
-        # Update the environment history
-        self.update(user_message)
-        # Call for plan and execute
-        message: AssistantMessage = await self.call_agent(AgentType.PLAN_AND_EXECUTE, target=task)
-        # Update the environment history
-        self.update(message)
+        # Plan and execute the task
+        task = await self.plan_and_exec(task)
         
         # Check the task status
         if task.status != TaskStatus.FINISHED:
@@ -363,3 +366,47 @@ class Query(BaseEnvironment):
         
         else:
             raise ValueError(f"Unknown output type: {output_type}")
+
+    async def plan_and_exec(self, target: TreeTaskNode) -> TreeTaskNode:
+        """Plan and execute the task.
+        """
+        sub_tasks = target.sub_tasks
+        # Create a iterator for the sub-tasks
+        sub_tasks_iter = iter(sub_tasks.values())
+        # Get the first sub-task
+        sub_task = next(sub_tasks_iter)
+        
+        while not target.is_finished():
+
+            # Process the created status
+            if sub_task.is_created():
+                # Create a new UserMessage
+                user_message = UserMessage(content=self.prompts["task"].format(task=ToDoTaskView(sub_task).format()))
+                # Update the environment history
+                self.update(user_message)
+                # Call for plan and execute
+                message: AssistantMessage = await self.call_agent(
+                    AgentType.PLAN_AND_EXECUTE, 
+                    target=sub_task, 
+                    exclude_tools=[*self.tools.keys()], 
+                )
+                # Update the environment history
+                self.update(message)
+                
+            elif sub_task.is_error():
+                # Log the error
+                logger.error(f"Sub-task {sub_task.question} is in error state.")
+                # Raise the error
+                raise RuntimeError(f"Sub-task {sub_task.question} is in error state.")
+            
+            elif sub_task.is_finished():
+                # Get the next sub-task
+                try:
+                    sub_task = next(sub_tasks_iter)
+                except StopIteration:
+                    # Log the content
+                    logger.info(f"所有子任务已处理完成。")
+                    # Break the loop
+                    break
+        
+        return target

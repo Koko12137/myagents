@@ -1,7 +1,7 @@
 from .base import BaseWorkflow
 from .act import ActionFlow
-from .plan import PlanFlow
+from .plan import PlanAndExecFlow
 from .orchestrate import OrchestrateFlow
 
 
-__all__ = ["ActionFlow", "PlanFlow", "OrchestrateFlow", "BaseWorkflow"]
+__all__ = ["ActionFlow", "PlanAndExecFlow", "OrchestrateFlow", "BaseWorkflow"]

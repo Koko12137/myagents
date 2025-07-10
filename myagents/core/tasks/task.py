@@ -44,7 +44,15 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
     sub_task_depth: int
     answer: str 
     
-    def __init__(self, question: str, description: str, sub_task_depth: int, parent: TreeTaskNode, *args, **kwargs) -> None:
+    def __init__(
+        self, 
+        question: str, 
+        description: str, 
+        sub_task_depth: int, 
+        parent: TreeTaskNode = None, 
+        *args, 
+        **kwargs
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.uid = uuid4().hex
         
@@ -57,7 +65,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         assert isinstance(sub_task_depth, int), "The sub task depth must be an integer."
         self.sub_task_depth = sub_task_depth
         
-        assert isinstance(parent, TreeTaskNode), "The parent must be a TreeTaskNode."
+        assert parent is None or isinstance(parent, TreeTaskNode), "The parent must be a TreeTaskNode."
         self.parent = parent
         
         # Initialize the stateful attributes
@@ -127,6 +135,13 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         """Set the task status to finished.
         """
         self.status = TaskStatus.FINISHED
+        
+        # Convert the parent task to finished
+        if self.parent:
+            # Check if the parent task is running and all the sub-tasks are finished
+            if self.parent.is_running() and all(sub_task.is_finished() for sub_task in self.parent.sub_tasks.values()):
+                # Convert the parent task to finished
+                self.parent.to_finished()
     
     def is_finished(self) -> bool:
         """Check if the task status is finished.

@@ -69,8 +69,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
         This method will be called after the initialization of the workflow.
         """
         # Register the finish tool
-        @self.register_tool("finish")
-        def finish() -> ToolCallResult:
+        @self.register_tool("finish_workflow")
+        async def finish_workflow() -> ToolCallResult:
             """
             完成当前任务，使用这个工具来结束工作流。
             
@@ -85,14 +85,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
             target: Stateful = self.context.get("target")
             # Get the tool call
             tool_call: ToolCallRequest = self.context.get("tool_call")
-            # Get the finish callback
-            finish_callback: Callable = self.context.get("finish_callback", None)
-            # Call the finish callback
-            if finish_callback is not None:
-                finish_callback()
-            else:
-                # Set the task status to finished
-                target.to_finished()
+            # Set the task status to finished
+            target.to_finished()
             # Create a new tool call result
             result = ToolCallResult(
                 tool_call_id=tool_call.id, 
@@ -125,7 +119,7 @@ class BaseWorkflow(Workflow, ToolsMixin):
         exclude_tools: list[str] = [], 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
-        **kwargs,
+        **kwargs, 
     ) -> Stateful:
         """Run the workflow from the environment or task.
 

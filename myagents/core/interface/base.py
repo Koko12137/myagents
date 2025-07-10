@@ -7,7 +7,7 @@ from fastmcp.tools import Tool as FastMCPTool
 from fastmcp import Client as MCPClient
 from mcp import Tool as MCPTool
 
-from myagents.core.interface.core import Stateful, Status, ToolsCaller
+from myagents.core.interface.core import Stateful, ToolsCaller, Context
 from myagents.core.interface.llm import LLM
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
@@ -448,6 +448,12 @@ class Environment(Stateful, ToolsCaller):
     agents: dict[str, Agent]
     agent_type_map: dict[AgentType, list[str]]
     agent_type_semaphore: dict[AgentType, Semaphore]
+    # Tools Mixin
+    tools: dict[str, FastMCPTool]
+    context: Context
+    # Stateful Mixin
+    status: EnvironmentStatus
+    history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
     
     @abstractmethod
     def register_agent(self, agent: Agent) -> None:
