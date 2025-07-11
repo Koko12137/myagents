@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Any
 
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
@@ -76,8 +76,8 @@ class ReActFlow(BaseWorkflow):
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
@@ -91,10 +91,15 @@ class ReActFlow(BaseWorkflow):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of times to idle thinking the agent.
-            tool_choice (str, optional, defaults to None):
-                The designated tool choice to use for the agent. 
-            exclude_tools (list[str], optional, defaults to []):
-                The tools to exclude from the tool choice. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts of the workflow. The following prompts are supported:
+                - "react_system": The system prompt of the workflow.
+                - "react_think": The think prompt of the workflow.
+                - "react_reflect": The reflect prompt of the workflow.
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
             running_checker (Callable[[Stateful], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
@@ -115,12 +120,12 @@ class ReActFlow(BaseWorkflow):
         if running_checker(target):
             # Reason and act on the target
             target = await self.reason_act_reflect(
-                target, 
-                max_error_retry, 
-                max_idle_thinking, 
-                tool_choice, 
-                exclude_tools, 
-                running_checker, 
+                target=target, 
+                max_error_retry=max_error_retry, 
+                max_idle_thinking=max_idle_thinking, 
+                prompts=prompts, 
+                completion_config=completion_config, 
+                running_checker=running_checker, 
                 *args, 
                 **kwargs,
             )
@@ -138,8 +143,8 @@ class ReActFlow(BaseWorkflow):
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
@@ -153,23 +158,21 @@ class ReActFlow(BaseWorkflow):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of times to idle thinking the agent. 
-            tool_choice (str, optional, defaults to None):
-                The designated tool choice to use for the agent. 
-            exclude_tools (list[str], optional, defaults to []):
-                The tools to exclude from the tool choice. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts of the workflow. The following prompts are supported:
+                - "react_system": The system prompt of the workflow.
+                - "react_think": The think prompt of the workflow.
+                - "react_reflect": The reflect prompt of the workflow.
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
             running_checker (Callable[[Stateful], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the agent.
             **kwargs:
                 The additional keyword arguments for running the agent. 
-                The following keyword arguments are supported:
-                - react_system (str):
-                    The system prompt of the workflow.
-                - react_think (str):
-                    The think prompt of the workflow.
-                - react_reflect (str):
-                    The reflect prompt of the workflow.
         """
         # Check if the running checker is provided
         if running_checker is None:
@@ -177,9 +180,9 @@ class ReActFlow(BaseWorkflow):
             running_checker = lambda target: target.is_running()
         
         # Prepare the prompts 
-        react_system = kwargs.pop("react_system", self.prompts["react_system"])
-        react_think = kwargs.pop("react_think", self.prompts["react_think"])
-        react_reflect = kwargs.pop("react_reflect", self.prompts["react_reflect"])
+        react_system = prompts.pop("react_system", self.prompts["react_system"])
+        react_think = prompts.pop("react_think", self.prompts["react_think"])
+        react_reflect = prompts.pop("react_reflect", self.prompts["react_reflect"])
         
         # Update system prompt to history
         message = SystemMessage(content=react_system)
@@ -193,14 +196,13 @@ class ReActFlow(BaseWorkflow):
         
             # === Reason Stage ===
             target, current_error, current_thinking = await self.reason_act(
-                target, 
+                target=target, 
                 react_think=react_think,
                 max_error_retry=max_error_retry, 
                 current_error=current_error, 
                 max_idle_thinking=max_idle_thinking, 
                 current_thinking=current_thinking, 
-                tool_choice=tool_choice, 
-                exclude_tools=exclude_tools,
+                completion_config=completion_config, 
                 *args, 
                 **kwargs,
             )
@@ -211,7 +213,7 @@ class ReActFlow(BaseWorkflow):
             
             # === Reflect Stage ===
             target, finish_flag = await self.reflect(
-                target, 
+                target=target, 
                 react_reflect=react_reflect,
                 *args, 
                 **kwargs,
@@ -231,8 +233,7 @@ class ReActFlow(BaseWorkflow):
         current_error: int = 0, 
         max_idle_thinking: int = 1, 
         current_thinking: int = 0, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        completion_config: dict[str, Any] = {}, 
         *args, 
         **kwargs,
     ) -> tuple[Stateful, int, int]:
@@ -251,10 +252,10 @@ class ReActFlow(BaseWorkflow):
                 The maximum number of times to idle thinking the agent. 
             current_thinking (int, optional, defaults to 0):
                 The current thinking counter.
-            tool_choice (str, optional, defaults to None):
-                The designated tool choice to use for the agent. 
-            exclude_tools (list[str], optional, defaults to []):
-                The tools to exclude from the tool choice. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -278,8 +279,8 @@ class ReActFlow(BaseWorkflow):
         # Prepare the thinking kwargs
         think_kwargs = self.prepare_thinking_kwargs(
             tools=external_tools, 
-            tool_choice=tool_choice, 
-            exclude_tools=exclude_tools, 
+            tool_choice=completion_config.get("tool_choice", None), 
+            exclude_tools=completion_config.get("exclude_tools", []), 
             *args, 
             **kwargs,
         )
@@ -320,6 +321,8 @@ class ReActFlow(BaseWorkflow):
                     if current_error >= max_error_retry:
                         # Set the task status to error
                         target.to_error()
+                        # Record the error as answer
+                        target.answer += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {result.content}"
                         # Force the react loop to finish
                         break
         else:
@@ -334,6 +337,8 @@ class ReActFlow(BaseWorkflow):
             if current_thinking >= max_idle_thinking:
                 # Set the task status to error
                 target.to_error()
+                # Record the error as answer
+                target.answer += f"\n连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。"
         
         return target, current_error, current_thinking
 
@@ -355,11 +360,6 @@ class ReActFlow(BaseWorkflow):
                 The additional arguments for running the agent.
             **kwargs:
                 The additional keyword arguments for running the agent.
-                The following keyword arguments are supported:
-                - react_system (str):
-                    The system prompt of the workflow.
-                - react_think (str):
-                    The think prompt of the workflow.
         
         Returns:
             tuple[Stateful, bool]:

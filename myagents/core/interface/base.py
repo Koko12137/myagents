@@ -3,7 +3,7 @@ from asyncio import Semaphore, Lock
 from enum import Enum
 from typing import Callable, Awaitable, Any, Union, Optional, Protocol, runtime_checkable
 
-from fastmcp.tools import Tool as FastMCPTool
+from fastmcp.tools import Tool as FastMcpTool
 from fastmcp import Client as MCPClient
 from mcp import Tool as MCPTool
 
@@ -178,7 +178,7 @@ class Agent(Protocol):
     async def think(
         self, 
         observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
-        tools: dict[str, Union[FastMCPTool, MCPTool]] = {}, 
+        tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
         tool_choice: Optional[str] = 'none', 
         **kwargs, 
     ) -> AssistantMessage:
@@ -270,16 +270,6 @@ class Agent(Protocol):
         pass
 
 
-class LeaderAgent(Agent):
-    """LeaderAgent is a main agent that represent for other agents.
-    
-    Attributes:
-        out_env (Environment):
-            The outside environment that the leader agent is running on.
-    """
-    out_env: 'Environment'
-
-
 class Workflow(ToolsCaller):
     """Workflow is stateless, it does not store any information about the state, it is only used to orchestrate the task or environment. 
     The workflow is not responsible for the state of the task or environment. 
@@ -293,12 +283,15 @@ class Workflow(ToolsCaller):
             The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
         context (Context):
             The context of the workflow.
-        tools (dict[str, FastMCPTool]):
+        tools (dict[str, FastMcpTool]):
             The tools provided by the workflow. These tools can be used to control the workflow. 
     """
     profile: str
     agent: Agent
     prompts: dict[str, str]
+    # Context and tools
+    context: Context
+    tools: dict[str, FastMcpTool]
     
     @abstractmethod
     def register_agent(self, agent: Agent) -> None:
@@ -320,8 +313,8 @@ class Workflow(ToolsCaller):
         target: Stateful, 
         max_error_retry: int, 
         max_idle_thinking: int, 
-        tool_choice: str, 
-        exclude_tools: list[str], 
+        prompts: dict[str, str], 
+        completion_config: dict[str, Any], 
         running_checker: Callable[[Stateful], bool], 
         *args, 
         **kwargs, 
@@ -335,12 +328,14 @@ class Workflow(ToolsCaller):
                 The maximum number of times to retry the workflow when the target is errored.
             max_idle_thinking (int):
                 The maximum number of times to idle thinking the workflow.
-            tool_choice (str):
-                The designated tool choice to use for the agent. 
-            exclude_tools (list[str]):
-                The tools to exclude from the tool choice. 
+            prompts (dict[str, str]):
+                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+            completion_config (dict[str, Any]):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
             running_checker (Callable[[Stateful], bool]):
-                The checker to check if the workflow should be running.
+                The checker to check if the workflow should be running. 
             *args:
                 The additional arguments for running the workflow.
             **kwargs:
@@ -357,8 +352,8 @@ class Workflow(ToolsCaller):
             target: Stateful, 
             max_error_retry: int, 
             max_idle_thinking: int, 
-            tool_choice: str, 
-            exclude_tools: list[str], 
+            prompts: dict[str, str], 
+            completion_config: dict[str, Any], 
             running_checker: Callable[[Stateful], bool], 
             *args, 
             **kwargs,
@@ -417,8 +412,8 @@ class Environment(Stateful, ToolsCaller):
             The name of the environment.
         profile (str):
             The profile of the environment. 
-        system_prompt (str):
-            The system prompt of the environment. 
+        prompts (dict[str, str]):
+            The prompts of the environment. The key is the prompt name and the value is the prompt content. 
         leader (Agent):
             The leader agent of the environment. 
         agents (dict[str, Agent]):
@@ -429,7 +424,7 @@ class Environment(Stateful, ToolsCaller):
             The map of the agent type to the agent name. The key is the agent type and the value is the agent name list. 
         agent_type_semaphore (dict[AgentType, Semaphore]):
             The semaphore of the agent type. The key is the agent type and the value is the semaphore. 
-        tools (dict[str, FastMCPTool]):
+        tools (dict[str, FastMcpTool]):
             The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
         context (Context):
             The context of the environment.
@@ -441,15 +436,15 @@ class Environment(Stateful, ToolsCaller):
     uid: str
     name: str
     profile: str
+    prompts: dict[str, str]
     required_agents: list[AgentType]
-    system_prompt: str
     # Agents and tools
-    leader: 'LeaderAgent'
+    leader: Agent
     agents: dict[str, Agent]
     agent_type_map: dict[AgentType, list[str]]
     agent_type_semaphore: dict[AgentType, Semaphore]
     # Tools Mixin
-    tools: dict[str, FastMCPTool]
+    tools: dict[str, FastMcpTool]
     context: Context
     # Stateful Mixin
     status: EnvironmentStatus

@@ -1,9 +1,9 @@
-from typing import Callable
+from typing import Callable, Any
 
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import Agent, Stateful, Context
+from myagents.core.interface import Agent, Stateful, Context, TreeTaskNode
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage
 from myagents.core.workflows.react import ReActFlow
 from myagents.core.utils.extractor import extract_by_label
@@ -73,20 +73,20 @@ class OrchestrateFlow(ReActFlow):
         
     async def __reason(
         self, 
-        target: Stateful, 
+        target: TreeTaskNode, 
         max_idle_thinking: int = 1, 
-    ) -> Stateful:
+    ) -> TreeTaskNode:
         """Reason about the task. This is the pre step of the planning in order to inference the real 
         and detailed requirements of the task. 
         
         Args:
-            target (Stateful):
+            target (TreeTaskNode):
                 The task to reason about.
             max_idle_thinking (int):
                 The maximum number of idle thinking.
 
         Returns:
-            Stateful: 
+            TreeTaskNode: 
                 The target after reasoning.
         """
         # Update system prompt to history
@@ -147,29 +147,31 @@ class OrchestrateFlow(ReActFlow):
         
     async def run(
         self, 
-        target: Stateful, 
+        target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        tool_choice: str = "create_task", 
-        exclude_tools: list[str] = [], 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
-    ) -> Stateful:
+    ) -> TreeTaskNode:
         """Orchestrate the target. This workflow will not design any detailed plans, it will 
         only orchestrate the key objectives of the task. 
 
         Args:
-            target (Stateful):
+            target (TreeTaskNode):
                 The target to orchestrate.
             max_error_retry (int, optional, defaults to 3):
                 The maximum number of error retries.
             max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of idle thinking.
-            tool_choice (str, optional, defaults to "create_task"):
-                The tool choice of the agent.
-            exclude_tools (list[str], optional, defaults to []):
-                The tools to exclude from the agent.
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
             running_checker (Callable[[Stateful], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
@@ -178,7 +180,7 @@ class OrchestrateFlow(ReActFlow):
                 The keyword arguments to be passed to the parent class.
 
         Returns:
-            Stateful:
+            TreeTaskNode:
                 The target after orchestrating.
         """
         # Check if the running checker is provided
@@ -208,8 +210,8 @@ class OrchestrateFlow(ReActFlow):
                 target=target, 
                 max_error_retry=max_error_retry, 
                 max_idle_thinking=max_idle_thinking, 
-                tool_choice=tool_choice, 
-                exclude_tools=exclude_tools, 
+                prompts=prompts, 
+                completion_config=completion_config, 
                 running_checker=running_checker, 
                 *args, 
                 **kwargs,

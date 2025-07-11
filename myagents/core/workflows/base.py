@@ -1,6 +1,6 @@
 import asyncio
 from abc import abstractmethod
-from typing import Callable
+from typing import Callable, Any
 
 from fastmcp.tools import Tool as FastMcpTool
 
@@ -115,8 +115,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs, 
@@ -126,16 +126,18 @@ class BaseWorkflow(Workflow, ToolsMixin):
         Args:
             target (Stateful): 
                 The stateful entity to run the workflow.
-            max_error_retry (int, optional, defaults to 3):
+            max_error_retry (int, defaults to 3):
                 The maximum number of times to retry the workflow when the target is errored.
-            max_idle_thinking (int, optional, defaults to 1):
-                The maximum number of times to idle thinking the workflow. 
-            tool_choice (str, optional, defaults to None):
-                The designated tool choice to use for the workflow. 
-            exclude_tools (list[str], optional, defaults to []):
-                The tools to exclude from the tool choice. 
-            running_checker (Callable[[Stateful], bool], optional, defaults to None):
-                The checker to check if the workflow should be running.
+            max_idle_thinking (int, defaults to 1):
+                The maximum number of times to idle thinking the workflow.
+            prompts (dict[str, str], defaults to {}):
+                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+            completion_config (dict[str, Any], defaults to {}):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
+            running_checker (Callable[[Stateful], bool], defaults to None):
+                The checker to check if the workflow should be running. 
             *args:
                 The additional arguments for running the workflow.
             **kwargs:
@@ -150,11 +152,11 @@ class BaseWorkflow(Workflow, ToolsMixin):
         async def run(
             self, 
             target: Stateful, 
-            max_error_retry: int, 
-            max_idle_thinking: int, 
-            tool_choice: str, 
-            exclude_tools: list[str], 
-            running_checker: Callable[[Stateful], bool], 
+            max_error_retry: int = 3, 
+            max_idle_thinking: int = 1, 
+            prompts: dict[str, str] = {}, 
+            completion_config: dict[str, Any] = {}, 
+            running_checker: Callable[[Stateful], bool] = None, 
             *args, 
             **kwargs,
         ) -> Stateful:

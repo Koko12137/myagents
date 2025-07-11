@@ -1,14 +1,14 @@
-from typing import Callable
+from typing import Callable, Any
 
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.messages import SystemMessage
+from myagents.core.messages import SystemMessage, UserMessage
 from myagents.core.interface import Agent, TaskStatus, Context, Stateful, TreeTaskNode
 from myagents.core.workflows.react import ReActFlow
 from myagents.core.tasks import DocumentTaskView, ToDoTaskView
 from myagents.core.utils.extractor import extract_by_label
-from myagents.prompts.workflows.plan import PROFILE, PLAN_ATTENTION_PROMPT, EXEC_PLAN_PROMPT, PLAN_SYSTEM_PROMPT
+from myagents.prompts.workflows.plan import PROFILE, PLAN_ATTENTION_PROMPT, EXEC_PLAN_PROMPT, PLAN_SYSTEM_PROMPT, ERROR_PROMPT
 
 
 class PlanAndExecFlow(ReActFlow):
@@ -80,8 +80,8 @@ class PlanAndExecFlow(ReActFlow):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
@@ -95,10 +95,17 @@ class PlanAndExecFlow(ReActFlow):
                 The maximum number of error retries.
             max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of idle thinking.
-            tool_choice (str, optional, defaults to None):
-                The tool choice of the agent.
-            exclude_tools (list[str], optional, defaults to []):
-                The tools to exclude from the agent.
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts of the workflow. The following prompts are supported:
+                - "plan_system": The system prompt of the workflow.
+                - "plan_think": The think prompt of the workflow.
+                - "exec_system": The system prompt of the workflow.
+                - "exec_think": The think prompt of the workflow.
+                - "exec_reflect": The reflect prompt of the workflow.
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
             running_checker (Callable[[Stateful], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
@@ -115,6 +122,8 @@ class PlanAndExecFlow(ReActFlow):
             # Set the running checker to the default checker
             running_checker = lambda target: not target.is_finished()
 
+        error_prompt = prompts.pop("error_prompt", ERROR_PROMPT)
+        
         # Record the current error retry count
         current_error_retry = 0
         
@@ -124,44 +133,74 @@ class PlanAndExecFlow(ReActFlow):
         
         while running_checker(target):
             
+            # Check if the target is created, if True, then plan the task
             if target.is_created():
                 # Plan the task
-                await self.plan(
+                target = await self.plan(
                     target, 
                     max_error_retry, 
                     max_idle_thinking, 
-                    tool_choice, 
-                    exclude_tools, 
+                    prompts, 
+                    completion_config, 
                     running_checker,
                 )
             
             elif target.is_running():
                 # Execute the task
-                await self.reason_act_reflect(
+                target = await self.execute(
                     target, 
                     max_error_retry, 
                     max_idle_thinking, 
-                    tool_choice, 
-                    exclude_tools, 
+                    prompts, 
+                    completion_config, 
                     running_checker,
                 )
+                # Check if the target is created, if True, then process the error
+                if target.is_created():
+                    # Convert to cancelled status
+                    target.to_cancelled()
+            
+            elif target.is_error():
+                # Clean up all the cancelled sub-tasks
+                cancelled_sub_tasks = [sub_task for sub_task in target.sub_tasks.values() if sub_task.is_cancelled()]
+                # Delete the cancelled sub-tasks
+                for sub_task in cancelled_sub_tasks:
+                    del target.sub_tasks[sub_task.uid]
+                
+                # Convert to created status and call for re-planning
+                target.to_created()
+                
+            elif target.is_cancelled():
+                # Increment the error retry count
+                current_error_retry += 1
+                # Get the current result
+                current_result = DocumentTaskView(target).format()
+                # Create a new user message to record the error and the current result
+                message = UserMessage(content=error_prompt.format(
+                    error_retry=current_error_retry, 
+                    max_error_retry=max_error_retry, 
+                    error_reason=target.answer,
+                    current_result=current_result,
+                ))
+                target.update(message)
+                # Check if the error retry count is greater than the max error retry
+                if current_error_retry > max_error_retry:
+                    # Log the error
+                    logger.error(f"错误次数 {current_error_retry} 超过最大错误次数 {max_error_retry}，任务终止。")
+                    # Record the error information to the answer of the parent task
+                    target.parent.answer = target.answer
+                    # Break the loop
+                    break
+                
+                # Clean up the error information
+                target.answer = ""
+                # Convert to error status and call for error handling
+                target.to_error()
+                
             
             elif target.is_finished():
                 # Break the loop
                 break
-            
-            elif target.is_error():
-                # Increment the error retry count
-                current_error_retry += 1
-                # Process the error
-                await self.__process_error(target, max_error_retry, max_idle_thinking, tool_choice, exclude_tools, running_checker)
-                
-                # Check if the error retry count is greater than the max error retry
-                if current_error_retry > max_error_retry:
-                    # Log the error
-                    logger.error(f"Error retry count {current_error_retry} is greater than the max error retry {max_error_retry}.")
-                    # Cancel the target 
-                    target.to_cancelled()
             
             else:
                 # Log the error
@@ -171,29 +210,14 @@ class PlanAndExecFlow(ReActFlow):
             
         # Return the target
         return target
-    
-    async def __process_error(
-        self, 
-        target: TreeTaskNode, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
-        running_checker: Callable[[Stateful], bool] = None, 
-        *args, 
-        **kwargs,
-    ) -> TreeTaskNode:
-        """Process the error of the target.
-        """
-        pass
         
     async def plan(
         self, 
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
@@ -212,16 +236,16 @@ class PlanAndExecFlow(ReActFlow):
                 The target after planning.
         """
         # Prepare the prompts 
-        plan_system = kwargs.pop("plan_system", self.prompts["plan_system"])
-        plan_think = kwargs.pop("plan_think", self.prompts["plan_think"])
+        plan_system = prompts.pop("plan_system", self.prompts["plan_system"])
+        plan_think = prompts.pop("plan_think", self.prompts["plan_think"])
         
         # Call the parent class to reason and act
         await super().reason_act_reflect(
             target, 
             max_error_retry, 
             max_idle_thinking, 
-            tool_choice, 
-            exclude_tools, 
+            prompts, 
+            completion_config, 
             running_checker, 
             plan_system=plan_system,
             plan_think=plan_think,
@@ -233,18 +257,39 @@ class PlanAndExecFlow(ReActFlow):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
-        """Execute the task. This is the post step of the planning in order to execute the task. 
+        """Deep first execute the task. This is the post step of the planning in order to execute the task. 
+        
+        Args:
+            target (TreeTaskNode):
+                The task to deep first execute.
+            max_error_retry (int):
+                The maximum number of error retries.
+            max_idle_thinking (int):
+                The maximum number of idle thinking. 
+            prompts (dict[str, str]):
+                The prompts of the workflow. The following prompts are supported:
+                - "exec_system": The system prompt of the workflow.
+                - "exec_think": The think prompt of the workflow.
+                - "exec_reflect": The reflect prompt of the workflow.
+            completion_config (dict[str, Any]):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
+            *args:
+                The additional arguments for running the agent.
+            **kwargs:
+                The additional keyword arguments for running the agent.
+                
+        Returns:
+            TreeTaskNode:
+                The target after deep first executing.
         """
-        # Prepare the prompts 
-        exec_system = kwargs.pop("exec_system", self.prompts["exec_system"])
-        exec_think = kwargs.pop("exec_think", self.prompts["exec_think"])
-        exec_reflect = kwargs.pop("exec_reflect", self.prompts["exec_reflect"])
         
         # Unfinished sub-tasks
         unfinished_sub_tasks = iter(target.sub_tasks.values())
@@ -253,9 +298,28 @@ class PlanAndExecFlow(ReActFlow):
         
         # Traverse all the sub-tasks
         while sub_task is not None:
+            
+            # Check if the sub-task is created, if True, there must be some error in the sub-task
+            if sub_task.is_created():
+                # Log the error
+                logger.error(f"子任务执行中出现错误: \n{ToDoTaskView(sub_task).format()}")
+                # Record the error information to the answer of the parent task
+                target.answer = sub_task.answer
+                # Cancel all the unfinished sub-tasks
+                for sub_task in target.sub_tasks.values():
+                    if not sub_task.is_finished():
+                        sub_task.to_cancelled()
+                # IF all the sub-tasks are cancelled, then set the parent task status to cancelled
+                if all(sub_task.is_cancelled() for sub_task in target.sub_tasks.values()):
+                    target.to_cancelled()
+                else:
+                    # Set the parent task status to error
+                    target.to_created()
+                # Return the target
+                return target
                 
             # Check if the sub-task is running, if True, then act the sub-task
-            if sub_task.is_running():
+            elif sub_task.is_running():
                 # Log the sub-task
                 logger.info(f"执行子任务: \n{ToDoTaskView(sub_task).format()}")
                 # Act the sub-task
@@ -263,23 +327,40 @@ class PlanAndExecFlow(ReActFlow):
                     sub_task, 
                     max_error_retry, 
                     max_idle_thinking, 
-                    tool_choice, 
-                    exclude_tools, 
+                    prompts, 
+                    completion_config, 
                     running_checker,
                 )
 
             # Check if the sub-task is failed, if True, then retry the sub-task
             elif sub_task.is_error():
-                # Cancel the sub-task
+                # Log the error sub-task
+                logger.error(f"子任务执行中出现错误: \n{ToDoTaskView(sub_task).format()}")
+                # Set the sub-task status to error
                 sub_task.to_cancelled()
+                # Record the error information to the answer of the parent task
+                target.answer += sub_task.answer
             
             # Check if the sub-task is cancelled, if True, set the parent task status to created and stop the traverse
             elif sub_task.is_cancelled():
-                # Set the parent task status to created
-                target.to_created()
                 # Log the cancelled sub-task
                 logger.error(f"取消所有未执行或执行失败的子任务: \n{ToDoTaskView(target).format()}")
-                return target
+                # Record the error information to the answer of the parent task
+                target.answer = sub_task.answer
+                
+                # Cancel all the sub-tasks
+                for sub_task in target.sub_tasks.values():
+                    if not sub_task.is_finished():
+                        sub_task.to_cancelled()
+                # IF all the sub-tasks are cancelled, then set the parent task status to cancelled
+                if all(sub_task.is_cancelled() for sub_task in target.sub_tasks.values()):
+                    target.to_cancelled()
+                else:
+                    # Set the parent task status to error
+                    target.to_created()
+                
+                # Return the target
+                return target 
             
             # Check if the sub-task is finished, if True, then summarize the result of the sub-task
             elif sub_task.is_finished():
@@ -294,18 +375,19 @@ class PlanAndExecFlow(ReActFlow):
                 raise ValueError(f"The status of the sub-task is invalid in action flow: {sub_task.get_status()}")
             
         # Post traverse the task
-        # All the sub-tasks are finished, then call the action flow to act the task
-        target = await self.reason_act_reflect(
-            target, 
-            max_error_retry, 
-            max_idle_thinking, 
-            tool_choice, 
-            exclude_tools, 
-            running_checker, 
-            *args, 
-            **kwargs,
-        )
-        
+        # All the sub-tasks are finished, then reason, act and reflect on the task
+        if all(sub_task.is_finished() for sub_task in target.sub_tasks.values()):
+            target = await self.reason_act_reflect(
+                target, 
+                max_error_retry, 
+                max_idle_thinking, 
+                prompts, 
+                completion_config, 
+                running_checker, 
+                *args, 
+                **kwargs,
+            )
+            
         return target 
     
     async def reason_act_reflect(
@@ -313,12 +395,37 @@ class PlanAndExecFlow(ReActFlow):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
-        """Execute the task. This is the post step of the planning in order to execute the task. 
+        """Reason, act and reflect on the target. This is the post step of the planning in order to execute the task. 
+        
+        Args:
+            target (TreeTaskNode):
+                The task to reason, act and reflect.
+            max_error_retry (int):
+                The maximum number of error retries.
+            max_idle_thinking (int):
+                The maximum number of idle thinking. 
+            prompts (dict[str, str]):
+                The prompts of the workflow. The following prompts are supported:
+                - "exec_system": The system prompt of the workflow.
+                - "exec_think": The think prompt of the workflow.
+                - "exec_reflect": The reflect prompt of the workflow.
+            completion_config (dict[str, Any]):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
+            *args:
+                The additional arguments for running the agent.
+            **kwargs:
+                The additional keyword arguments for running the agent.
+                
+        Returns:
+            TreeTaskNode:
+                The target after reasoning, acting and reflecting.
         """
         # Check if the target is running
         if not target.is_running():
@@ -327,9 +434,9 @@ class PlanAndExecFlow(ReActFlow):
             return target
         
         # Prepare the prompts
-        exec_system = kwargs.pop("exec_system", self.prompts["exec_system"])
-        exec_think = kwargs.pop("exec_think", self.prompts["exec_think"])
-        exec_reflect = kwargs.pop("exec_reflect", self.prompts["exec_reflect"])
+        exec_system = prompts.pop("exec_system", self.prompts["exec_system"])
+        exec_think = prompts.pop("exec_think", self.prompts["exec_think"])
+        exec_reflect = prompts.pop("exec_reflect", self.prompts["exec_reflect"])
         
         # Get the blueprint from the context
         blueprint = self.agent.env.context.get("blueprint")
@@ -355,8 +462,8 @@ class PlanAndExecFlow(ReActFlow):
                 current_error=current_error, 
                 max_idle_thinking=max_idle_thinking, 
                 current_thinking=current_thinking, 
-                tool_choice=tool_choice, 
-                exclude_tools=exclude_tools,
+                prompts=prompts, 
+                completion_config=completion_config, 
             )
             # Get the last message
             message = target.get_history()[-1]

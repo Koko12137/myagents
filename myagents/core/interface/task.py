@@ -39,6 +39,15 @@ class Task(Stateful):
     Attributes:
         uid (str):
             The unique identifier of the task. Do not specify this field. It will be automatically generated.
+        question (str):
+            The question to be answered. 
+        description (str):
+            The detail information and limitation of the task. 
+        status (TaskStatus):
+            The status of the current task.
+        history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
+            The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
+            The value is a list of the history messages. 
     """
     uid: str
     question: str
@@ -72,11 +81,39 @@ class TreeTaskNode(Task):
         answer (str):
             The answer to the question. If the task is not finished, the answer is None
     """
+    uid: str
+    question: str
+    description: str
+    # Status and history
+    status: TaskStatus
+    history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
+    # Parent and sub-tasks
     parent: 'TreeTaskNode'
     # NOTE: The key should be the question of the sub-task, the value should be the sub-task instance. 
     sub_tasks: OrderedDict[str, 'TreeTaskNode']
     sub_task_depth: int
     answer: str
+    
+    @abstractmethod
+    def to_created(self) -> None:
+        """Set the current status of the stateful entity to created. This will also set the sub-tasks to cancelled if the 
+        sub-tasks are not finished.
+        """
+        pass
+    
+    @abstractmethod
+    def to_running(self) -> None:
+        """Set the current status of the stateful entity to running. This will also set the parent task to running if the 
+        parent task is created and all the sub-tasks are running.
+        """
+        pass
+    
+    @abstractmethod
+    def to_finished(self) -> None:
+        """Set the current status of the stateful entity to finished. This will also set the parent task to finished if the 
+        parent task is running and all the sub-tasks are finished.
+        """
+        pass
 
 
 @runtime_checkable
@@ -100,10 +137,15 @@ class GraphTaskNode(Task):
             The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
             The value is a list of the history messages. 
     """
-    dependencies: OrderedDict[str, 'GraphTaskNode']
-    answer: Optional[str]
+    uid: str
+    question: str
+    description: str
+    # Status and history
     status: TaskStatus
     history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
+    # Dependencies and answer
+    dependencies: OrderedDict[str, 'GraphTaskNode']
+    answer: Optional[str]
 
 
 @runtime_checkable

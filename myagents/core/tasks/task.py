@@ -105,9 +105,13 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
             raise ValueError(f"The format {format} is not supported.")
     
     def to_created(self) -> None:
-        """Set the task status to created.
+        """Set the task status to created. This will also set the sub-tasks to cancelled if the sub-tasks are not finished.
         """
         self.status = TaskStatus.CREATED
+        # Convert the sub-tasks to cancelled if the sub-tasks are not finished
+        for sub_task in self.sub_tasks.values():
+            if not sub_task.is_finished():
+                sub_task.to_cancelled()
     
     def is_created(self) -> bool:
         """Check if the task status is created.
@@ -115,7 +119,8 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         return self.status == TaskStatus.CREATED
     
     def to_running(self) -> None:
-        """Set the task status to running.
+        """Set the task status to running. This will also set the parent task to running if the parent task is created and 
+        all the sub-tasks are running.
         """
         self.status = TaskStatus.RUNNING
         
@@ -132,7 +137,8 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         return self.status == TaskStatus.RUNNING
     
     def to_finished(self) -> None:
-        """Set the task status to finished.
+        """Set the task status to finished. This will also set the parent task to finished if the parent task is running and 
+        all the sub-tasks are finished.
         """
         self.status = TaskStatus.FINISHED
         
