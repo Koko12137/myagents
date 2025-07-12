@@ -7,7 +7,7 @@ from myagents.core.interface import Agent, Stateful, Context, TreeTaskNode
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage
 from myagents.core.workflows.react import ReActFlow
 from myagents.core.utils.extractor import extract_by_label
-from myagents.prompts.workflows.orchestrate import PROFILE, SYSTEM_PROMPT, THINK_PROMPT, ACTION_PROMPT
+from myagents.prompts.workflows.orchestrate import PROFILE, SYSTEM_PROMPT, THINK_PROMPT, ACTION_PROMPT, REFLECT_PROMPT
 
 
 class OrchestrateFlow(ReActFlow):
@@ -39,7 +39,9 @@ class OrchestrateFlow(ReActFlow):
         profile: str = "", 
         system_prompt: str = "", 
         think_prompt: str = "", 
-        action_prompt: str = "", 
+        react_system: str = "", 
+        react_think: str = "", 
+        react_reflect: str = "", 
         *args, 
         **kwargs,
     ) -> None:
@@ -52,8 +54,12 @@ class OrchestrateFlow(ReActFlow):
                 The system prompt of the workflow.
             think_prompt (str, optional, defaults to ""):
                 The think prompt of the workflow.
-            action_prompt (str, optional, defaults to ""):
+            react_system (str, optional, defaults to ""):
+                The react system prompt of the workflow.
+            react_think (str, optional, defaults to ""):
                 The action prompt of the workflow.
+            react_reflect (str, optional, defaults to ""):
+                The reflection prompt of the workflow.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
@@ -68,7 +74,9 @@ class OrchestrateFlow(ReActFlow):
         self.prompts.update({
             "orchestrate_system": system_prompt if system_prompt != "" else SYSTEM_PROMPT.format(profile=self.profile),
             "orchestrate_think": think_prompt if think_prompt != "" else THINK_PROMPT,
-            "react_think": action_prompt if action_prompt != "" else ACTION_PROMPT,
+            "react_system": react_system if react_system != "" else SYSTEM_PROMPT.format(profile=self.profile),
+            "react_think": react_think if react_think != "" else ACTION_PROMPT,
+            "react_reflect": react_reflect if react_reflect != "" else REFLECT_PROMPT,
         })
         
     async def __reason(

@@ -1,14 +1,17 @@
 import traceback
+from uuid import uuid4
 from asyncio import Queue, Lock
 from typing import Union, Optional, Callable, Awaitable, Any
 
+from loguru import logger
 from fastmcp import Client as MCPClient
 from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
 from mcp import Tool as MCPTool
 
 from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult
-from myagents.core.interface import LLM, Agent, AgentType, StepCounter, Environment, Stateful, Workflow
+from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow
+from myagents.core.agents.types import AgentType
 from myagents.core.utils.tools import tool_schema
 from myagents.core.utils.step_counters import MaxStepsError
 
@@ -61,6 +64,9 @@ class BaseAgent(Agent):
     
     def __init__(
         self, 
+        name: str, 
+        type: AgentType, 
+        profile: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
@@ -70,8 +76,14 @@ class BaseAgent(Agent):
         """Initialize the BaseAgent.
         
         Args:
+            name (str):
+                The name of the agent.
+            type (AgentType):
+                The type of the agent.
+            profile (str):
+                The profile of the agent.
             llm (LLM):
-                The LLM to use for the agent.
+                The LLM to use for the agent. 
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
@@ -84,9 +96,17 @@ class BaseAgent(Agent):
         # Initialize the parent class
         super().__init__(*args, **kwargs)
         
+        # Initialize the basic information
+        self.uid = str(uuid4())
+        self.name = name
+        self.type = type
+        self.profile = profile
         # Initialize the LLM and MCP client
         self.llm = llm
         self.mcp_client = mcp_client
+        # Initialize the workflow and environment
+        self.workflow = None
+        self.env = None
         # Initialize the step counters
         self.step_counters = {counter.uname: counter for counter in step_counters}
         # Initialize the synchronization lock
@@ -233,7 +253,7 @@ class BaseAgent(Agent):
             res = await self.mcp_client.call_tool(tool_call_name, tool_call_args)
         except ClientError as e:
             # Record and return the error
-            self.custom_logger.error(f"Error calling tool {tool_call_name}: {e}")
+            logger.error(f"Error calling tool {tool_call_name}: {e}")
             return ToolCallResult(
                 tool_call_id=tool_call_id, 
                 content=str(e), 
@@ -241,7 +261,7 @@ class BaseAgent(Agent):
             )
         except RuntimeError as e:
             # Raise the error 
-            self.custom_logger.error(f"{e}, traceback: {traceback.format_exc()}")
+            logger.error(f"{e}, traceback: {traceback.format_exc()}")
             raise e
         
         # Return the result
@@ -254,10 +274,10 @@ class BaseAgent(Agent):
     async def run(
         self, 
         target: Stateful, 
-        max_error_retry: int, 
-        max_idle_thinking: int, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         *args, 
         **kwargs
     ) -> AssistantMessage:
@@ -266,14 +286,16 @@ class BaseAgent(Agent):
         Args:
             target (Stateful): 
                 The stateful entity to run the agent on. 
-            max_error_retry (int): 
+            max_error_retry (int, optional, defaults to 3): 
                 The maximum number of times to retry the agent when the target is errored. 
-            max_idle_thinking (int): 
+            max_idle_thinking (int, optional, defaults to 1): 
                 The maximum number of times to idle thinking the agent. 
-            tool_choice (str, optional, defaults to None):
-                The designated tool choice to use for the agent. 
-            exclude_tools (list[str], optional, defaults to []):
-                The tools to exclude from the tool choice. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts of the agent. The key is the prompt name and the value is the prompt content. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the agent. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -283,6 +305,18 @@ class BaseAgent(Agent):
             AssistantMessage:
                 The assistant message returned by the agent after running on the stateful entity or any other entity.
         """
+        # Check if the workflow is registered
+        if self.workflow is None:
+            # Log the error
+            logger.error("The workflow is not registered to the agent.")
+            raise ValueError("The workflow is not registered to the agent.")
+        
+        # Check if the environment is registered
+        if self.env is None:
+            # Log the error
+            logger.error("The environment is not registered to the agent.")
+            raise ValueError("The environment is not registered to the agent.")
+        
         # Get the lock of the agent
         await self.lock.acquire()
         
@@ -291,8 +325,8 @@ class BaseAgent(Agent):
             target, 
             max_error_retry, 
             max_idle_thinking, 
-            tool_choice, 
-            exclude_tools, 
+            prompts, 
+            completion_config, 
             *args, 
             **kwargs,
         )
@@ -310,3 +344,52 @@ class BaseAgent(Agent):
                 The step counter to register.
         """
         self.step_counters[counter.uname] = counter
+
+
+    def register_workflow(self, workflow: Workflow) -> None:
+        """Register a workflow to the base agent.
+        
+        Args:
+            workflow (Workflow):
+                The workflow to register.
+                
+        Raises:
+            ValueError:
+                If the type of the workflow is not valid.
+            ValueError:
+                If the workflow is already registered to the agent.
+        """
+        # Check if the workflow is available
+        if not isinstance(workflow, Workflow):
+            raise ValueError(f"The type of the workflow is not valid. Expected Workflow, but got {type(workflow)}.")
+        
+        # Check if the workflow is already registered
+        if self.workflow is not None:
+            raise ValueError("The workflow is already registered to the agent.")
+        
+        # Register the workflow
+        self.workflow = workflow
+        
+    def register_env(self, env: Environment) -> None:
+        """Register an environment to the base agent.
+        
+        Args:
+            env (Environment):
+                The environment to register.
+                
+        Raises:
+            ValueError:
+                If the type of the environment is not valid.
+            ValueError:
+                If the environment is already registered to the agent.
+        """
+        # Check if the environment is available
+        if not isinstance(env, Environment):
+            raise ValueError(f"The type of the environment is not valid. Expected Environment, but got {type(env)}.")
+        
+        # Check if the environment is already registered
+        if self.env is not None:
+            raise ValueError("The environment is already registered to the agent.")
+        
+        # Register the environment
+        self.env = env

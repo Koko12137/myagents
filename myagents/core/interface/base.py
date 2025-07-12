@@ -92,22 +92,6 @@ class StepCounter(Protocol):
         pass
 
 
-class AgentType(Enum):
-    """The type of the agent.
-    
-    Attributes:
-        REACT (str):
-            The reason and act agent. This agent works on a basic reason and act workflow. 
-        ORCHESTRATE (str):
-            The orchestrator agent. This agent works on an objective and key outputs orchestration workflow. 
-        PLAN_AND_EXECUTE (str):
-            The plan and executor agent. This agent works on a plan and executor workflow. 
-    """
-    REACT = "react"
-    ORCHESTRATE = "orchestrate"
-    PLAN_AND_EXECUTE = "plan_and_execute"
-
-
 @runtime_checkable
 class Agent(Protocol):
     """Agent running on an environment, and working on a task according to the workflow.
@@ -117,7 +101,7 @@ class Agent(Protocol):
             The unique identifier of the agent.
         name (str):
             The name of the agent.
-        type (AgentType):
+        type (Enum):
             The type of the agent.
         profile (str):
             The profile of the agent.
@@ -137,7 +121,7 @@ class Agent(Protocol):
     # Basic information
     uid: str
     name: str
-    type: AgentType
+    type: Enum
     profile: str
     # LLM and MCP client
     llm: LLM
@@ -230,8 +214,8 @@ class Agent(Protocol):
         target: Stateful, 
         max_error_retry: int, 
         max_idle_thinking: int, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [],  
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         *args, 
         **kwargs
     ) -> AssistantMessage:
@@ -244,10 +228,12 @@ class Agent(Protocol):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent. 
-            tool_choice (str, optional, defaults to None):
-                The designated tool choice to use for the agent. 
-            exclude_tools (list[str], optional, defaults to []):
-                The tools to exclude from the tool choice. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts for running specific workflow of the agent. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the agent. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -266,6 +252,26 @@ class Agent(Protocol):
         Args:
             counter (StepCounter):
                 The step counter to register.
+        """
+        pass
+    
+    @abstractmethod
+    def register_workflow(self, workflow: 'Workflow') -> None:
+        """Register a workflow to the agent.
+        
+        Args:
+            workflow (Workflow):
+                The workflow to register.
+        """
+        pass
+    
+    @abstractmethod
+    def register_env(self, env: 'Environment') -> None:
+        """Register an environment to the agent.
+        
+        Args:
+            env (Environment):
+                The environment to register.
         """
         pass
 
@@ -329,7 +335,7 @@ class Workflow(ToolsCaller):
             max_idle_thinking (int):
                 The maximum number of times to idle thinking the workflow.
             prompts (dict[str, str]):
-                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+                The prompts for running specific workflow of the workflow. 
             completion_config (dict[str, Any]):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
@@ -418,11 +424,11 @@ class Environment(Stateful, ToolsCaller):
             The leader agent of the environment. 
         agents (dict[str, Agent]):
             The agents in the environment. The key is the agent name and the value is the agent. 
-        required_agents (list[AgentType]):
+        required_agents (list[Enum]):
             The agents in the list must be registered to the environment. 
-        agent_type_map (dict[AgentType, list[str]]):
+        agent_type_map (dict[Enum, list[str]]):
             The map of the agent type to the agent name. The key is the agent type and the value is the agent name list. 
-        agent_type_semaphore (dict[AgentType, Semaphore]):
+        agent_type_semaphore (dict[Enum, Semaphore]):
             The semaphore of the agent type. The key is the agent type and the value is the semaphore. 
         tools (dict[str, FastMcpTool]):
             The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
@@ -437,12 +443,12 @@ class Environment(Stateful, ToolsCaller):
     name: str
     profile: str
     prompts: dict[str, str]
-    required_agents: list[AgentType]
+    required_agents: list[Enum]
     # Agents and tools
     leader: Agent
     agents: dict[str, Agent]
-    agent_type_map: dict[AgentType, list[str]]
-    agent_type_semaphore: dict[AgentType, Semaphore]
+    agent_type_map: dict[Enum, list[str]]
+    agent_type_semaphore: dict[Enum, Semaphore]
     # Tools Mixin
     tools: dict[str, FastMcpTool]
     context: Context
@@ -473,12 +479,12 @@ class Environment(Stateful, ToolsCaller):
     @abstractmethod
     async def call_agent(
         self, 
-        agent_type: AgentType, 
+        agent_type: Enum, 
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         designated_agent: str = None, 
         *args, 
         **kwargs, 
@@ -490,7 +496,7 @@ class Environment(Stateful, ToolsCaller):
             One agent can only work on one task at a time. 
         
         Args:
-            agent_type (AgentType):
+            agent_type (Enum):
                 The type of the agent to call.
             target (Stateful):
                 The target to pass to the agent. 
@@ -498,10 +504,12 @@ class Environment(Stateful, ToolsCaller):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of times to idle thinking the agent. 
-            tool_choice (str, optional, defaults to None):
-                The designated tool choice to use for the agent. 
-            exclude_tools (list[str], optional, defaults to []):
-                The tools to exclude from the tool choice. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts for running specific workflow of the agent. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the agent. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
             designated_agent (str, optional, defaults to None):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:

@@ -20,7 +20,11 @@ class ReActFlow(BaseWorkflow):
         agent (Agent):
             The agent that is used to reason and act. 
         prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+            The prompts for running specific workflow of the workflow. 
+            The following prompts are supported:
+            - "react_system": The system prompt of the workflow.
+            - "react_think": The think prompt of the workflow.
+            - "react_reflect": The reflect prompt of the workflow.
         context (BaseContext):
             The context of the workflow.
         tools (dict[str, FastMcpTool]):
@@ -46,14 +50,8 @@ class ReActFlow(BaseWorkflow):
         """Initialize the ReActFlow.
 
         Args:
-            profile (str, optional, defaults to ""):
-                The profile of the workflow.
-            system_prompt (str, optional, defaults to ""):
-                The system prompt of the workflow.
-            think_prompt (str, optional, defaults to ""):
-                The think prompt of the workflow.
-            reflect_prompt (str, optional, defaults to ""):
-                The reflect prompt of the workflow.
+            workflow_config (WorkflowConfig):
+                The configuration for the workflow.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
@@ -61,14 +59,20 @@ class ReActFlow(BaseWorkflow):
         """
         super().__init__(*args, **kwargs)
         
+        # Read the workflow profile
+        profile = profile if profile != "" else PROFILE
+        system_prompt = system_prompt if system_prompt != "" else SYSTEM_PROMPT.format(profile=profile)
+        think_prompt = think_prompt if think_prompt != "" else THINK_PROMPT
+        reflect_prompt = reflect_prompt if reflect_prompt != "" else REFLECT_PROMPT
+        
         # Initialize the workflow components
         self.profile = profile if profile != "" else PROFILE
         self.agent = None
         # Update the prompts
         self.prompts = {
-            "react_system": system_prompt if system_prompt != "" else SYSTEM_PROMPT.format(profile=self.profile),
-            "react_think": think_prompt if think_prompt != "" else THINK_PROMPT,
-            "react_reflect": reflect_prompt if reflect_prompt != "" else REFLECT_PROMPT,
+            "react_system": system_prompt, 
+            "react_think": think_prompt, 
+            "react_reflect": reflect_prompt, 
         }
     
     async def run(

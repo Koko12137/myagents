@@ -4,13 +4,15 @@ import json
 from abc import abstractmethod
 from asyncio import Semaphore
 from enum import Enum
+from uuid import uuid4
 from typing import Union, Any
 
 from json_repair import repair_json
 from fastmcp.tools import Tool as FastMCPTool
 
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
-from myagents.core.interface import Agent, AgentType, Environment, Context, Stateful
+from myagents.core.interface import Agent, Environment, Context, Stateful
+from myagents.core.agents import AgentType
 from myagents.core.tasks import BaseTreeTaskNode
 from myagents.core.state_mixin import StateMixin
 from myagents.core.tools_mixin import ToolsMixin
@@ -38,8 +40,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             The name of the environment.
         profile (str):
             The profile of the environment.
-        system_prompt (str):
-            The system prompt of the environment.
+        prompts (dict[str, str]):
+            The prompts of the environment. 
         required_agents (list[AgentType]):
             The required agents to work on the environment. The agents in the list must be registered to the environment. 
         leader (Agent):
@@ -79,6 +81,10 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
     
     def __init__(
         self, 
+        name: str, 
+        profile: str, 
+        prompts: dict[str, str], 
+        required_agents: list[AgentType], 
         *args, 
         **kwargs, 
     ) -> None:
@@ -89,6 +95,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The name of the environment.
             profile (str):
                 The profile of the environment.
+            prompts (dict[str, str]):
+                The prompts of the environment. The key is the prompt name and the value is the prompt content. 
             required_agents (list[AgentType]):
                 The required agents to work on the environment. The agents in the list must be registered to the environment. 
             *args:
@@ -100,12 +108,14 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         super().__init__(*args, **kwargs)
         
         # Initialize the basic information
-        self.name = None
-        self.profile = None
+        self.uid = str(uuid4())
+        self.name = name
+        self.profile = profile
+        self.prompts = prompts
+        self.required_agents = required_agents
         # Initialize the core components
         self.leader = None
         self.agents = {}
-        self.required_agents = []
         self.agent_type_map = {}
         self.agent_type_semaphore = {}
         self.tools = {}
@@ -264,8 +274,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        tool_choice: str = None, 
-        exclude_tools: list[str] = [], 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
         designated_agent: str = None, 
         *args, 
         **kwargs
@@ -285,10 +295,12 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional):
                 The maximum number of times to idle thinking the agent.
-            tool_choice (str, optional):
-                The designated tool choice to use for the agent. 
-            exclude_tools (list[str], optional):
-                The tools to exclude from the tool choice. 
+            prompts (dict[str, str], optional):
+                The prompts for running specific workflow of the agent. 
+            completion_config (dict[str, Any], optional):
+                The completion config of the agent. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
             designated_agent (str, optional):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:
@@ -334,8 +346,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             target, 
             max_error_retry, 
             max_idle_thinking, 
-            tool_choice, 
-            exclude_tools, 
+            prompts, 
+            completion_config, 
             *args, 
             **kwargs,
         )

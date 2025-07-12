@@ -2,7 +2,7 @@ from .llm import LLM, Provider
 from .logger import Logger
 from .task import TreeTaskNode, TaskView, TaskStatus, Task
 from .core import Stateful, Context, ToolsCaller, Status
-from .base import StepCounter, Agent, AgentType, Workflow, Environment
+from .base import StepCounter, Agent, Workflow, Environment
 
 
 __all__ = [
@@ -16,7 +16,6 @@ __all__ = [
     "Task", 
     "Workflow", 
     "Agent", 
-    "AgentType", 
     "Environment", 
     "StepCounter", 
     "Stateful", 

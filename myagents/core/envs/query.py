@@ -4,18 +4,28 @@ from asyncio import Semaphore
 from collections import OrderedDict
 from enum import Enum
 from traceback import format_exc
-from typing import Union
+from typing import Union, Any
 
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
-from myagents.core.interface import Agent, AgentType, TreeTaskNode, Context, TaskStatus, Stateful
+from myagents.core.interface import Agent, TreeTaskNode, Context, TaskStatus
+from myagents.core.agents import AgentType
 from myagents.core.tasks.task import BaseTreeTaskNode, DocumentTaskView, ToDoTaskView
 from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
 from myagents.core.utils.tools import ToolView
 from myagents.tools.docs import DocumentLog, BaseDocument, FormatType
-from myagents.prompts.envs.query import QUERY_SYSTEM_PROMPT, QUERY_DOC_PROMPT, QUERY_TASK_PROMPT, QUERY_SELECT_PROMPT, NAME, PROFILE
+from myagents.prompts.envs.query import (
+    NAME, 
+    PROFILE, 
+    QUERY_SYSTEM_PROMPT, 
+    QUERY_DOC_PROMPT, 
+    QUERY_ORCHESTRATION_PROMPT, 
+    QUERY_PLAN_AND_EXECUTE_PROMPT, 
+    QUERY_SELECT_PROMPT, 
+    QUERY_ERROR_PROMPT,
+)
 
 
 REQUIRED_AGENTS = [AgentType.ORCHESTRATE, AgentType.REACT, AgentType.PLAN_AND_EXECUTE]
@@ -96,9 +106,11 @@ class Query(BaseEnvironment):
         self, 
         profile: str = "", 
         system_prompt: str = "", 
+        orchestration_prompt: str = "", 
+        plan_and_execute_prompt: str = "", 
         doc_prompt: str = "", 
-        task_prompt: str = "", 
         select_prompt: str = "", 
+        error_prompt: str = "", 
         *args, 
         **kwargs,
     ) -> None:
@@ -109,28 +121,34 @@ class Query(BaseEnvironment):
                 The profile of the environment.
             system_prompt (str, optional, defaults to ""):
                 The system prompt of the environment.
+            orchestration_prompt (str, optional, defaults to ""):
+                The orchestration prompt of the environment.
             doc_prompt (str, optional, defaults to ""):
                 The document prompt of the environment.
-            task_prompt (str, optional, defaults to ""):
-                The task prompt of the environment.
             select_prompt (str, optional, defaults to ""):
                 The select prompt of the environment.
+            error_prompt (str, optional, defaults to ""):
+                The error prompt of the environment.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        super().__init__(*args, **kwargs)
-        
-        # Initialize the basic information
-        self.profile = profile if profile != "" else PROFILE
-        # Update the prompts
-        self.prompts.update({
-            "system": system_prompt if system_prompt != "" else QUERY_SYSTEM_PROMPT,
-            "doc": doc_prompt if doc_prompt != "" else QUERY_DOC_PROMPT,
-            "task": task_prompt if task_prompt != "" else QUERY_TASK_PROMPT,
-            "select": select_prompt if select_prompt != "" else QUERY_SELECT_PROMPT,
-        })
+        super().__init__(
+            name=NAME, 
+            profile=profile if profile != "" else PROFILE, 
+            prompts={
+                "system": system_prompt if system_prompt != "" else QUERY_SYSTEM_PROMPT,
+                "orchestration": orchestration_prompt if orchestration_prompt != "" else QUERY_ORCHESTRATION_PROMPT,
+                "plan_and_execute": plan_and_execute_prompt if plan_and_execute_prompt != "" else QUERY_PLAN_AND_EXECUTE_PROMPT,
+                "doc": doc_prompt if doc_prompt != "" else QUERY_DOC_PROMPT,
+                "select": select_prompt if select_prompt != "" else QUERY_SELECT_PROMPT,
+                "error": error_prompt if error_prompt != "" else QUERY_ERROR_PROMPT,
+            }, 
+            required_agents=REQUIRED_AGENTS, 
+            *args, 
+            **kwargs,
+        )
         
         # Initialize the tasks
         self.tasks = OrderedDict()
@@ -269,13 +287,13 @@ class Query(BaseEnvironment):
         elif sub_task_depth > 5:
             raise ValueError("The sub task depth must be less than 5.")
         
-        # Set the status to running
-        self.to_running()
         # Append the system prompt to the history
-        self.update(SystemMessage(content=self.prompts["system"].format(
-            profile=self.profile, 
-            question_type=output_type.value, 
-        )))
+        self.update(SystemMessage(
+            content=self.prompts["system"].format(
+                profile=self.profile, 
+                question_type=output_type.value, 
+            ),
+        ))
         # Create a new Task
         task = BaseTreeTaskNode(
             question=question, 
@@ -286,18 +304,9 @@ class Query(BaseEnvironment):
         self.tasks[task.question] = task
         # Log the task
         logger.info(f"任务创建: \n{task.question}")
-        # Record the question
-        self.update(UserMessage(content=QUERY_TASK_PROMPT.format(task=ToDoTaskView(task).format())))
-        # Call for global orchestration
-        message: AssistantMessage = await self.call_agent(
-            AgentType.ORCHESTRATE, 
-            target=task, 
-            tool_choice="create_task", 
-        )
-        # Update the environment history
-        self.update(message)
-        # Plan and execute the task
-        task = await self.plan_and_exec(task)
+        
+        # Process the task
+        task = await self.process_task(task)
         
         # Check the task status
         if task.status != TaskStatus.FINISHED:
@@ -334,7 +343,12 @@ class Query(BaseEnvironment):
                 AgentType.REACT, 
                 target=task, 
                 document=document, 
-                exclude_tools=["select_answer"], 
+                prompts={
+                    "react_system": self.prompts["doc"],
+                },
+                completion_config={
+                    "exclude_tools": ["select_answer"],
+                },
             )
             # Update the environment history
             self.update(message)
@@ -355,7 +369,12 @@ class Query(BaseEnvironment):
             message: AssistantMessage = await self.call_agent(
                 AgentType.REACT, 
                 target=task, 
-                tool_choice="select_answer", 
+                prompts={
+                    "react_system": self.prompts["select"],
+                },
+                completion_config={
+                    "tool_choice": "select_answer",
+                },
             )
             # Update the environment history
             self.update(message)
@@ -366,10 +385,187 @@ class Query(BaseEnvironment):
         
         else:
             raise ValueError(f"Unknown output type: {output_type}")
-
-    async def plan_and_exec(self, target: TreeTaskNode) -> TreeTaskNode:
-        """Plan and execute the task.
+        
+    async def process_task(
+        self, 
+        target: TreeTaskNode, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
+    ) -> TreeTaskNode:
+        """Process the task.
+        
+        Args:
+            target (TreeTaskNode):
+                The target task to be processed.
+            max_error_retry (int, optional, defaults to 3):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int, optional, defaults to 1):
+                The maximum number of times to idle thinking the agent. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts of the agent. The key is the prompt name and the value is the prompt content. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the agent. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
+        Returns:
+            TreeTaskNode:
+                The processed task.
         """
+        # Initialize the error retry count
+        current_error = 0
+        
+        while not target.is_finished():
+            # Check the status of the target
+            if target.is_created():
+                # Call for global orchestration
+                target = await self.orchestrate(
+                    target, 
+                    max_error_retry, 
+                    max_idle_thinking, 
+                    prompts, 
+                    completion_config, 
+                )
+            
+            elif target.is_running():
+                # Plan and execute the task
+                target = await self.plan_and_exec(
+                    target, 
+                    max_error_retry, 
+                    max_idle_thinking, 
+                    prompts, 
+                    completion_config, 
+                )
+            
+            elif target.is_finished():
+                # Break the loop
+                break
+            
+            elif target.is_error():
+                # Get all the sub-tasks that are not finished
+                sub_tasks = [sub_task for sub_task in target.sub_tasks.values() if not sub_task.is_finished()]
+                # Delete all the sub-tasks that are not finished
+                for sub_task in sub_tasks:
+                    del target.sub_tasks[sub_task.uid]
+                
+                # Rollback the target to created status
+                target.to_created()
+                # Record the error information
+                current_result = DocumentTaskView(target).format()
+                # Create a new user message to record the error and the current result
+                message = UserMessage(content=self.prompts["error"].format(
+                    error_retry=current_error, 
+                    max_error_retry=max_error_retry, 
+                    error_reason=target.answer,
+                    current_result=current_result,
+                ))
+                # Update the environment history
+                self.update(message)
+                # Clean up the error information
+                target.answer = ""
+            
+            elif target.is_cancelled():
+                # Increment the error retry count
+                current_error += 1
+                # Log the error
+                logger.error(f"任务 {target.question} 处理失败，重试次数: {current_error} / {max_error_retry}。")
+                
+                # Check the error retry count
+                if current_error >= max_error_retry:
+                    # Log the error
+                    logger.error(f"任务 {target.question} 处理失败，达到最大重试次数。")
+                    # Raise the error
+                    raise RuntimeError(f"Task {target.question} is in error state. Max error retry count reached.")
+                
+                # Rollback the target to error status and call for error handling
+                target.to_error()
+                
+            else:
+                # Log the error
+                logger.critical(f"任务 {target.question} 当前处于非法状态 {target.get_status()}。")
+                # Raise the error
+                raise RuntimeError(f"Task {target.question} is in error state. Invalid status.")
+        
+        # Return the answer
+        return target
+        
+    async def orchestrate(
+        self, 
+        target: TreeTaskNode, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
+    ) -> TreeTaskNode:
+        """Orchestrate the task. 
+        
+        Args:
+            target (TreeTaskNode):
+                The target task to be orchestrated.
+            max_error_retry (int, optional, defaults to 3):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int, optional, defaults to 1):
+                The maximum number of times to idle thinking the agent. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts of the agent. The key is the prompt name and the value is the prompt content. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the agent. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
+        Returns:    
+            TreeTaskNode:
+                The orchestrated task.
+        """
+        # Record the question
+        self.update(UserMessage(
+            content=self.prompts["orchestration"].format(task=ToDoTaskView(target).format()),
+        ))
+        # Call for global orchestration
+        message: AssistantMessage = await self.call_agent(
+            AgentType.ORCHESTRATE, 
+            target=target, 
+            max_error_retry=max_error_retry, 
+            max_idle_thinking=max_idle_thinking, 
+            prompts=prompts, 
+            completion_config=completion_config, 
+        )
+        # Update the environment history
+        self.update(message)
+        # Return the target
+        return target
+
+    async def plan_and_exec(
+        self, 
+        target: TreeTaskNode, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
+    ) -> TreeTaskNode:
+        """Plan and execute the task.
+        
+        Args:
+            target (TreeTaskNode):
+                The target task to be planned and executed.
+            max_error_retry (int, optional, defaults to 3):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int, optional, defaults to 1):
+                The maximum number of times to idle thinking the agent. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts of the agent. The key is the prompt name and the value is the prompt content. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the agent. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
+        Returns:
+            TreeTaskNode:
+                The planned and executed task.
+        """
+        # Record the question
+        self.update(UserMessage(
+            content=self.prompts["plan_and_execute"].format(task=ToDoTaskView(target).format()),
+        ))
         sub_tasks = target.sub_tasks
         # Create a iterator for the sub-tasks
         sub_tasks_iter = iter(sub_tasks.values())
@@ -380,24 +576,23 @@ class Query(BaseEnvironment):
 
             # Process the created status
             if sub_task.is_created():
-                # Create a new UserMessage
-                user_message = UserMessage(content=self.prompts["task"].format(task=ToDoTaskView(sub_task).format()))
-                # Update the environment history
-                self.update(user_message)
                 # Call for plan and execute
                 message: AssistantMessage = await self.call_agent(
                     AgentType.PLAN_AND_EXECUTE, 
                     target=sub_task, 
-                    exclude_tools=[*self.tools.keys()], 
+                    max_error_retry=max_error_retry, 
+                    max_idle_thinking=max_idle_thinking, 
+                    prompts=prompts, 
+                    completion_config=completion_config, 
                 )
                 # Update the environment history
                 self.update(message)
                 
-            elif sub_task.is_error():
+            elif sub_task.is_cancelled():
                 # Log the error
-                logger.error(f"Sub-task {sub_task.question} is in error state.")
-                # Raise the error
-                raise RuntimeError(f"Sub-task {sub_task.question} is in error state.")
+                logger.error(f"子任务 {sub_task.question} 已取消。")
+                # Break the loop
+                break
             
             elif sub_task.is_finished():
                 # Get the next sub-task

@@ -8,7 +8,14 @@ from myagents.core.interface import Agent, TaskStatus, Context, Stateful, TreeTa
 from myagents.core.workflows.react import ReActFlow
 from myagents.core.tasks import DocumentTaskView, ToDoTaskView
 from myagents.core.utils.extractor import extract_by_label
-from myagents.prompts.workflows.plan import PROFILE, PLAN_ATTENTION_PROMPT, EXEC_PLAN_PROMPT, PLAN_SYSTEM_PROMPT, ERROR_PROMPT
+from myagents.prompts.workflows.plan_and_exec import (
+    PROFILE, 
+    PLAN_SYSTEM_PROMPT, 
+    PLAN_THINK_PROMPT, 
+    EXEC_SYSTEM_PROMPT, 
+    EXEC_THINK_PROMPT, 
+    ERROR_PROMPT
+)
 
 
 class PlanAndExecFlow(ReActFlow):
@@ -22,7 +29,13 @@ class PlanAndExecFlow(ReActFlow):
         agent (Agent): 
             The agent that is used to orchestrate the task.
         prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+            The prompts for running specific workflow of the workflow. 
+            The following prompts are supported:
+            - "plan_system": The system prompt of the workflow.
+            - "plan_think": The think prompt of the workflow.
+            - "exec_system": The system prompt of the workflow.
+            - "exec_think": The think prompt of the workflow.
+            - "exec_reflect": The reflect prompt of the workflow.
         context (Context):
             The global context container of the workflow.
         tools (dict[str, FastMcpTool]):
@@ -39,9 +52,11 @@ class PlanAndExecFlow(ReActFlow):
     def __init__(
         self, 
         profile: str = "", 
-        system_prompt: str = "", 
-        attention_prompt: str = "", 
-        exec_prompt: str = "", 
+        plan_system_prompt: str = "", 
+        plan_think_prompt: str = "", 
+        exec_system_prompt: str = "", 
+        exec_think_prompt: str = "", 
+        error_prompt: str = "", 
         *args, 
         **kwargs, 
     ) -> None:
@@ -50,12 +65,20 @@ class PlanAndExecFlow(ReActFlow):
         Args:
             profile (str, optional, defaults to ""):
                 The profile of the workflow.
-            system_prompt (str, optional, defaults to ""):
+            plan_system_prompt (str, optional, defaults to ""):
                 The system prompt of the workflow.
-            attention_prompt (str, optional, defaults to ""):
-                The attention prompt of the workflow.
-            exec_prompt (str, optional, defaults to ""):
-                The execution prompt of the workflow.
+            plan_think_prompt (str, optional, defaults to ""):
+                The think prompt of the workflow.
+            plan_reflect_prompt (str, optional, defaults to ""):
+                The reflect prompt of the workflow.
+            exec_system_prompt (str, optional, defaults to ""):
+                The system prompt of the workflow.
+            exec_think_prompt (str, optional, defaults to ""):
+                The think prompt of the workflow.
+            exec_reflect_prompt (str, optional, defaults to ""):
+                The reflect prompt of the workflow.
+            error_prompt (str, optional, defaults to ""):
+                The error prompt of the workflow.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
@@ -67,9 +90,11 @@ class PlanAndExecFlow(ReActFlow):
         self.profile = profile if profile != "" else PROFILE
         # Update the prompts
         self.prompts.update({
-            "system": system_prompt if system_prompt != "" else PLAN_SYSTEM_PROMPT.format(profile=self.profile),
-            "attention": attention_prompt if attention_prompt != "" else PLAN_ATTENTION_PROMPT,
-            "exec": exec_prompt if exec_prompt != "" else EXEC_PLAN_PROMPT,
+            "plan_system": plan_system_prompt if plan_system_prompt != "" else PLAN_SYSTEM_PROMPT.format(profile=self.profile),
+            "plan_think": plan_think_prompt if plan_think_prompt != "" else PLAN_THINK_PROMPT,
+            "exec_system": exec_system_prompt if exec_system_prompt != "" else EXEC_SYSTEM_PROMPT,
+            "exec_think": exec_think_prompt if exec_think_prompt != "" else EXEC_THINK_PROMPT,
+            "error_prompt": error_prompt if error_prompt != "" else ERROR_PROMPT,
         })
         
         # Post initialize to initialize the tools
@@ -122,14 +147,10 @@ class PlanAndExecFlow(ReActFlow):
             # Set the running checker to the default checker
             running_checker = lambda target: not target.is_finished()
 
-        error_prompt = prompts.pop("error_prompt", ERROR_PROMPT)
+        error_prompt = prompts.pop("error_prompt", self.prompts["error_prompt"])
         
         # Record the current error retry count
         current_error_retry = 0
-        
-        # Update system prompt to history
-        message = SystemMessage(content=self.prompts["system"])
-        target.update(message)
         
         while running_checker(target):
             
@@ -153,12 +174,15 @@ class PlanAndExecFlow(ReActFlow):
                     max_idle_thinking, 
                     prompts, 
                     completion_config, 
-                    running_checker,
                 )
                 # Check if the target is created, if True, then process the error
                 if target.is_created():
                     # Convert to cancelled status
                     target.to_cancelled()
+                
+            elif target.is_finished():
+                # Break the loop
+                break
             
             elif target.is_error():
                 # Clean up all the cancelled sub-tasks
@@ -169,10 +193,6 @@ class PlanAndExecFlow(ReActFlow):
                 
                 # Convert to created status and call for re-planning
                 target.to_created()
-                
-            elif target.is_cancelled():
-                # Increment the error retry count
-                current_error_retry += 1
                 # Get the current result
                 current_result = DocumentTaskView(target).format()
                 # Create a new user message to record the error and the current result
@@ -183,6 +203,15 @@ class PlanAndExecFlow(ReActFlow):
                     current_result=current_result,
                 ))
                 target.update(message)
+                # Clean up the error information
+                target.answer = ""
+                
+            elif target.is_cancelled():
+                # Increment the error retry count
+                current_error_retry += 1
+                # Log the error
+                logger.error(f"任务 {target.question} 处理失败，重试次数: {current_error_retry} / {max_error_retry}。")
+                
                 # Check if the error retry count is greater than the max error retry
                 if current_error_retry > max_error_retry:
                     # Log the error
@@ -192,15 +221,8 @@ class PlanAndExecFlow(ReActFlow):
                     # Break the loop
                     break
                 
-                # Clean up the error information
-                target.answer = ""
                 # Convert to error status and call for error handling
                 target.to_error()
-                
-            
-            elif target.is_finished():
-                # Break the loop
-                break
             
             else:
                 # Log the error
@@ -238,6 +260,11 @@ class PlanAndExecFlow(ReActFlow):
         # Prepare the prompts 
         plan_system = prompts.pop("plan_system", self.prompts["plan_system"])
         plan_think = prompts.pop("plan_think", self.prompts["plan_think"])
+        # Update the prompts
+        prompts = {
+            "react_system": plan_system,
+            "react_think": plan_think,
+        }
         
         # Call the parent class to reason and act
         await super().reason_act_reflect(
@@ -247,8 +274,6 @@ class PlanAndExecFlow(ReActFlow):
             prompts, 
             completion_config, 
             running_checker, 
-            plan_system=plan_system,
-            plan_think=plan_think,
         )
         return target
     
@@ -259,7 +284,6 @@ class PlanAndExecFlow(ReActFlow):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
-        running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -329,7 +353,6 @@ class PlanAndExecFlow(ReActFlow):
                     max_idle_thinking, 
                     prompts, 
                     completion_config, 
-                    running_checker,
                 )
 
             # Check if the sub-task is failed, if True, then retry the sub-task
@@ -377,13 +400,22 @@ class PlanAndExecFlow(ReActFlow):
         # Post traverse the task
         # All the sub-tasks are finished, then reason, act and reflect on the task
         if all(sub_task.is_finished() for sub_task in target.sub_tasks.values()):
+            # Prepare the prompts
+            exec_system = prompts.pop("exec_system", self.prompts["exec_system"])
+            exec_think = prompts.pop("exec_think", self.prompts["exec_think"])
+            # Update the prompts
+            prompts = {
+                "react_system": exec_system,
+                "react_think": exec_think,
+            }
+            
+            # Call the parent class to reason, act and reflect
             target = await self.reason_act_reflect(
                 target, 
                 max_error_retry, 
                 max_idle_thinking, 
                 prompts, 
                 completion_config, 
-                running_checker, 
                 *args, 
                 **kwargs,
             )
@@ -434,9 +466,9 @@ class PlanAndExecFlow(ReActFlow):
             return target
         
         # Prepare the prompts
-        exec_system = prompts.pop("exec_system", self.prompts["exec_system"])
-        exec_think = prompts.pop("exec_think", self.prompts["exec_think"])
-        exec_reflect = prompts.pop("exec_reflect", self.prompts["exec_reflect"])
+        react_system = prompts.pop("react_system", self.prompts["react_system"])
+        react_think = prompts.pop("react_think", self.prompts["react_think"])
+        react_reflect = prompts.pop("react_reflect", self.prompts["react_reflect"])
         
         # Get the blueprint from the context
         blueprint = self.agent.env.context.get("blueprint")
@@ -446,7 +478,10 @@ class PlanAndExecFlow(ReActFlow):
         task_result = DocumentTaskView(task).format()
         
         # Append the system prompt to the history
-        message = SystemMessage(content=exec_system.format(blueprint=blueprint, task_result=task_result))
+        message = SystemMessage(content=react_system.format(
+            blueprint=blueprint, 
+            task_result=task_result,
+        ))
         target.update(message)
             
         # This is used for no tool calling thinking limit.
@@ -457,7 +492,7 @@ class PlanAndExecFlow(ReActFlow):
             # === Reason and Act Stage ===
             target, current_error, current_thinking = await self.reason_act(
                 target, 
-                react_think=exec_think,
+                react_think=react_think,
                 max_error_retry=max_error_retry, 
                 current_error=current_error, 
                 max_idle_thinking=max_idle_thinking, 
@@ -481,7 +516,7 @@ class PlanAndExecFlow(ReActFlow):
             # === Reflect Stage ===
             target, finish_flag = await self.reflect(
                 target, 
-                react_reflect=exec_reflect,
+                react_reflect=react_reflect,
             )
             if finish_flag:
                 # Set the task status to finished

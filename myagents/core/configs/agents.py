@@ -2,6 +2,7 @@ from typing import Union, Optional
 
 from pydantic import BaseModel, Field
 
+from myagents.core.agents import AgentType
 from myagents.core.configs.llms import LLMConfig
 from myagents.core.configs.mcps import MCPConfig
 
@@ -23,14 +24,14 @@ class AgentConfig(BaseModel):
     """The configuration for the agent.
 
     Args:
-        name (str):
-            The name of the agent.
+        type (AgentType):
+            The type of the agent.
         llm (LLMConfig):
             The configuration for the LLM.
         mcp_client (MCPConfig, optional):
             The configuration for the MCP client. 
     """
-    name: str = Field(description="The name of the agent.")
+    type: AgentType = Field(description="The type of the agent.")
     llm: LLMConfig = Field(description="The configuration for the LLM.")
     mcp_client: Optional[MCPConfig] = Field(
         description="The configuration for the MCP client.", 

@@ -6,21 +6,20 @@ from fastmcp.client import Client as MCPClient
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.types import AgentType
 from myagents.core.interface import LLM, Workflow, Environment, StepCounter
-from myagents.core.workflows import ReActFlow
-from myagents.prompts.workflows.react import PROFILE as WORKFLOW_PROFILE
+from myagents.core.workflows import OrchestrateFlow
+from myagents.prompts.workflows.orchestrate import PROFILE as WORKFLOW_PROFILE
 
 
 PROFILE = """
-我叫{name}，是一个会按照“观察-思考-行动-反思”的流程来执行任务的助手。
+我叫{name}，是一个会按照“编排-反思”的流程来编排任务总体目标的助手。
 
 以下是我的工作流信息：
 {workflow}
 """
 
 
-
-class ReActAgent(BaseAgent):
-    """ReActAgent is the agent that is used to react to the environment.
+class OrchestrateAgent(BaseAgent):
+    """OrchestrateAgent is the agent that is used to orchestrate the environment.
     
     Attributes:
         uid (str):
@@ -71,7 +70,7 @@ class ReActAgent(BaseAgent):
         **kwargs, 
     ) -> None:        
         """
-        Initialize the ReActAgent.
+        Initialize the OrchestrateAgent.
         
         Args:
             name (str):
@@ -90,7 +89,7 @@ class ReActAgent(BaseAgent):
         super().__init__(
             llm=llm, 
             name=name, 
-            type=AgentType.REACT, 
+            type=AgentType.ORCHESTRATE, 
             profile=PROFILE.format(name=name, workflow=WORKFLOW_PROFILE), 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
@@ -100,12 +99,12 @@ class ReActAgent(BaseAgent):
         
         # Read the workflow profile
         # Initialize the workflow for the agent
-        self.workflow = ReActFlow()
+        self.workflow = OrchestrateFlow()
         # Register the agent to the workflow
         self.workflow.register_agent(self)
 
     def __str__(self) -> str:
-        return f"ReActAgent(uid={self.uid}, name={self.name}, profile={self.profile})"
+        return f"OrchestrateAgent(uid={self.uid}, name={self.name}, profile={self.profile})"
     
     def __repr__(self) -> str:
         return self.__str__()

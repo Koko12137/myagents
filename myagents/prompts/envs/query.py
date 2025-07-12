@@ -26,9 +26,9 @@ QUERY_SYSTEM_PROMPT = """
 """
 
 
-QUERY_TASK_PROMPT = """
+QUERY_ORCHESTRATION_PROMPT = """
 # 任务进度
-当前处于【编排阶段】，这一阶段需要产出任务的总体规划，这个规划可以是树结构也可以是图结构。
+当前处于【编排阶段】，这一阶段需要产出任务的总体规划，这个规划可以是树结构也可以是图结构（具体支持类型需要根据提供的工具来决定）。
 
 # 任务描述
 {task}
@@ -42,6 +42,27 @@ QUERY_PLAN_AND_EXECUTE_PROMPT = """
 # 任务描述
 {task}
 """
+
+
+QUERY_ERROR_PROMPT = """
+# 任务进度
+当前处于【错误处理阶段】，这一阶段需要根据错误信息，完成错误处理。
+- 你需要根据错误原因以及现在已经完成的结果，重新规划未完成的任务。
+
+# 错误信息
+## 错误原因
+{error_reason}
+
+## 错误重试次数
+{error_retry}
+
+## 最大错误重试次数
+{max_error_retry}
+
+# 当前结果
+{current_result}
+"""
+
 
 QUERY_DOC_PROMPT = """
 # 任务要求
