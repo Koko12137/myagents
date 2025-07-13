@@ -2,6 +2,7 @@ from asyncio import Lock
 from typing import Optional
 
 from fastmcp.client import Client as MCPClient
+from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.types import AgentType
@@ -52,6 +53,8 @@ class PlanAndExecAgent(BaseAgent):
     # LLM and MCP client
     llm: LLM
     mcp_client: MCPClient
+    # Tools
+    tools: dict[str, FastMcpTool]
     # Workflow and environment
     workflow: Workflow
     env: Environment

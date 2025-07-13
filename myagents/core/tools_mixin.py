@@ -3,7 +3,8 @@ from typing import Callable, Awaitable, Union
 from fastmcp.tools import Tool as FastMCPTool
 from loguru import logger
 
-from myagents.core.interface import Context, ToolsCaller
+from myagents.core.interface import ToolsCaller
+from myagents.core.utils.context import BaseContext
 from myagents.core.messages import ToolCallRequest, ToolCallResult
 
 
@@ -17,8 +18,24 @@ class ToolsMixin(ToolsCaller):
             The context of the mixin.
     """
     tools: dict[str, FastMCPTool]
-    context: Context
+    context: BaseContext
     
+    def __init__(self, *args, **kwargs) -> None:
+        """Initialize the ToolsMixin.
+
+        Args:
+            *args:
+                The arguments to be passed to the parent class.
+            **kwargs:
+                The keyword arguments to be passed to the parent class.
+        """
+        super().__init__(*args, **kwargs)
+        
+        # Initialize the tools
+        self.tools = {}
+        # Initialize the context
+        self.context = BaseContext()
+        
     def add_tool(
         self, 
         name: str, 
@@ -115,14 +132,9 @@ class ToolsMixin(ToolsCaller):
         # Put the tool_call and keyword arguments to the context
         self.context.create_next(tool_call=tool_call, **kwargs)
         
-        # Get the tool
-        tool = self.tools[tool_call.name].fn
         try:
             # Call the tool
-            if isinstance(tool, Awaitable):
-                result = await tool(tool_call.args)
-            else:
-                result = tool(tool_call.args)
+            result = await self.tools[tool_call.name].run(tool_call.args)
         except Exception as e:
             # Log the error
             logger.error(f"Error calling tool {tool_call.name}: {e}")

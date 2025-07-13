@@ -48,22 +48,11 @@ class BaseWorkflow(Workflow, ToolsMixin):
         self.profile = None
         self.agent = None
         self.prompts = {}
-        
-        # Initialize the tools and context
-        self.tools = {}
-        self.context = BaseContext()
 
         # Post initialize
-        try:
-            loop = asyncio.get_running_loop()
-            # 如果已经有事件循环，创建任务并等待完成
-            task = loop.create_task(self.post_init())
-            loop.run_until_complete(task)  # 这行在已运行的loop下会报错
-        except RuntimeError:
-            # 没有事件循环，直接新建一个
-            asyncio.run(self.post_init())
+        self.post_init()
         
-    async def post_init(self) -> None:
+    def post_init(self) -> None:
         """Post init is the method that will be called after the initialization of the workflow.
         
         This method will be called after the initialization of the workflow.
@@ -117,6 +106,7 @@ class BaseWorkflow(Workflow, ToolsMixin):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs, 
@@ -136,6 +126,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], defaults to {}):
+                The additional keyword arguments for observing the target. 
             running_checker (Callable[[Stateful], bool], defaults to None):
                 The checker to check if the workflow should be running. 
             *args:
@@ -167,7 +159,7 @@ class BaseWorkflow(Workflow, ToolsMixin):
             if running_checker(target):
                 # Run the workflow
                 # Observe the task
-                observe = await self.observe(target)
+                observe = await self.observe(target, **observe_args)
                 # Think about the task
                 completion = await self.think(observe, allow_tools=True)
                 # Act on the task

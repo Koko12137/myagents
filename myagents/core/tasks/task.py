@@ -53,7 +53,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         *args, 
         **kwargs
     ) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__(status_class=TaskStatus, *args, **kwargs)
         self.uid = uuid4().hex
         
         assert isinstance(question, str), "The question must be a string."
@@ -67,10 +67,11 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         
         assert parent is None or isinstance(parent, TreeTaskNode), "The parent must be a TreeTaskNode."
         self.parent = parent
-        
         # Initialize the stateful attributes
         self.sub_tasks = OrderedDict()
-        self.status = TaskStatus.CREATED
+        # Initialize the status
+        self.to_created()
+        # Initialize the answer
         self.answer = ""
         
     def __str__(self) -> str:
@@ -79,15 +80,16 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
     def __repr__(self) -> str:
         return self.__str__()
         
-    def observe(self, format: str, **kwargs) -> str:
+    async def observe(self, format: str, **kwargs) -> str:
         """Observe the task according to the current status and the format of the observation. 
         
         Args:
             format (str):
                 The format of the observation. The format can be:
-                 - "markdown": The task will be formatted to a markdown string.
+                 - "todo": The task will be formatted to a todo markdown string.
                  - "document": The task will be formatted to a document string.
                  - "json": The task will be formatted to a json string.
+                 - "answer": The task will be formatted to a answer string.
             **kwargs:
                 The additional keyword arguments for the observation.
                 
@@ -95,12 +97,14 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
             str:
                 The formatted task.
         """
-        if format == "markdown":
+        if format == "todo":
             return ToDoTaskView(self).format()
         elif format == "document":
             return DocumentTaskView(self).format()
         elif format == "json":
             return JsonTaskView(self).format()
+        elif format == "answer":
+            return AnswerTaskView(self).format()
         else:
             raise ValueError(f"The format {format} is not supported.")
     
@@ -173,7 +177,23 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         """Check if the task status is cancelled.
         """
         return self.status == TaskStatus.CANCELLED
+
+
+class AnswerTaskView(TaskView):
+    """AnswerTaskView is the view of the task answer. This view is used to format the task answer to a string.
     
+    Attributes:
+        task (TreeTaskNode):
+            The task to be viewed.
+    """
+    task: TreeTaskNode
+    
+    def __init__(self, task: TreeTaskNode) -> None:
+        self.task = task
+        
+    def format(self) -> str:
+        return self.task.answer
+
 
 class ToDoTaskView(TaskView):
     """ToDoTaskView is the view of the task context. This view is used to format the task context to a string.

@@ -30,6 +30,9 @@ def to_openai_dict(
             if message_dict['role'] == "tool":
                 message_dict['tool_call_id'] = message.tool_call_id
                 
+        elif isinstance(message, SystemMessage) or isinstance(message, UserMessage):
+            pass
+                
         elif isinstance(message, AssistantMessage):
             # If the message is a tool call, add the tool call to the history
             if message.tool_calls != [] and message.tool_calls is not None:

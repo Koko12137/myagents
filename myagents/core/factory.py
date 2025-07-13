@@ -1,5 +1,5 @@
 import sys
-from typing import Union, Optional
+from typing import Union, Optional, Any
 
 from fastmcp.client import Client as MCPClient
 from pydantic import BaseModel, Field
@@ -8,14 +8,15 @@ from myagents.core.configs.agents import CounterConfig, AgentConfig
 from myagents.core.configs.llms import LLMConfig
 from myagents.core.configs.mcps import MCPConfig
 from myagents.core.configs.envs import EnvironmentConfig
-from myagents.core.interface import LLM, StepCounter, Agent, Workflow,  Environment
+from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment
 from myagents.core.llms import OpenAiLLM
 from myagents.core.agents import AgentType, ReActAgent, OrchestrateAgent, PlanAndExecAgent
 from myagents.core.envs import Query, EnvironmentType
 from myagents.core.utils.step_counters import BaseStepCounter, MaxStepCounter, TokenStepCounter
 from myagents.core.utils.logger import init_logger
+from myagents.core.utils.name_generator import generate_name
 
-    
+
 class AutoAgentConfig(BaseModel):
     """AutoAgentConfig is the configuration for the AutoAgent.
     
@@ -39,6 +40,10 @@ class AutoAgentConfig(BaseModel):
 class AutoAgent:
     """AutoAgent is a factory for creating agents and allocating them to the environment and workflows.
     """
+    
+    def __init__(self):
+        """Initialize the AutoAgent factory."""
+        self._existing_names = []  # 跟踪已创建的agent名字
     
     def build_counter(self, config: CounterConfig) -> StepCounter:
         """Build a step counter.
@@ -73,8 +78,8 @@ class AutoAgent:
         provider = config.provider
         
         # Create kwargs for the LLM
-        kwargs = {}
-        if config.extra_body is not {}:
+        kwargs: dict[str, Any] = {}
+        if config.extra_body != {}:
             kwargs["extra_body"] = config.extra_body
         if config.api_key_field is not None:
             kwargs["api_key_field"] = config.api_key_field
@@ -129,12 +134,17 @@ class AutoAgent:
             Agent:
                 The agent.
         """
-        agent_type = config.type
+        agent_type = AgentType(config.type)
         
         # Build the LLM
         llm = self.__build_llm(config.llm)
         # Build the MCP client
         mcp_client = self.__build_mcp_client(config.mcp_client)
+        
+        # 生成唯一的agent名字
+        agent_name = generate_name(excluded_names=self._existing_names)
+        # 添加到已存在名字列表
+        self._existing_names.append(agent_name)
         
         match agent_type:
             case AgentType.REACT:
@@ -148,6 +158,7 @@ class AutoAgent:
         
         # Build the agent
         return AGENT(
+            name=agent_name,
             llm=llm, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
@@ -169,15 +180,17 @@ class AutoAgent:
         # Build the agents
         agents = [self.__build_agent(agent, counters) for agent in config.agents]
         
-        
-        env_type = config.type
+        env_type = EnvironmentType(config.type)
         # Build the environment
         match env_type:
             case EnvironmentType.QUERY:
                 env = Query()
                 # Register the agents to the environment
                 for agent in agents:
+                    # Register the agent to the environment
                     env.register_agent(agent)
+                    # Register the environment to the agent
+                    agent.register_env(env)
                 # Return the environment
                 return env
             case _:

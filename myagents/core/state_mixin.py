@@ -15,8 +15,29 @@ class StateMixin(Stateful):
         history (dict[str, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]):
             The history of the stateful entity.
     """
+    status_class: Enum
     status: Enum
     history: dict[str, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]
+    
+    def __init__(self, status_class: Enum, *args, **kwargs) -> None:
+        """Initialize the StateMixin.
+        
+        Args:
+            status_class (Enum):
+                The status class of the stateful entity.
+            *args:
+                The arguments to be passed to the parent class.
+            **kwargs:
+                The keyword arguments to be passed to the parent class.
+        """
+        super().__init__(*args, **kwargs)
+        
+        # Initialize the status class
+        self.status_class = status_class
+        # Initialize the history
+        self.history = {}
+        # Reset the history
+        self.reset()
     
     def update(
         self, 
@@ -32,16 +53,21 @@ class StateMixin(Stateful):
         Returns:
             None
         """
-        if isinstance(message, SystemMessage) and len(self.history[self.status]) > 0:
-            # Convert the SystemMessage to a UserMessage
-            message = UserMessage(content=message.content)
-            return self.update(message)
+        if isinstance(message, SystemMessage):
+            if len(self.history[self.status]) > 0:
+                # Convert the SystemMessage to a UserMessage
+                message = UserMessage(content=message.content)
+                return self.update(message)
+            else:
+                self.history[self.status].append(message)
         
-        elif isinstance(message, UserMessage) and len(self.history[self.status]) > 0:
-            last_message = self.history[self.status][-1]
-            if last_message.role == MessageRole.USER:
-                last_message.content = f"{last_message.content}\n{message.content}"
-                last_message.stop_reason = message.stop_reason
+        elif isinstance(message, UserMessage):
+            if len(self.history[self.status]) > 0:
+                last_message = self.history[self.status][-1]
+                if last_message.role == MessageRole.USER:
+                    last_message.content = f"{last_message.content}\n{message.content}"
+                else:
+                    self.history[self.status].append(message)
             else:
                 self.history[self.status].append(message)
         
@@ -78,9 +104,9 @@ class StateMixin(Stateful):
         """Reset the history for all the statuses.
         """
         # Traverse all the attributes of the status class
-        for attr in self.status.__dict__:
-            if isinstance(attr, Enum):
-                self.history[attr] = []
+        for attr in self.status_class.__dict__:
+            if isinstance(self.status_class.__dict__[attr], Enum):
+                self.history[self.status_class.__dict__[attr]] = []
 
     def get_status(self) -> Enum:
         """Get the current status of the stateful entity. 

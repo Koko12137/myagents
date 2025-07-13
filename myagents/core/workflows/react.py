@@ -82,6 +82,7 @@ class ReActFlow(BaseWorkflow):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
@@ -104,6 +105,8 @@ class ReActFlow(BaseWorkflow):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
             running_checker (Callable[[Stateful], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
@@ -129,6 +132,7 @@ class ReActFlow(BaseWorkflow):
                 max_idle_thinking=max_idle_thinking, 
                 prompts=prompts, 
                 completion_config=completion_config, 
+                observe_args=observe_args, 
                 running_checker=running_checker, 
                 *args, 
                 **kwargs,
@@ -149,6 +153,7 @@ class ReActFlow(BaseWorkflow):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
@@ -171,6 +176,8 @@ class ReActFlow(BaseWorkflow):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
             running_checker (Callable[[Stateful], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
@@ -178,11 +185,6 @@ class ReActFlow(BaseWorkflow):
             **kwargs:
                 The additional keyword arguments for running the agent. 
         """
-        # Check if the running checker is provided
-        if running_checker is None:
-            # Set the running checker to the default checker
-            running_checker = lambda target: target.is_running()
-        
         # Prepare the prompts 
         react_system = prompts.pop("react_system", self.prompts["react_system"])
         react_think = prompts.pop("react_think", self.prompts["react_think"])
@@ -201,12 +203,13 @@ class ReActFlow(BaseWorkflow):
             # === Reason Stage ===
             target, current_error, current_thinking = await self.reason_act(
                 target=target, 
-                react_think=react_think,
+                react_think=react_think, 
                 max_error_retry=max_error_retry, 
                 current_error=current_error, 
                 max_idle_thinking=max_idle_thinking, 
                 current_thinking=current_thinking, 
                 completion_config=completion_config, 
+                observe_args=observe_args, 
                 *args, 
                 **kwargs,
             )
@@ -218,7 +221,8 @@ class ReActFlow(BaseWorkflow):
             # === Reflect Stage ===
             target, finish_flag = await self.reflect(
                 target=target, 
-                react_reflect=react_reflect,
+                react_reflect=react_reflect, 
+                observe_args=observe_args, 
                 *args, 
                 **kwargs,
             )
@@ -238,6 +242,7 @@ class ReActFlow(BaseWorkflow):
         max_idle_thinking: int = 1, 
         current_thinking: int = 0, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         *args, 
         **kwargs,
     ) -> tuple[Stateful, int, int]:
@@ -260,6 +265,10 @@ class ReActFlow(BaseWorkflow):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. The following observe args must be provided:
+                - "react_think": The observe args for the think stage.
+                - "react_reflect": The observe args for the reflect stage.
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -273,7 +282,7 @@ class ReActFlow(BaseWorkflow):
         external_tools = {**self.agent.tools, **self.agent.env.tools}
         
         # Observe the target
-        observe = await self.agent.observe(target)
+        observe = await self.agent.observe(target, **observe_args["react_think"])
         # Log the observe
         logger.info(f"Observe: \n{observe}")
         # Create new user message
@@ -350,6 +359,7 @@ class ReActFlow(BaseWorkflow):
         self, 
         target: Stateful, 
         react_reflect: str, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         *args, 
         **kwargs,
     ) -> tuple[Stateful, bool]:
@@ -360,6 +370,10 @@ class ReActFlow(BaseWorkflow):
                 The target to reflect on.
             react_reflect (str):
                 The reflect prompt of the workflow.
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
+                The following observe args must be provided:
+                - "react_reflect": The observe args for the reflect stage.
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -370,7 +384,7 @@ class ReActFlow(BaseWorkflow):
                 The target and the finish flag.
         """
         # Observe the target after acting
-        observe = await self.agent.observe(target)
+        observe = await self.agent.observe(target, **observe_args["react_reflect"])
         # Log the observe
         logger.info(f"Observe: \n{observe}")
         # Create new user message
@@ -428,10 +442,12 @@ class ReActFlow(BaseWorkflow):
         
         # Set the tool choice
         if tool_choice is not None:
-            # Convert the tool choice to a FastMcpTool
-            tool = tools.get(tool_choice, tool_choice)
-            arguments["tool_choice"] = tool
-            arguments["tools"] = [tool]
+            # Check if the tool choice is in the tools
+            assert tool_choice in tools, f"The tool choice {tool_choice} is not in the tools."
+            # Set the tool choice
+            arguments["tool_choice"] = tool_choice
+            # Set the tools
+            arguments["tools"] = [tools[tool_choice]]
         else:
             arguments["tools"] = tools
         

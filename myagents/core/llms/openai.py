@@ -89,7 +89,7 @@ class OpenAiLLM(LLM):
             AssistantMessage: 
                 The completed message.
         """
-        kwargs = self.__prepare_kwargs(available_tools, tool_choice, **kwargs)
+        kwargs = self.__prepare_kwargs(available_tools=available_tools, tool_choice=tool_choice, **kwargs)
         
         # Create the generation history
         history = to_openai_dict(messages)
@@ -100,7 +100,7 @@ class OpenAiLLM(LLM):
             **kwargs, 
         )
         content = response.choices[0].message.content
-        self.custom_logger.debug(f"\n{content}")
+        logger.debug(f"\n{content}")
         # Get the usage
         usage = response.usage
         # Create the usage
@@ -110,7 +110,7 @@ class OpenAiLLM(LLM):
             total_tokens=usage.total_tokens or -100
         )
         # Log the usage
-        self.custom_logger.warning(f"Usage: {usage}")
+        logger.warning(f"Usage: {usage}")
         
         # Extract tool calls from response
         tool_calls = []
@@ -118,7 +118,7 @@ class OpenAiLLM(LLM):
             # Traverse all the tool calls and log the tool call
             for i, tool_call in enumerate(response.choices[0].message.tool_calls):
                 # Log the tool call
-                self.custom_logger.debug(f"Tool call {i + 1}: {tool_call}")
+                logger.debug(f"Tool call {i + 1}: {tool_call}")
                 
                 # Create the tool call request
                 tool_calls.append(ToolCallRequest(
@@ -133,7 +133,7 @@ class OpenAiLLM(LLM):
             stop_reason = StopReason.LENGTH
         elif response.choices[0].finish_reason == "content_filter":
             stop_reason = StopReason.CONTENT_FILTER
-        elif response.choices[0].finish_reason != "stop" and len(tool_calls) > 0:
+        elif response.choices[0].finish_reason != "stop" or len(tool_calls) > 0:
             stop_reason = StopReason.TOOL_CALL
         elif response.choices[0].finish_reason == "stop" and len(tool_calls) == 0:
             stop_reason = StopReason.STOP
@@ -183,29 +183,31 @@ class OpenAiLLM(LLM):
             logger.info(f"Max tokens is set to {max_tokens}")
         
         # Check tools are provided
-        available_tools = kwargs.get("available_tools", None)
+        available_tools: list[dict[str, str]] = kwargs.get("available_tools", None)
         if available_tools is not None and len(available_tools) == 0:
             available_tools = None
         else:
+            # Check the tool choice if the available tools are provided
+            tool_choice = kwargs.get("tool_choice", None)
+            if tool_choice is not None:
+                if isinstance(tool_choice, str):
+                    # Remove unexpectable tools
+                    available_tools = [tool for tool in available_tools if tool["function"]["name"] == tool_choice]
+                    if len(available_tools) == 0:
+                        logger.critical(f"Tool choice {tool_choice} is not in the available tools.")
+                        raise ValueError(f"Tool choice {tool_choice} is not in the available tools.")
+
+                    # Get the tool from the available tools
+                    tool_choice = available_tools[0]
+                    # Set the tool choice
+                    arguments["tool_choice"] = tool_choice
+                    # Log the tool choice
+                    logger.warning(f"Tool choice: {arguments['tool_choice']}")
+                else:
+                    logger.critical(f"Tool choice expected: str, the name of the tool, got: {type(tool_choice)}")
+                    # Raise an error for the unsupported tool choice type
+                    raise ValueError(f"Tool choice expected: str, the name of the tool, got: {type(tool_choice)}")
+            
             arguments["tools"] = available_tools
-        
-        tool_choice = kwargs.get("tool_choice", None)
-        if tool_choice is not None:
-            if isinstance(tool_choice, FastMcpTool):
-                # Set the tool choice
-                arguments["tool_choice"] = {
-                    "type": "function",
-                    "function": {
-                        "name": tool_choice.name, 
-                        "arguments": tool_choice.parameters['properties'], 
-                        "required": tool_choice.parameters['required'],
-                    }
-                }
-                # Log the tool choice
-                logger.warning(f"Tool choice: {arguments['tool_choice']}")
-            else:
-                logger.critical(f"Unsupported tool choice type: {type(tool_choice)}")
-                # Raise an error for the unsupported tool choice type
-                raise ValueError(f"Unsupported tool choice type: {type(tool_choice)}")
         
         return arguments

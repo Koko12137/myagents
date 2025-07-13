@@ -1,6 +1,7 @@
+import asyncio
 import traceback
 from uuid import uuid4
-from asyncio import Queue, Lock
+from asyncio import Lock
 from typing import Union, Optional, Callable, Awaitable, Any
 
 from loguru import logger
@@ -9,7 +10,7 @@ from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
 from mcp import Tool as MCPTool
 
-from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult
+from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
 from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow
 from myagents.core.agents.types import AgentType
 from myagents.core.utils.tools import tool_schema
@@ -36,6 +37,8 @@ class BaseAgent(Agent):
             The LLM to use for the agent. 
         mcp_client (MCPClient):
             The MCP client to use for the agent.
+        tools (dict[str, FastMcpTool]):
+            The tools to use for the agent.
         workflow (Workflow):
             The workflow to that the agent is running on.
         env (Environment):
@@ -54,6 +57,8 @@ class BaseAgent(Agent):
     # LLM and MCP client
     llm: LLM
     mcp_client: MCPClient
+    # Tools
+    tools: dict[str, FastMcpTool]
     # Workflow and environment
     workflow: Workflow
     env: Environment
@@ -104,17 +109,20 @@ class BaseAgent(Agent):
         # Initialize the LLM and MCP client
         self.llm = llm
         self.mcp_client = mcp_client
+        self.tools = {}
+        
         # Initialize the workflow and environment
         self.workflow = None
         self.env = None
         # Initialize the step counters
-        self.step_counters = {counter.uname: counter for counter in step_counters}
+        self.step_counters = {counter.uid: counter for counter in step_counters}
         # Initialize the synchronization lock
         self.lock = Lock()
     
     async def observe(
         self, 
         target: Union[Stateful, Any], 
+        format: str, 
         observe_func: Optional[Callable[..., Awaitable[Union[str, list[dict]]]]] = None, 
         **kwargs, 
     ) -> Union[str, list[dict]]:
@@ -124,8 +132,17 @@ class BaseAgent(Agent):
         Args:
             target (Union[Stateful, Any]): 
                 The stateful entity or any other entity to observe. 
+            format (str):
+                The format of the observation. 
             observe_func (Callable[..., Awaitable[Union[str, list[dict]]]], optional):
-                The function to observe the target. If not provided, the default observe function will be used. 
+                The function to observe the target. If not provided, the default observe function will 
+                be used. The function should have the following signature:
+                - target (Union[Stateful, Any]): The stateful entity or any other entity to observe.
+                - format (str): The format of the observation.
+                - **kwargs: The additional keyword arguments for observing the target.
+                The function should return the observation in the following format:
+                - str: The string observation. 
+                - list[dict]: The list of dicts observation. If the observation is multi-modal.
             **kwargs:
                 The additional keyword arguments for observing the target. 
             
@@ -138,35 +155,31 @@ class BaseAgent(Agent):
             if observe_func is None:
                 raise ValueError("The target is not observable and the observe function is not provided.")
             else:
-                observation = await observe_func(target, **kwargs)
+                observation = await observe_func(target, format, **kwargs)
                 return observation
 
         # Call the observe function of the target
-        observation = await target.observe(**kwargs)
+        observation = await target.observe(format, **kwargs)
         return observation
         
     async def think(
         self, 
-        observe: list[Union[AssistantMessage, ToolCallRequest, ToolCallResult]], 
-        allow_tools: bool, 
-        external_tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
-        tool_choice: str = None, 
-        stream: bool = False, 
-        queue: Optional[Queue] = None, 
+        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
+        tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
+        tool_choice: Optional[str] = None, 
         **kwargs, 
     ) -> AssistantMessage:
         """Think about the environment.
         
         Args:
-            observe (list[Union[AssistantMessage, ToolCallRequest, ToolCallResult]]):
+            observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
                 The messages observed from the environment. 
-            allow_tools (bool):
-                Whether to allow the tools provided by the agent to be used. This do not affect the 
-                external tools provided by the workflow. 
-            external_tools (dict[str, Union[FastMcpTool, MCPTool]]):
-                The external tools to use for the agent.  
-            tool_choice (str, optional, defaults to None):
-                The designated tool choice to use for the agent. 
+            tools (Optional[dict[str, Union[FastMcpTool, MCPTool]]], defaults to {}):
+                The tools allowed to be used for the agent. 
+            tool_choice (Optional[str], defaults to None):
+                The tool choice to use for the agent. This is used to control the tool calling. 
+                - None: The agent will automatically choose the tool to use. 
+                - "tool_name": The agent will use the tool with the name "tool_name". 
             **kwargs: 
                 The additional keyword arguments for thinking about the observed messages. 
 
@@ -179,20 +192,13 @@ class BaseAgent(Agent):
             await step_counter.check_limit()
         
         # Get the available tools
-        external_tools_list = list(external_tools.values())
-        external_tools_list = [tool_schema(tool, self.llm.provider) for tool in external_tools_list]
-        if allow_tools:
-            available_tools = self.tools + external_tools_list
-        else:
-            available_tools = external_tools_list
+        tools = [tool_schema(tool, self.llm.provider) for tool in tools]
         
         # Call for completion from the LLM
         message = await self.llm.completion(
             observe, 
-            available_tools=available_tools, 
+            available_tools=tools, 
             tool_choice=tool_choice, 
-            stream=stream, 
-            queue=queue, 
             **kwargs
         )
         
@@ -278,6 +284,7 @@ class BaseAgent(Agent):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         *args, 
         **kwargs
     ) -> AssistantMessage:
@@ -296,6 +303,8 @@ class BaseAgent(Agent):
                 The completion config of the agent. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -316,17 +325,25 @@ class BaseAgent(Agent):
             # Log the error
             logger.error("The environment is not registered to the agent.")
             raise ValueError("The environment is not registered to the agent.")
+
+        # Initialize the tools
+        if self.mcp_client is not None:
+            # Get a new loop for running the coroutine
+            tools = await self.mcp_client.list_tools()
+            for tool in tools:
+                self.tools[tool.name] = tool
         
         # Get the lock of the agent
         await self.lock.acquire()
         
         # Call for running the workflow
         target = await self.workflow.run(
-            target, 
-            max_error_retry, 
-            max_idle_thinking, 
-            prompts, 
-            completion_config, 
+            target=target, 
+            max_error_retry=max_error_retry, 
+            max_idle_thinking=max_idle_thinking, 
+            prompts=prompts, 
+            completion_config=completion_config, 
+            observe_args=observe_args, 
             *args, 
             **kwargs,
         )
@@ -334,7 +351,11 @@ class BaseAgent(Agent):
         # Release the lock of the agent
         self.lock.release()
         
-        return target
+        # Observe the target
+        observe = await self.observe(target, **observe_args["agent"])
+        # Create a new assistant message
+        message = AssistantMessage(content=observe)
+        return message
 
     def register_counter(self, counter: StepCounter) -> None:
         """Register a step counter to the base agent.
@@ -343,7 +364,7 @@ class BaseAgent(Agent):
             counter (StepCounter):
                 The step counter to register.
         """
-        self.step_counters[counter.uname] = counter
+        self.step_counters[counter.uid] = counter
 
 
     def register_workflow(self, workflow: Workflow) -> None:

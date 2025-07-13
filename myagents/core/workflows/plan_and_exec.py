@@ -90,7 +90,7 @@ class PlanAndExecFlow(ReActFlow):
         self.profile = profile if profile != "" else PROFILE
         # Update the prompts
         self.prompts.update({
-            "plan_system": plan_system_prompt if plan_system_prompt != "" else PLAN_SYSTEM_PROMPT.format(profile=self.profile),
+            "plan_system": plan_system_prompt if plan_system_prompt != "" else PLAN_SYSTEM_PROMPT,
             "plan_think": plan_think_prompt if plan_think_prompt != "" else PLAN_THINK_PROMPT,
             "exec_system": exec_system_prompt if exec_system_prompt != "" else EXEC_SYSTEM_PROMPT,
             "exec_think": exec_think_prompt if exec_think_prompt != "" else EXEC_THINK_PROMPT,
@@ -107,6 +107,7 @@ class PlanAndExecFlow(ReActFlow):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
@@ -131,6 +132,8 @@ class PlanAndExecFlow(ReActFlow):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
             running_checker (Callable[[Stateful], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
@@ -158,22 +161,23 @@ class PlanAndExecFlow(ReActFlow):
             if target.is_created():
                 # Plan the task
                 target = await self.plan(
-                    target, 
-                    max_error_retry, 
-                    max_idle_thinking, 
-                    prompts, 
-                    completion_config, 
-                    running_checker,
+                    target=target, 
+                    max_error_retry=max_error_retry, 
+                    max_idle_thinking=max_idle_thinking, 
+                    prompts=prompts, 
+                    completion_config=completion_config, 
+                    observe_args=observe_args, 
                 )
             
             elif target.is_running():
                 # Execute the task
                 target = await self.execute(
-                    target, 
-                    max_error_retry, 
-                    max_idle_thinking, 
-                    prompts, 
-                    completion_config, 
+                    target=target, 
+                    max_error_retry=max_error_retry, 
+                    max_idle_thinking=max_idle_thinking, 
+                    prompts=prompts, 
+                    completion_config=completion_config, 
+                    observe_args=observe_args, 
                 )
                 # Check if the target is created, if True, then process the error
                 if target.is_created():
@@ -240,7 +244,7 @@ class PlanAndExecFlow(ReActFlow):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
-        running_checker: Callable[[Stateful], bool] = None, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -252,6 +256,15 @@ class PlanAndExecFlow(ReActFlow):
                 The task to plan.
             max_idle_thinking (int):
                 The maximum number of idle thinking.
+            prompts (dict[str, str]):
+                The prompts of the workflow. The following prompts are supported:
+                - "plan_system": The system prompt of the workflow.
+                - "plan_think": The think prompt of the workflow.
+            completion_config (dict[str, Any]):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+            observe_args (dict[str, dict[str, Any]]):
+                The additional keyword arguments for observing the target. 
 
         Returns:
             TreeTaskNode: 
@@ -263,17 +276,25 @@ class PlanAndExecFlow(ReActFlow):
         # Update the prompts
         prompts = {
             "react_system": plan_system,
-            "react_think": plan_think,
+            "react_think": plan_think.format(detail_level=target.sub_task_depth),
+        }
+        # Create a new running checker
+        running_checker = lambda target: target.is_created()
+        # Prepare the observe args
+        observe_args = {
+            "react_think": observe_args.pop("plan_react_think"),
+            "react_reflect": observe_args.pop("plan_react_reflect"),
         }
         
         # Call the parent class to reason and act
         await super().reason_act_reflect(
             target, 
-            max_error_retry, 
-            max_idle_thinking, 
-            prompts, 
-            completion_config, 
-            running_checker, 
+            max_error_retry=max_error_retry, 
+            max_idle_thinking=max_idle_thinking, 
+            prompts=prompts, 
+            completion_config=completion_config, 
+            observe_args=observe_args, 
+            running_checker=running_checker, 
         )
         return target
     
@@ -284,6 +305,7 @@ class PlanAndExecFlow(ReActFlow):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -300,11 +322,12 @@ class PlanAndExecFlow(ReActFlow):
                 The prompts of the workflow. The following prompts are supported:
                 - "exec_system": The system prompt of the workflow.
                 - "exec_think": The think prompt of the workflow.
-                - "exec_reflect": The reflect prompt of the workflow.
             completion_config (dict[str, Any]):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]]):
+                The additional keyword arguments for observing the target. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -349,10 +372,11 @@ class PlanAndExecFlow(ReActFlow):
                 # Act the sub-task
                 sub_task = await self.execute(
                     sub_task, 
-                    max_error_retry, 
-                    max_idle_thinking, 
-                    prompts, 
-                    completion_config, 
+                    max_error_retry=max_error_retry, 
+                    max_idle_thinking=max_idle_thinking, 
+                    prompts=prompts, 
+                    completion_config=completion_config, 
+                    observe_args=observe_args, 
                 )
 
             # Check if the sub-task is failed, if True, then retry the sub-task
@@ -410,25 +434,27 @@ class PlanAndExecFlow(ReActFlow):
             }
             
             # Call the parent class to reason, act and reflect
-            target = await self.reason_act_reflect(
-                target, 
-                max_error_retry, 
-                max_idle_thinking, 
-                prompts, 
-                completion_config, 
+            target = await self.execute_one(
+                target=target, 
+                max_error_retry=max_error_retry, 
+                max_idle_thinking=max_idle_thinking, 
+                prompts=prompts, 
+                completion_config=completion_config, 
+                observe_args=observe_args, 
                 *args, 
                 **kwargs,
             )
             
         return target 
     
-    async def reason_act_reflect(
+    async def execute_one(
         self, 
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -450,6 +476,8 @@ class PlanAndExecFlow(ReActFlow):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -469,6 +497,11 @@ class PlanAndExecFlow(ReActFlow):
         react_system = prompts.pop("react_system", self.prompts["react_system"])
         react_think = prompts.pop("react_think", self.prompts["react_think"])
         react_reflect = prompts.pop("react_reflect", self.prompts["react_reflect"])
+        # Prepare the observe args
+        observe_args = {
+            "react_think": observe_args.pop("exec_react_think"),
+            "react_reflect": observe_args.pop("exec_react_reflect"),
+        }
         
         # Get the blueprint from the context
         blueprint = self.agent.env.context.get("blueprint")
@@ -483,7 +516,7 @@ class PlanAndExecFlow(ReActFlow):
             task_result=task_result,
         ))
         target.update(message)
-            
+        
         # This is used for no tool calling thinking limit.
         current_thinking = 0
         current_error = 0
@@ -497,8 +530,8 @@ class PlanAndExecFlow(ReActFlow):
                 current_error=current_error, 
                 max_idle_thinking=max_idle_thinking, 
                 current_thinking=current_thinking, 
-                prompts=prompts, 
                 completion_config=completion_config, 
+                observe_args=observe_args, 
             )
             # Get the last message
             message = target.get_history()[-1]
@@ -517,6 +550,7 @@ class PlanAndExecFlow(ReActFlow):
             target, finish_flag = await self.reflect(
                 target, 
                 react_reflect=react_reflect,
+                observe_args=observe_args, 
             )
             if finish_flag:
                 # Set the task status to finished

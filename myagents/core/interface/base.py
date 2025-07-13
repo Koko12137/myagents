@@ -17,7 +17,7 @@ class StepCounter(Protocol):
     the same step counter for all agents. 
     
     Attributes:
-        uname (str):
+        uid (str):
             The unique name of the step counter. 
         limit (Union[int, float]):
             The limit of the step counter. 
@@ -26,7 +26,7 @@ class StepCounter(Protocol):
         lock (Lock):
             The lock of the step counter. 
     """
-    uname: str
+    uid: str
     limit: Union[int, float]
     current: Union[int, float]
     lock: Lock
@@ -109,6 +109,8 @@ class Agent(Protocol):
             The LLM to use for the agent. 
         mcp_client (MCPClient):
             The MCP client to use for the agent.
+        tools (dict[str, FastMcpTool]):
+            The tools to use for the agent.
         workflow (Workflow):
             The workflow to that the agent is running on.
         env (Environment):
@@ -126,6 +128,7 @@ class Agent(Protocol):
     # LLM and MCP client
     llm: LLM
     mcp_client: MCPClient
+    tools: dict[str, FastMcpTool]
     # Workflow and environment and running context
     workflow: 'Workflow'
     env: 'Environment'
@@ -137,7 +140,8 @@ class Agent(Protocol):
     @abstractmethod
     async def observe(
         self, 
-        target: Stateful, 
+        target: Union[Stateful, Any], 
+        format: str, 
         observe_func: Optional[Callable[..., Awaitable[Union[str, list[dict]]]]] = None, 
         **kwargs, 
     ) -> Union[str, list[dict]]:
@@ -145,10 +149,19 @@ class Agent(Protocol):
         function to get the string or list of dicts observation. 
         
         Args:
-            target (Stateful):
-                The stateful entity to observe. 
-            observe_func (Callable[..., Awaitable[Union[str, list[dict]]]], optional):
-                The function to observe the target. If not provided, the default observe function will be used. 
+            target (Union[Stateful, Any]):
+                The stateful entity or any other entity to observe. 
+            format (str):
+                The format of the observation. 
+            observe_func (Optional[Callable[..., Awaitable[Union[str, list[dict]]]]], optional, defaults to None):
+                The function to observe the target. If not provided, the default observe function will 
+                be used. The function should have the following signature:
+                - target (Union[Stateful, Any]): The stateful entity or any other entity to observe.
+                - format (str): The format of the observation.
+                - **kwargs: The additional keyword arguments for observing the target.
+                The function should return the observation in the following format:
+                - str: The string observation. 
+                - list[dict]: The list of dicts observation. If the observation is multi-modal.
             **kwargs:
                 The additional keyword arguments for observing the target. 
 
@@ -163,7 +176,7 @@ class Agent(Protocol):
         self, 
         observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
         tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
-        tool_choice: Optional[str] = 'none', 
+        tool_choice: Optional[str] = None, 
         **kwargs, 
     ) -> AssistantMessage:
         """Think about the observation of the task or environment.
@@ -175,9 +188,8 @@ class Agent(Protocol):
                 The tools allowed to be used for the agent. 
             tool_choice (Optional[str], defaults to None):
                 The tool choice to use for the agent. This is used to control the tool calling. 
-                - "auto": The agent will automatically choose the tool to use. 
-                - "none": The agent will not use any tool. 
-                - "all": The agent will use all the tools. 
+                - None: The agent will automatically choose the tool to use. 
+                - "tool_name": The agent will use the tool with the name "tool_name". 
             **kwargs:
                 The additional keyword arguments for thinking about the task or environment. 
                 
@@ -216,6 +228,7 @@ class Agent(Protocol):
         max_idle_thinking: int, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         *args, 
         **kwargs
     ) -> AssistantMessage:
@@ -234,6 +247,8 @@ class Agent(Protocol):
                 The completion config of the agent. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -321,6 +336,7 @@ class Workflow(ToolsCaller):
         max_idle_thinking: int, 
         prompts: dict[str, str], 
         completion_config: dict[str, Any], 
+        observe_args: dict[str, dict[str, Any]], 
         running_checker: Callable[[Stateful], bool], 
         *args, 
         **kwargs, 
@@ -340,6 +356,8 @@ class Workflow(ToolsCaller):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]]):
+                The additional keyword arguments for observing the target. 
             running_checker (Callable[[Stateful], bool]):
                 The checker to check if the workflow should be running. 
             *args:
@@ -360,6 +378,7 @@ class Workflow(ToolsCaller):
             max_idle_thinking: int, 
             prompts: dict[str, str], 
             completion_config: dict[str, Any], 
+            observe_args: dict[str, dict[str, Any]], 
             running_checker: Callable[[Stateful], bool], 
             *args, 
             **kwargs,
@@ -485,6 +504,7 @@ class Environment(Stateful, ToolsCaller):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         designated_agent: str = None, 
         *args, 
         **kwargs, 
@@ -510,6 +530,8 @@ class Environment(Stateful, ToolsCaller):
                 The completion config of the agent. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional):
+                The additional keyword arguments for observing the target. 
             designated_agent (str, optional, defaults to None):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:

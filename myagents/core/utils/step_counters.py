@@ -3,6 +3,7 @@ from typing import Union
 from asyncio import Lock
 
 from loguru import logger
+
 from myagents.core.interface import StepCounter, Logger
 from myagents.core.messages import CompletionUsage
 
@@ -49,16 +50,13 @@ class MaxStepCounter(StepCounter):
             The limit of the step counter. 
         current (int):
             The current step of the step counter. 
-        custom_logger (Logger, defaults to logger):
-            The custom logger to use for the step counter. 
     """
     uid: str
     limit: int
     current: int
     lock: Lock
-    custom_logger: Logger
     
-    def __init__(self, limit: int = 10, custom_logger: Logger = logger) -> None:
+    def __init__(self, limit: int = 10) -> None:
         """Initialize the step counter.
         
         Args:
@@ -68,7 +66,6 @@ class MaxStepCounter(StepCounter):
         self.uid = uuid4().hex
         self.limit = limit
         self.current = 0
-        self.custom_logger = custom_logger
         self.lock = Lock()
         
     async def check_limit(self) -> bool:
@@ -84,7 +81,7 @@ class MaxStepCounter(StepCounter):
         """
         if self.current >= self.limit:
             e = MaxStepsError(self.current, self.limit)
-            self.custom_logger.error(e)
+            logger.error(e)
             raise e
         return False
         
@@ -109,7 +106,7 @@ class MaxStepCounter(StepCounter):
         if await self.check_limit():
             e = MaxStepsError(self.current, self.limit)
             # The max steps error is raised, then update the task status to cancelled
-            self.custom_logger.error(e)
+            logger.error(e)
             raise e
         
     async def reset(self) -> None:
@@ -150,22 +147,19 @@ class BaseStepCounter(MaxStepCounter):
             The limit of the step counter. 
         current (int):
             The current step of the step counter. 
-        custom_logger (Logger):
-            The custom logger to use for the step counter. 
     """
     uid: str
     limit: int
     current: int
-    custom_logger: Logger
     
-    def __init__(self, limit: int = 10, custom_logger: Logger = logger) -> None:
+    def __init__(self, limit: int = 10) -> None:
         """Initialize the step counter.
         
         Args:
             limit (int, optional, defaults to 10):
                 The limit of the step counter. 
         """
-        super().__init__(limit, custom_logger)
+        super().__init__(limit)
         
     async def step(self, step: CompletionUsage) -> None:
         """Increment the current step of the step counter.
@@ -195,7 +189,7 @@ class BaseStepCounter(MaxStepCounter):
             else:
                 e = MaxStepsError(self.current, self.limit)
                 # The max steps error is raised, then update the task status to cancelled
-                self.custom_logger.error(e)
+                logger.error(e)
                 raise e
         
     async def reset(self) -> None:
@@ -238,24 +232,19 @@ class TokenStepCounter(BaseStepCounter):
             The limit of the step counter. 
         current (int):
             The current step of the step counter. 
-        custom_logger (Logger):
-            The custom logger to use for the step counter. 
     """
     uid: str
     limit: int
     current: int
-    custom_logger: Logger
     
-    def __init__(self, limit: int = 10000, custom_logger: Logger = logger) -> None:
+    def __init__(self, limit: int = 10000) -> None:
         """Initialize the step counter.
         
         Args:
             limit (int, optional, defaults to 10000):
                 The limit of the step counter. Default to 10 thousand. 
-            custom_logger (Logger, optional, defaults to logger):
-                The custom logger to use for the step counter. 
         """
-        super().__init__(limit, custom_logger)
+        super().__init__(limit)
     
     async def step(self, step: CompletionUsage) -> None:
         """Increment the current step of the step counter.
@@ -266,7 +255,7 @@ class TokenStepCounter(BaseStepCounter):
         """
         async with self.lock:
             self.current += step.total_tokens
-            self.custom_logger.warning(f"The current Token Usage is {self.current}, the Limit is {self.limit}.")
+            logger.warning(f"The current Token Usage is {self.current}, the Limit is {self.limit}.")
             
         # Check if the current step is greater than the max auto steps
         if await self.check_limit():
@@ -279,7 +268,7 @@ class TokenStepCounter(BaseStepCounter):
             else:
                 e = MaxStepsError(self.current, self.limit)
                 # The max steps error is raised, then update the task status to cancelled
-                self.custom_logger.error(e)
+                logger.error(e)
                 raise e
             
     async def reset(self) -> None:

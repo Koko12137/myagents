@@ -116,7 +116,6 @@ class TreeTaskNode(Task):
         pass
 
 
-@runtime_checkable
 class GraphTaskNode(Task):
     """GraphTaskNode is the protocol for all the tasks. It is a graph structure of the tasks.
     

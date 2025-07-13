@@ -13,7 +13,7 @@ from fastmcp.tools import Tool as FastMCPTool
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 from myagents.core.interface import Agent, Environment, Context, Stateful
 from myagents.core.agents import AgentType
-from myagents.core.tasks import BaseTreeTaskNode
+from myagents.core.tasks.task import BaseTreeTaskNode
 from myagents.core.state_mixin import StateMixin
 from myagents.core.tools_mixin import ToolsMixin
 from myagents.core.utils.context import BaseContext
@@ -105,7 +105,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The keyword arguments to be passed to the parent class.
         """
         # Initialize the parent class
-        super().__init__(*args, **kwargs)
+        super().__init__(status_class=EnvironmentStatus, *args, **kwargs)
         
         # Initialize the basic information
         self.uid = str(uuid4())
@@ -118,24 +118,12 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         self.agents = {}
         self.agent_type_map = {}
         self.agent_type_semaphore = {}
-        self.tools = {}
-        # Initialize the context
-        self.context = BaseContext()
-        # Initialize the status and history
-        self.status = self.to_created()
-        self.history = []
-        
         # Initialize the tools
-        try:
-            loop = asyncio.get_running_loop()
-            # 如果已经有事件循环，创建任务并等待完成
-            task = loop.create_task(self.post_init())
-            loop.run_until_complete(task)  # 这行在已运行的loop下会报错
-        except RuntimeError:
-            # 没有事件循环，直接新建一个
-            asyncio.run(self.post_init())
+        self.post_init()
+        # Initialize the status
+        self.to_created()
     
-    async def post_init(self) -> None:
+    def post_init(self) -> None:
         """Post init is the method that will be called after the initialization of the environment.
         
         This method will be called after the initialization of the environment.
@@ -167,12 +155,12 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         
         # Register the create task tool
         @self.register_tool("create_task")
-        async def create_task(orchestration: str) -> ToolCallResult:
+        async def create_task(orchestration: dict[str, dict]) -> ToolCallResult:
             """
             创建一个新的任务，并将其添加到当前任务的子任务中。
             
             Args:
-                orchestration (str): 
+                orchestration (dict[str, dict]): 
                     当前任务的规划蓝图。应该是一个json格式的输入，下面是输入举例:
                     ```json
                     {
@@ -180,12 +168,15 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                             "关键产出 1.1": "关键产出1.1的描述",
                             "关键产出 1.2": "关键产出1.2的描述",
                             ...
+                            "关键产出 1.n": "关键产出1.n的描述",
                         },
                         "任务目标2": {
                             "关键产出 2.1": "关键产出2.1的描述",
                             "关键产出 2.2": "关键产出2.2的描述",
                             ...
+                            "关键产出 2.n": "关键产出2.n的描述",
                         }
+                        ...(其他更多的任务目标)
                     }
                     ```
                 
@@ -194,14 +185,9 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                     创建子任务的工具调用结果。
             """
             # Get the parent task from the context
-            parent = self.context.get("task")
+            parent = self.context.get("target")
             # Get the function call details
             tool_call = self.context.get("tool_call")
-            
-            # Repair the json
-            orchestration = repair_json(orchestration)
-            # Parse the json
-            orchestration = json.loads(orchestration)
             
             # Traverse the orchestration
             for key, value in orchestration.items():
@@ -209,14 +195,14 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 new_task = BaseTreeTaskNode(
                     question=normalize_string(key), 
                     description=str(value), 
-                    depth=parent.depth - 1,
+                    sub_task_depth=parent.sub_task_depth - 1,
                 )
                 # Link the new task to the parent task
                 new_task.parent = parent
                 # Add the new task to the parent task
                 parent.sub_tasks[new_task.question] = new_task
                 # If the sub task depth is 0, then set the task status to running
-                if new_task.depth == 0:
+                if new_task.sub_task_depth == 0:
                     new_task.to_running()
             
             # Create a new tool call result
@@ -276,6 +262,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         designated_agent: str = None, 
         *args, 
         **kwargs
@@ -301,6 +288,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The completion config of the agent. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional):
+                The additional keyword arguments for observing the target. 
             designated_agent (str, optional):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:
@@ -348,6 +337,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             max_idle_thinking, 
             prompts, 
             completion_config, 
+            observe_args, 
             *args, 
             **kwargs,
         )

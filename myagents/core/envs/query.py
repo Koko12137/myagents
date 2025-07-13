@@ -12,7 +12,7 @@ from fastmcp.tools import Tool as FastMcpTool
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
 from myagents.core.interface import Agent, TreeTaskNode, Context, TaskStatus
 from myagents.core.agents import AgentType
-from myagents.core.tasks.task import BaseTreeTaskNode, DocumentTaskView, ToDoTaskView
+from myagents.core.tasks import BaseTreeTaskNode, DocumentTaskView, ToDoTaskView
 from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
 from myagents.core.utils.tools import ToolView
 from myagents.tools.docs import DocumentLog, BaseDocument, FormatType
@@ -298,7 +298,7 @@ class Query(BaseEnvironment):
         task = BaseTreeTaskNode(
             question=question, 
             description=description, 
-            sub_task_depth=sub_task_depth, 
+            sub_task_depth=sub_task_depth,
         )
         # Set the task as the sub-task
         self.tasks[task.question] = task
@@ -349,6 +349,17 @@ class Query(BaseEnvironment):
                 completion_config={
                     "exclude_tools": ["select_answer"],
                 },
+                observe_args={
+                    "react_think": {
+                        "format": "document",
+                    },
+                    "react_reflect": {
+                        "format": "document",
+                    },
+                    "agent": {
+                        "format": "document",
+                    },
+                },
             )
             # Update the environment history
             self.update(message)
@@ -375,6 +386,17 @@ class Query(BaseEnvironment):
                 completion_config={
                     "tool_choice": "select_answer",
                 },
+                observe_args={
+                    "react_think": {
+                        "format": "document",
+                    },
+                    "react_reflect": {
+                        "format": "document",
+                    },
+                    "agent": {
+                        "format": "answer",
+                    },
+                },
             )
             # Update the environment history
             self.update(message)
@@ -392,7 +414,6 @@ class Query(BaseEnvironment):
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
-        completion_config: dict[str, Any] = {}, 
     ) -> TreeTaskNode:
         """Process the task.
         
@@ -405,10 +426,7 @@ class Query(BaseEnvironment):
                 The maximum number of times to idle thinking the agent. 
             prompts (dict[str, str], optional, defaults to {}):
                 The prompts of the agent. The key is the prompt name and the value is the prompt content. 
-            completion_config (dict[str, Any], optional, defaults to {}):
-                The completion config of the agent. The following completion config are supported:
-                - "tool_choice": The tool choice to use for the agent. 
-                - "exclude_tools": The tools to exclude from the tool choice. 
+        
         Returns:
             TreeTaskNode:
                 The processed task.
@@ -421,21 +439,50 @@ class Query(BaseEnvironment):
             if target.is_created():
                 # Call for global orchestration
                 target = await self.orchestrate(
-                    target, 
-                    max_error_retry, 
-                    max_idle_thinking, 
-                    prompts, 
-                    completion_config, 
+                    target=target, 
+                    max_error_retry=max_error_retry, 
+                    max_idle_thinking=max_idle_thinking, 
+                    prompts=prompts, 
+                    observe_args={
+                        "orchestrate_think": {
+                            "format": "todo",
+                        }, 
+                        "react_think": {
+                            "format": "todo",
+                        },
+                        "react_reflect": {
+                            "format": "todo",
+                        },
+                        "agent": {
+                            "format": "todo",
+                        }
+                    }, 
                 )
             
             elif target.is_running():
                 # Plan and execute the task
                 target = await self.plan_and_exec(
-                    target, 
-                    max_error_retry, 
-                    max_idle_thinking, 
-                    prompts, 
-                    completion_config, 
+                    target=target, 
+                    max_error_retry=max_error_retry, 
+                    max_idle_thinking=max_idle_thinking, 
+                    prompts=prompts, 
+                    observe_args={
+                        "plan_react_think": {
+                            "format": "todo",
+                        },
+                        "plan_react_reflect": {
+                            "format": "todo",
+                        },
+                        "exec_react_think": {
+                            "format": "todo",
+                        },
+                        "exec_react_reflect": {
+                            "format": "document",
+                        },
+                        "agent": {
+                            "format": "todo",
+                        },
+                    }, 
                 )
             
             elif target.is_finished():
@@ -496,7 +543,7 @@ class Query(BaseEnvironment):
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
-        completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
     ) -> TreeTaskNode:
         """Orchestrate the task. 
         
@@ -509,14 +556,18 @@ class Query(BaseEnvironment):
                 The maximum number of times to idle thinking the agent. 
             prompts (dict[str, str], optional, defaults to {}):
                 The prompts of the agent. The key is the prompt name and the value is the prompt content. 
-            completion_config (dict[str, Any], optional, defaults to {}):
-                The completion config of the agent. The following completion config are supported:
-                - "tool_choice": The tool choice to use for the agent. 
-                - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
+        
         Returns:    
             TreeTaskNode:
                 The orchestrated task.
         """
+        # Prepare the completion config
+        completion_config = {
+            "tool_choice": "create_task", # The tool to use for the agent. 
+        }
+        
         # Record the question
         self.update(UserMessage(
             content=self.prompts["orchestration"].format(task=ToDoTaskView(target).format()),
@@ -529,6 +580,7 @@ class Query(BaseEnvironment):
             max_idle_thinking=max_idle_thinking, 
             prompts=prompts, 
             completion_config=completion_config, 
+            observe_args=observe_args, 
         )
         # Update the environment history
         self.update(message)
@@ -541,7 +593,7 @@ class Query(BaseEnvironment):
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
-        completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
     ) -> TreeTaskNode:
         """Plan and execute the task.
         
@@ -554,14 +606,16 @@ class Query(BaseEnvironment):
                 The maximum number of times to idle thinking the agent. 
             prompts (dict[str, str], optional, defaults to {}):
                 The prompts of the agent. The key is the prompt name and the value is the prompt content. 
-            completion_config (dict[str, Any], optional, defaults to {}):
-                The completion config of the agent. The following completion config are supported:
-                - "tool_choice": The tool choice to use for the agent. 
-                - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
+        
         Returns:
             TreeTaskNode:
                 The planned and executed task.
         """
+        # Prepare the completion config
+        completion_config = {}
+        
         # Record the question
         self.update(UserMessage(
             content=self.prompts["plan_and_execute"].format(task=ToDoTaskView(target).format()),
@@ -584,6 +638,7 @@ class Query(BaseEnvironment):
                     max_idle_thinking=max_idle_thinking, 
                     prompts=prompts, 
                     completion_config=completion_config, 
+                    observe_args=observe_args, 
                 )
                 # Update the environment history
                 self.update(message)
@@ -605,3 +660,23 @@ class Query(BaseEnvironment):
                     break
         
         return target
+
+    async def observe(self, format: str = "document") -> str:
+        """Observe the environment. The format can be:
+         - "document": The document of the environment.
+         - "summary": The summary of the environment.
+         - "todo": The todo list of the environment.
+         
+        Returns:
+            str:
+                The observation of the environment.
+        """
+        # Get the task from the tasks
+        task = list(self.tasks.values())[-1]
+        # Return the document of the task
+        if format == "document":
+            return DocumentTaskView(task).format()
+        elif format == "summary":
+            return ToDoTaskView(task).format()
+        else:
+            raise ValueError(f"Unknown format: {format}")

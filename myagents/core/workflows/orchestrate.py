@@ -83,6 +83,7 @@ class OrchestrateFlow(ReActFlow):
         self, 
         target: TreeTaskNode, 
         max_idle_thinking: int = 1, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
     ) -> TreeTaskNode:
         """Reason about the task. This is the pre step of the planning in order to inference the real 
         and detailed requirements of the task. 
@@ -92,7 +93,9 @@ class OrchestrateFlow(ReActFlow):
                 The task to reason about.
             max_idle_thinking (int):
                 The maximum number of idle thinking.
-
+            observe_args (dict[str, dict[str, Any]]):
+                The additional keyword arguments for observing the target. 
+        
         Returns:
             TreeTaskNode: 
                 The target after reasoning.
@@ -102,7 +105,7 @@ class OrchestrateFlow(ReActFlow):
         target.update(message)
         
         # Observe the task
-        observe = await self.agent.observe(target)
+        observe = await self.agent.observe(target, **observe_args["orchestrate_think"])
         # Log the observation
         logger.info(f"Observe: \n{observe}")
         # Create a new message for the current observation
@@ -160,6 +163,7 @@ class OrchestrateFlow(ReActFlow):
         max_idle_thinking: int = 1, 
         prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
@@ -180,6 +184,8 @@ class OrchestrateFlow(ReActFlow):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
             running_checker (Callable[[Stateful], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
@@ -202,6 +208,7 @@ class OrchestrateFlow(ReActFlow):
             await self.__reason(
                 target=target, 
                 max_idle_thinking=max_idle_thinking, 
+                observe_args=observe_args, 
             )
         else:
             # Log the error
@@ -220,6 +227,7 @@ class OrchestrateFlow(ReActFlow):
                 max_idle_thinking=max_idle_thinking, 
                 prompts=prompts, 
                 completion_config=completion_config, 
+                observe_args=observe_args, 
                 running_checker=running_checker, 
                 *args, 
                 **kwargs,

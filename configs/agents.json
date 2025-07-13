@@ -1,8 +1,8 @@
 {
     "debug": false, 
-    "save_dir": "logs/", 
+    "save_dir": "stdout", 
     "environment": {
-        "type": "query", 
+        "type": "Query", 
         "step_counters": [
             {
                 "name": "base",
@@ -15,7 +15,7 @@
         ],
         "agents": [
             {
-                "type": "react",
+                "type": "ReActAgent",
                 "llm": {
                     "provider": "openai",
                     "base_url": "http://localhost:8889/v1",
@@ -28,7 +28,7 @@
                 }
             },
             {
-                "type": "orchestrate",
+                "type": "OrchestrateAgent",
                 "llm": {
                     "provider": "openai",
                     "base_url": "http://localhost:8889/v1",
@@ -41,7 +41,7 @@
                 }
             }, 
             {
-                "type": "plan_and_exec",
+                "type": "PlanAndExecuteAgent",
                 "llm": {
                     "provider": "openai",
                     "base_url": "http://localhost:8889/v1",

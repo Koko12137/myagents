@@ -146,7 +146,7 @@ class Stateful(Protocol):
     history: dict[Status, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]
     
     @abstractmethod
-    def observe(self, format: str, **kwargs) -> str:
+    async def observe(self, format: str, **kwargs) -> str:
         """Observe the state of the stateful entity according to the current status and the 
         format of the observation.
         
@@ -277,7 +277,7 @@ class ToolsCaller(Protocol):
     context: Context
     
     @abstractmethod
-    async def post_init(self) -> None:
+    def post_init(self) -> None:
         """Post init the tools caller.
         
         Example:
