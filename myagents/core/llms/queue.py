@@ -5,7 +5,7 @@ from typing import Union, Optional
 from loguru import logger
 
 from myagents.core.interface import LLM, Logger
-from myagents.core.message import CompletionMessage, ToolCallRequest, ToolCallResult
+from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult
 from myagents.core.utils.tools import Provider
 
 
@@ -83,9 +83,9 @@ class QueueLLM(LLM):
     
     async def completion(
         self, 
-        messages: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
+        messages: list[Union[AssistantMessage, ToolCallRequest, ToolCallResult]], 
         available_tools: Optional[list[dict[str, str]]] = None, 
-    ) -> CompletionMessage:
+    ) -> AssistantMessage:
         """Completion the messages.
 
         Args:
@@ -119,7 +119,7 @@ class QueueLLM(LLM):
                 if message_dict['role'] == "tool":
                     message_dict['tool_call_id'] = message.tool_call_id
             
-            elif isinstance(message, CompletionMessage):
+            elif isinstance(message, AssistantMessage):
                 # If the message is a tool call, add the tool call to the history
                 if message.tool_calls != [] and message.tool_calls is not None:
                     message_dict["tool_calls"] = []
@@ -141,7 +141,7 @@ class QueueLLM(LLM):
         # Put the history to the request queue
         await self.request_queue.put(history)
         # Get the response from the response queue
-        response: CompletionMessage = await self.response_queue.get()
+        response: AssistantMessage = await self.response_queue.get()
         # Log the response
         self.custom_logger.info(f"\n{response.content}")
         

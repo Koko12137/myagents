@@ -1,6 +1,6 @@
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class BaseContext(BaseModel):
@@ -14,9 +14,9 @@ class BaseContext(BaseModel):
         key_values (dict[str, Any]):
             The key-value pairs of the context.
     """
-    prev: Optional['BaseContext'] = None
-    next: Optional['BaseContext'] = None
-    key_values: dict[str, Any]
+    prev: Optional['BaseContext'] = Field(default=None)
+    next: Optional['BaseContext'] = Field(default=None)
+    key_values: dict[str, Any] = Field(default_factory=dict)
     
     def append(self, key: str, value: Any) -> None:
         """Append the key-value pair to the context.
@@ -46,6 +46,10 @@ class BaseContext(BaseModel):
         Returns:
             Any:
                 The value of the context.
+                
+        Raises:
+            KeyError:
+                If the key is not found.
         """
         return self.key_values.get(key)
     
@@ -60,7 +64,7 @@ class BaseContext(BaseModel):
         """
         self.key_values[key] = value
     
-    def remove(self, key: str) -> None:
+    def pop(self, key: str) -> None:
         """Remove the key-value pair from the context.
         
         Args:
@@ -68,8 +72,8 @@ class BaseContext(BaseModel):
                 The key of the value.
                 
         Raises:
-            ValueError:
-                The key does not exist.
+            KeyError:
+                If the key is not found.
         """
         self.key_values.pop(key)
     

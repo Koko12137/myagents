@@ -1,5 +1,17 @@
+from enum import Enum
+
 from myagents.core.envs.base import BaseEnvironment
 from myagents.core.envs.query import Query
-from myagents.core.envs.task import BaseTask, TaskAnswerView
 
-__all__ = ["BaseEnvironment", "Query", "BaseTask", "TaskAnswerView"]
+
+class EnvironmentType(Enum):
+    """EnvironmentType is the type of the environment.
+    
+    Attributes:
+        QUERY (EnvironmentType):
+            The type of the Query environment.
+    """
+    QUERY = "Query"
+
+
+__all__ = ["BaseEnvironment", "Query", "EnvironmentType"]

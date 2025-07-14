@@ -1,0 +1,576 @@
+from abc import abstractmethod
+from asyncio import Semaphore, Lock
+from enum import Enum
+from typing import Callable, Awaitable, Any, Union, Optional, Protocol, runtime_checkable
+
+from fastmcp.tools import Tool as FastMcpTool
+from fastmcp import Client as MCPClient
+from mcp import Tool as MCPTool
+
+from myagents.core.interface.core import Stateful, ToolsCaller, Context
+from myagents.core.interface.llm import LLM
+from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
+
+
+class StepCounter(Protocol):
+    """StepCounter is a protocol for the step counter. The limit can be max auto steps or max balance cost. It is better to use 
+    the same step counter for all agents. 
+    
+    Attributes:
+        uid (str):
+            The unique name of the step counter. 
+        limit (Union[int, float]):
+            The limit of the step counter. 
+        current (Union[int, float]):
+            The current step of the step counter. 
+        lock (Lock):
+            The lock of the step counter. 
+    """
+    uid: str
+    limit: Union[int, float]
+    current: Union[int, float]
+    lock: Lock
+    
+    @abstractmethod
+    async def reset(self) -> None:
+        """Reset the current step of the step counter.
+        
+        Returns:
+            None
+        """
+        pass
+    
+    @abstractmethod
+    async def update_limit(self, limit: Union[int, float]) -> None:
+        """Update the limit of the step counter.
+        
+        Args:
+            limit (Union[int, float]):
+                The limit of the step counter. 
+        """
+        pass
+    
+    @abstractmethod
+    async def check_limit(self) -> bool:
+        """Check if the limit of the step counter is reached.
+        
+        Returns:
+            bool:
+                Whether the limit of the step counter is reached.
+        
+        Raises:
+            MaxStepsError:
+                The max steps error raised by the step counter. 
+        """
+        pass
+    
+    @abstractmethod
+    async def step(self, step: Union[int, float]) -> None:
+        """Increment the current step of the step counter.
+        
+        Args:
+            step (Union[int, float]):
+                The step to increment. 
+        
+        Returns:
+            None 
+        
+        Raises:
+            MaxStepsError:
+                The max steps error raised by the step counter. 
+        """
+        pass
+    
+    @abstractmethod
+    async def recharge(self, limit: Union[int, float]) -> None:
+        """Recharge the limit of the step counter.
+        
+        Args:
+            limit (Union[int, float]):
+                The limit of the step counter. 
+        """
+        pass
+
+
+@runtime_checkable
+class Agent(Protocol):
+    """Agent running on an environment, and working on a task according to the workflow.
+    
+    Attributes:
+        uid (str):
+            The unique identifier of the agent.
+        name (str):
+            The name of the agent.
+        type (Enum):
+            The type of the agent.
+        profile (str):
+            The profile of the agent.
+        llm (LLM):
+            The LLM to use for the agent. 
+        mcp_client (MCPClient):
+            The MCP client to use for the agent.
+        tools (dict[str, FastMcpTool]):
+            The tools to use for the agent.
+        workflow (Workflow):
+            The workflow to that the agent is running on.
+        env (Environment):
+            The environment to that the agent is running on.
+        step_counters (dict[str, StepCounter]):
+            The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
+        lock (Lock):
+            The synchronization lock of the agent. The agent can only work on one task at a time. 
+    """
+    # Basic information
+    uid: str
+    name: str
+    type: Enum
+    profile: str
+    # LLM and MCP client
+    llm: LLM
+    mcp_client: MCPClient
+    tools: dict[str, FastMcpTool]
+    # Workflow and environment and running context
+    workflow: 'Workflow'
+    env: 'Environment'
+    # Step counters for the agent
+    step_counters: dict[str, StepCounter]
+    # Synchronization lock
+    lock: Lock
+    
+    # @abstractmethod
+    # async def memory(self, *args, **kwargs) -> Any:
+    #     """Get the memory of the agent.
+        
+    #     Returns:
+    #         Any:
+    #             The memory of the agent.
+    #     """
+    #     pass
+    
+    @abstractmethod
+    async def observe(
+        self, 
+        target: Union[Stateful, Any], 
+        format: str, 
+        observe_func: Optional[Callable[..., Awaitable[Union[str, list[dict]]]]] = None, 
+        **kwargs, 
+    ) -> Union[str, list[dict]]:
+        """Observe the target. If the target is not a task or environment, you should provide the observe 
+        function to get the string or list of dicts observation. 
+        
+        Args:
+            target (Union[Stateful, Any]):
+                The stateful entity or any other entity to observe. 
+            format (str):
+                The format of the observation. 
+            observe_func (Optional[Callable[..., Awaitable[Union[str, list[dict]]]]], optional, defaults to None):
+                The function to observe the target. If not provided, the default observe function will 
+                be used. The function should have the following signature:
+                - target (Union[Stateful, Any]): The stateful entity or any other entity to observe.
+                - format (str): The format of the observation.
+                - **kwargs: The additional keyword arguments for observing the target.
+                The function should return the observation in the following format:
+                - str: The string observation. 
+                - list[dict]: The list of dicts observation. If the observation is multi-modal.
+            **kwargs:
+                The additional keyword arguments for observing the target. 
+
+        Returns:
+            Union[str, list[dict]]:
+                The up to date information observed from the target.  
+        """
+        pass    # TODO: 以后需要在 observe 中实现调用 memory，同时通过 Agent属性 来确定 观察格式，禁止通过参数传递，定义一个 workflow 的状态，传入 observe 中，以确定当前的观察方式
+    
+    @abstractmethod
+    async def think(
+        self, 
+        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
+        tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
+        tool_choice: Optional[str] = None, 
+        **kwargs, 
+    ) -> AssistantMessage:
+        """Think about the observation of the task or environment.
+        
+        Args:
+            observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
+                The messages observed from the task or environment. 
+            tools (Optional[dict[str, Union[FastMcpTool, MCPTool]]], defaults to {}):
+                The tools allowed to be used for the agent. 
+            tool_choice (Optional[str], defaults to None):
+                The tool choice to use for the agent. This is used to control the tool calling. 
+                - None: The agent will automatically choose the tool to use. 
+                - "tool_name": The agent will use the tool with the name "tool_name". 
+            **kwargs:
+                The additional keyword arguments for thinking about the task or environment. 
+                
+        Returns:
+            AssistantMessage:
+                The completion message thought about by the LLM. 
+        """
+        pass    # TODO: 以后需要在 think 中实现更新 memory, 同时通过 Agent属性 和 workflow状态 来确定 Prompt，禁止通过参数传递，定义一个 workflow 的状态，传入 think 中，以确定当前的思考方式
+    
+    @abstractmethod
+    async def act(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
+        """Take an Action according to the tool call. Other arguments can be provided to the tool 
+        calling through the keyword arguments. 
+        
+        Args:
+            tool_call (ToolCallRequest):
+                The tool call request including the tool call id and the tool call arguments.
+            **kwargs:
+                The additional keyword arguments for calling the tool.
+                
+        Returns:
+            ToolCallResult:
+                The tool call result returned by the agent after acting on the environment or task.
+            
+        Raises:
+            ValueError:
+                If the tool call name is not registered to the workflow or environment.  
+        """
+        pass    # TODO: 以后需要在 act 中实现更新 memory
+    
+    @abstractmethod
+    async def run(
+        self, 
+        target: Stateful, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
+        *args, 
+        **kwargs
+    ) -> AssistantMessage:
+        """Run the agent on the task or environment. Before running the agent, you should get the lock of the agent. 
+        
+        Args:
+            target (Stateful):
+                The stateful entity to run the agent on.
+            max_error_retry (int):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int):
+                The maximum number of times to idle thinking the agent. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts for running specific workflow of the agent. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the agent. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
+            *args:
+                The additional arguments for running the agent.
+            **kwargs:
+                The additional keyword arguments for running the agent.
+                
+        Returns:
+            AssistantMessage:
+                The assistant message returned by the agent after running on the stateful entity.
+        """
+        pass
+    
+    @abstractmethod
+    def register_counter(self, counter: StepCounter) -> None:
+        """Register a step counter to the agent.
+        
+        Args:
+            counter (StepCounter):
+                The step counter to register.
+        """
+        pass
+    
+    @abstractmethod
+    def register_workflow(self, workflow: 'Workflow') -> None:
+        """Register a workflow to the agent.
+        
+        Args:
+            workflow (Workflow):
+                The workflow to register.
+        """
+        pass
+    
+    @abstractmethod
+    def register_env(self, env: 'Environment') -> None:
+        """Register an environment to the agent.
+        
+        Args:
+            env (Environment):
+                The environment to register.
+        """
+        pass
+
+
+class Workflow(ToolsCaller):
+    """Workflow is stateless, it does not store any information about the state, it is only used to orchestrate the task or environment. 
+    The workflow is not responsible for the state of the task or environment. 
+    
+    Attributes:
+        profile (str):
+            The profile of the workflow.
+        agent (Agent):
+            The agent that is used to work with the workflow.
+        prompts (dict[str, str]):
+            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+        context (Context):
+            The context of the workflow.
+        tools (dict[str, FastMcpTool]):
+            The tools provided by the workflow. These tools can be used to control the workflow. 
+    """
+    profile: str
+    agent: Agent
+    prompts: dict[str, str]
+    # Context and tools
+    context: Context
+    tools: dict[str, FastMcpTool]
+    
+    @abstractmethod
+    def register_agent(self, agent: Agent) -> None:
+        """Register a agent to the workflow.
+        
+        Args:
+            agent (Agent):
+                The agent to register.
+                
+        Raises:
+            ValueError:
+                If the workflow already has an agent.
+        """
+        pass
+    
+    @abstractmethod
+    async def run(
+        self, 
+        target: Stateful, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        prompts: dict[str, str], 
+        completion_config: dict[str, Any], 
+        observe_args: dict[str, dict[str, Any]], 
+        running_checker: Callable[[Stateful], bool], 
+        *args, 
+        **kwargs, 
+    ) -> Stateful:
+        """Run the workflow from the environment or task.
+
+        Args:
+            target (Stateful): 
+                The stateful entity to run the workflow.
+            max_error_retry (int):
+                The maximum number of times to retry the workflow when the target is errored.
+            max_idle_thinking (int):
+                The maximum number of times to idle thinking the workflow.
+            prompts (dict[str, str]):
+                The prompts for running specific workflow of the workflow. 
+            completion_config (dict[str, Any]):
+                The completion config of the workflow. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]]):
+                The additional keyword arguments for observing the target. 
+            running_checker (Callable[[Stateful], bool]):
+                The checker to check if the workflow should be running. 
+            *args:
+                The additional arguments for running the workflow.
+            **kwargs:
+                The additional keyword arguments for running the workflow.
+
+        Returns:
+            Stateful: 
+                The stateful entity after running the workflow.
+                
+        Example:
+        ```python
+        async def run(
+            self, 
+            target: Stateful, 
+            max_error_retry: int, 
+            max_idle_thinking: int, 
+            prompts: dict[str, str], 
+            completion_config: dict[str, Any], 
+            observe_args: dict[str, dict[str, Any]], 
+            running_checker: Callable[[Stateful], bool], 
+            *args, 
+            **kwargs,
+        ) -> Stateful:
+            # Update system prompt to history
+            message = SystemMessage(content=self.system_prompt)
+            
+            # Check if the target is running
+            if running_checker(target):
+                # Run the workflow
+                # Observe the task
+                observe = await self.observe(target)
+                # Think about the task
+                completion = await self.think(observe)
+                # Act on the task
+                target = await self.act(target, completion)
+                # Reflect the task
+                target = await self.reflect(target)
+            else:
+                # Set the target to error
+                target.to_error()
+                
+            # Return the target
+            return target
+        ```
+        """
+        pass
+
+
+class EnvironmentStatus(Enum):
+    """The status of the environment.
+    
+    - CREATED (int): The environment is created.
+    - PLANNING (int): The environment is planning.
+    - RUNNING (int): The environment is running.
+    - FINISHED (int): The environment is finished.
+    - ERROR (int): The environment is errored.
+    - CANCELLED (int): The environment is cancelled.
+    """
+    CREATED = 0
+    PLANNING = 1
+    RUNNING = 2
+    FINISHED = 3
+    ERROR = 4
+    CANCELLED = 5
+
+
+class Environment(Stateful, ToolsCaller):
+    """Environment is a stateful object that containing workflows. The workflows can be used to think about how to 
+    modify the environment. The tools can be used to modify the environment. 
+    
+    Attributes:
+        uid (str):
+            The unique identifier of the environment. 
+        name (str):
+            The name of the environment.
+        profile (str):
+            The profile of the environment. 
+        prompts (dict[str, str]):
+            The prompts of the environment. The key is the prompt name and the value is the prompt content. 
+        leader (Agent):
+            The leader agent of the environment. 
+        agents (dict[str, Agent]):
+            The agents in the environment. The key is the agent name and the value is the agent. 
+        required_agents (list[Enum]):
+            The agents in the list must be registered to the environment. 
+        agent_type_map (dict[Enum, list[str]]):
+            The map of the agent type to the agent name. The key is the agent type and the value is the agent name list. 
+        agent_type_semaphore (dict[Enum, Semaphore]):
+            The semaphore of the agent type. The key is the agent type and the value is the semaphore. 
+        tools (dict[str, FastMcpTool]):
+            The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
+        context (Context):
+            The context of the environment.
+        status (EnvironmentStatus):
+            The status of the environment.
+        history (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
+            The history messages of the environment. 
+    """
+    uid: str
+    name: str
+    profile: str
+    prompts: dict[str, str]
+    required_agents: list[Enum]
+    # Agents and tools
+    leader: Agent
+    agents: dict[str, Agent]
+    agent_type_map: dict[Enum, list[str]]
+    agent_type_semaphore: dict[Enum, Semaphore]
+    # Tools Mixin
+    tools: dict[str, FastMcpTool]
+    context: Context
+    # Stateful Mixin
+    status: EnvironmentStatus
+    history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
+    
+    @abstractmethod
+    def register_agent(self, agent: Agent) -> None:
+        """Register an agent to the environment.
+        
+        Args:
+            agent (Agent):
+                The agent to register. 
+        """
+        pass
+    
+    @abstractmethod
+    def set_leader(self, leader_agent: str) -> None:
+        """Set the leader agent to the environment.
+        
+        Args:
+            leader_agent (str):
+                The name of the leader agent to set.
+        """
+        pass
+    
+    @abstractmethod
+    async def call_agent(
+        self, 
+        agent_type: Enum, 
+        target: Stateful, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
+        designated_agent: str = None, 
+        *args, 
+        **kwargs, 
+    ) -> AssistantMessage:
+        """Call an agent to work on the environment or a task and return an assistant message. 
+        
+        Attention:
+            If any type of agent is registered more than one, be careful to the synchronization of the agent. 
+            One agent can only work on one task at a time. 
+        
+        Args:
+            agent_type (Enum):
+                The type of the agent to call.
+            target (Stateful):
+                The target to pass to the agent. 
+            max_error_retry (int, optional, defaults to 3):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int, optional, defaults to 1):
+                The maximum number of times to idle thinking the agent. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts for running specific workflow of the agent. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the agent. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional):
+                The additional keyword arguments for observing the target. 
+            designated_agent (str, optional, defaults to None):
+                The name of the designated agent to call. If not provided, a random agent will be selected. 
+            *args:
+                The additional arguments to pass to the agent.
+            **kwargs:
+                The additional keyword arguments to pass to the agent.
+                
+        Returns:
+            AssistantMessage:
+                The message returned by the agent.
+                
+        Raises:
+            ValueError:
+                If the type of this agent is not registered.
+        """
+        pass
+    
+    @abstractmethod
+    async def run(self, *args, **kwargs) -> Any:
+        """The main entrypoint of the environment. 
+        
+        Args:
+            *args:
+                The additional arguments to pass to the run method of the Environment.
+            **kwargs:
+                The additional keyword arguments to pass to the run method of the Environment.
+                
+        Returns:
+            Any:
+                The result returned by the environment.
+        """
+        pass

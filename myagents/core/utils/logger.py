@@ -7,6 +7,8 @@ from loguru import logger
 
 from myagents.core.interface import Logger
 
+# 全局变量跟踪是否已经初始化
+_logger_initialized = False
 
 def get_colored_format(record):
     """根据日志等级返回不同颜色的格式"""
@@ -31,7 +33,13 @@ def get_colored_format(record):
 
 
 def init_logger(level: str = "INFO", sink: str = "stdout", task_name: str = None, **kwargs) -> Logger:
-    # Remove the default logger
+    global _logger_initialized
+    
+    # 如果已经初始化过，先移除所有现有的处理器
+    if _logger_initialized:
+        logger.remove()
+    
+    # 移除所有默认的处理器，确保完全替换
     logger.remove()
     
     if sink == "stdout":
@@ -68,4 +76,14 @@ def init_logger(level: str = "INFO", sink: str = "stdout", task_name: str = None
         # Log to designated file with daily rotation
         logger.add(log_file, **kwargs)
 
+    # 标记为已初始化
+    _logger_initialized = True
+    
     return logger
+
+
+def reset_logger():
+    """重置 logger 到初始状态，移除所有处理器"""
+    global _logger_initialized
+    logger.remove()
+    _logger_initialized = False

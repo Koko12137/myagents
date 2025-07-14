@@ -1,7 +1,8 @@
+import asyncio
 import traceback
 from uuid import uuid4
-from typing import overload, Union, Optional
-from asyncio import Lock, Queue
+from asyncio import Lock
+from typing import Union, Optional, Callable, Awaitable, Any
 
 from loguru import logger
 from fastmcp import Client as MCPClient
@@ -9,587 +10,181 @@ from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
 from mcp import Tool as MCPTool
 
-from myagents.core.message import CompletionUsage, CompletionMessage, ToolCallRequest, ToolCallResult
-from myagents.core.interface import LLM, Agent, StepCounter, Task, Environment, Logger
-from myagents.core.envs.task import TaskContextView
+from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
+from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow
+from myagents.core.agents.types import AgentType
 from myagents.core.utils.tools import tool_schema
-from myagents.core.utils.context import BaseContext
+from myagents.core.utils.step_counters import MaxStepsError
 
-
-class MaxStepsError(Exception):
-    """MaxStepsError is the error raised when the max steps is reached.
-    
-    Attributes:
-        current (int):
-            The current step of the step counter.
-        limit (int):
-            The limit of the step counter.
-    """
-    current: int
-    limit: int
-    
-    def __init__(self, current: int, limit: int) -> None:
-        """Initialize the MaxStepsError.
-        
-        Args:
-            current (int):
-                The current step of the step counter.
-            limit (int):
-                The limit of the step counter.
-        """
-        self.current = current
-        self.limit = limit
-        
-    def __str__(self) -> str:
-        """Return the string representation of the MaxStepsError.
-        
-        Returns:
-            str:
-                The string representation of the MaxStepsError.
-        """
-        return f"Max auto steps reached. Current: {self.current}, Limit: {self.limit}"
-
-
-class MaxStepCounter(StepCounter):
-    """MaxStepCounter allows the user to set the limit of the step counter, and the limit will **never** be reset. 
-    
-    Attributes:
-        limit (int):
-            The limit of the step counter. 
-        current (int):
-            The current step of the step counter. 
-        custom_logger (Logger, defaults to logger):
-            The custom logger to use for the step counter. 
-    """
-    uid: str
-    limit: int
-    current: int
-    lock: Lock
-    custom_logger: Logger
-    
-    def __init__(self, limit: int = 10, custom_logger: Logger = logger) -> None:
-        """Initialize the step counter.
-        
-        Args:
-            limit (int, optional, defaults to 10):
-                The limit of the step counter. 
-        """
-        self.uid = uuid4().hex
-        self.limit = limit
-        self.current = 0
-        self.custom_logger = custom_logger
-        self.lock = Lock()
-        
-    async def check_limit(self) -> bool:
-        """Check if the limit of the step counter is reached.
-        
-        Returns:
-            bool:
-                Whether the limit of the step counter is reached.
-                
-        Raises:
-            MaxStepsError:
-                The max steps error raised by the step counter. 
-        """
-        if self.current >= self.limit:
-            e = MaxStepsError(self.current, self.limit)
-            self.custom_logger.error(e)
-            raise e
-        return False
-        
-    async def step(self, step: Union[int, float] = 1) -> None:
-        """Increment the current step of the step counter.
-        
-        Args:
-            step (Union[int, float], optional, defaults to 1):
-                The step to increment. 
-                
-        Returns:
-            None 
-        
-        Raises:
-            MaxStepsError:
-                The max steps error raised by the step counter. 
-        """
-        async with self.lock:
-            self.current += 1
-            
-        # Check if the current step is greater than the max auto steps
-        if await self.check_limit():
-            e = MaxStepsError(self.current, self.limit)
-            # The max steps error is raised, then update the task status to cancelled
-            self.custom_logger.error(e)
-            raise e
-        
-    async def reset(self) -> None:
-        """Reset the current step of the step counter.
-        
-        Returns:
-            None
-        """
-        raise NotImplementedError("Reset is not supported for the max step counter.")
-    
-    async def update_limit(self, limit: Union[int, float]) -> None:
-        """Update the limit of the step counter.
-        
-        Args:
-            limit (Union[int, float]):
-                The limit of the step counter. 
-        """
-        raise NotImplementedError("Update limit is not supported for the max step counter.")
-    
-    async def recharge(self, limit: Union[int, float]) -> None:
-        """Recharge the limit of the step counter.
-        
-        Args:
-            limit (Union[int, float]):
-                The limit of the step counter. 
-        """
-        raise NotImplementedError("Recharge is not supported for the max step counter.")
-
-
-class BaseStepCounter(MaxStepCounter):
-    """BaseStepCounter count only the action steps, without any concern of the token usage. The step counter could be 
-    reset by the user. 
-    
-    Attributes:
-        uid (str):
-            The unique identifier of the step counter. 
-        limit (int):
-            The limit of the step counter. 
-        current (int):
-            The current step of the step counter. 
-        custom_logger (Logger):
-            The custom logger to use for the step counter. 
-    """
-    uid: str
-    limit: int
-    current: int
-    custom_logger: Logger
-    
-    def __init__(self, limit: int = 10, custom_logger: Logger = logger) -> None:
-        """Initialize the step counter.
-        
-        Args:
-            limit (int, optional, defaults to 10):
-                The limit of the step counter. 
-        """
-        super().__init__(limit, custom_logger)
-        
-    async def step(self, step: CompletionUsage) -> None:
-        """Increment the current step of the step counter.
-        
-        Args:
-            step (CompletionUsage):
-                The step to increment. 
-                
-        Returns:
-            None 
-        
-        Raises:
-            MaxStepsError:
-                The max steps error raised by the step counter. 
-        """
-        async with self.lock:
-            self.current += 1
-            
-        # Check if the current step is greater than the max auto steps
-        if await self.check_limit():
-            # Request the user to reset the step counter
-            reset = input(f"The limit of auto steps is reached. Do you want to reset the step counter with limit {e.limit} steps? (y/n)")
-            
-            if reset == "y":
-                # Reset the step counter and continue the loop
-                await self.reset()
-            else:
-                e = MaxStepsError(self.current, self.limit)
-                # The max steps error is raised, then update the task status to cancelled
-                self.custom_logger.error(e)
-                raise e
-        
-    async def reset(self) -> None:
-        """Reset the current step of the step counter.
-        
-        Returns:
-            None
-        """
-        async with self.lock:
-            self.current = 0
-        
-    async def update_limit(self, limit: int) -> None:
-        """Update the limit of the step counter.
-        
-        Args:
-            limit (int):
-                The limit of the step counter. 
-        """
-        async with self.lock:
-            self.limit = limit
-        
-    async def recharge(self, limit: Union[int, float]) -> None:
-        """Recharge the limit of the step counter.
-        
-        Args:
-            limit (Union[int, float]):
-                The limit of the step counter. 
-        """
-        async with self.lock:
-            self.limit += limit
-
-
-class TokenStepCounter(BaseStepCounter):
-    """TokenStepCounter counts the token usage of the LLM. The step counter will ask for reset when the token usage is greater than the limit. 
-    
-    Attributes:
-        uid (str):
-            The unique identifier of the step counter. 
-        limit (int):
-            The limit of the step counter. 
-        current (int):
-            The current step of the step counter. 
-        custom_logger (Logger):
-            The custom logger to use for the step counter. 
-    """
-    uid: str
-    limit: int
-    current: int
-    custom_logger: Logger
-    
-    def __init__(self, limit: int = 10000, custom_logger: Logger = logger) -> None:
-        """Initialize the step counter.
-        
-        Args:
-            limit (int, optional, defaults to 10000):
-                The limit of the step counter. Default to 10 thousand. 
-            custom_logger (Logger, optional, defaults to logger):
-                The custom logger to use for the step counter. 
-        """
-        super().__init__(limit, custom_logger)
-    
-    async def step(self, step: CompletionUsage) -> None:
-        """Increment the current step of the step counter.
-        
-        Args:
-            step (CompletionUsage):
-                The step to increment. 
-        """
-        async with self.lock:
-            self.current += step.total_tokens
-            self.custom_logger.warning(f"The current Token Usage is {self.current}, the Limit is {self.limit}.")
-            
-        # Check if the current step is greater than the max auto steps
-        if await self.check_limit():
-            # Request the user to reset the step counter
-            reset = input(f"The limit of auto steps is reached. Do you want to reset the step counter with limit {self.limit} steps? (y/n)")
-            
-            if reset == "y":
-                # Reset the step counter and continue the loop  
-                await self.reset()
-            else:
-                e = MaxStepsError(self.current, self.limit)
-                # The max steps error is raised, then update the task status to cancelled
-                self.custom_logger.error(e)
-                raise e
-            
-    async def reset(self) -> None:
-        """Reset is not supported for the token step counter.
-        """
-        raise NotImplementedError("Reset is not supported for the token step counter. Please use `recharge` to update the limit.")
-
-        
-class DummyAgent(Agent):
-    """DummyAgent do nothing but return a dummy response.
-    """
-    llm: LLM
-    debug: bool
-    custom_logger: Logger
-    context: BaseContext
-    
-    # Stateless tools
-    mcp_client: MCPClient 
-    tools: list[dict[str, str]]
-    
-    # Max auto steps
-    step_counters: dict[str, StepCounter]
-    
-    def __init__(
-        self, 
-        llm: LLM, 
-        step_counters: list[StepCounter], 
-        mcp_client: Optional[MCPClient] = None, 
-        custom_logger: Optional[Logger] = logger, 
-        debug: bool = False, 
-    ) -> None: 
-        """Initialize the DummyAgent.
-        
-        Args:
-            llm (LLM):
-                The LLM to use for the agent.
-            step_counters (list[StepCounter]):
-                The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
-            mcp_client (MCPClient, optional):
-                The MCP client to use for the agent. If not provided, No MCP tools can be used. 
-            custom_logger (Logger, defaults to logger):
-                The custom logger to use for the agent. If not provided, the default loguru logger will be used. 
-            debug (bool, defaults to False):
-                The debug flag to use for the agent.
-        """
-        # Initialize the LLM
-        self.llm = llm
-        # Initialize the debug flag
-        self.debug = debug
-        # Initialize the custom logger
-        self.custom_logger = custom_logger
-        # Initialize the context
-        self.context = BaseContext(
-            prev=None,
-            next=None,
-            key_values={}
-        )
-        
-        # Initialize the step counters
-        self.step_counters = {counter.uid: counter for counter in step_counters}
-    
-    async def think(
-        self, 
-        observe: list[CompletionMessage, ToolCallRequest, ToolCallResult], 
-        allow_tools: bool, 
-        external_tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
-        **kwargs: dict, 
-    ) -> CompletionMessage:
-        """Think about the environment.
-        
-        Args:
-            observe (list[CompletionMessage, ToolCallRequest, ToolCallResult]):
-                The messages observed from the environment. 
-            allow_tools (bool):
-                Whether to allow the tools provided by the agent to be used. This do not affect the 
-                external tools provided by the workflow. 
-            external_tools (dict[str, Union[FastMcpTool, MCPTool]]):
-                The external tools to use for the agent.  
-            **kwargs (dict): 
-                The additional keyword arguments for thinking about the observed messages. 
-
-        Returns:
-            CompletionMessage:
-                The completion message thought about by the LLM. 
-        """
-        # Check if the limit of the step counters is reached
-        for step_counter in self.step_counters.values():
-            await step_counter.check_limit()
-        
-        return CompletionMessage(
-            role="assistant",
-            content="Dummy agent is thinking...",
-        )
-    
-    async def call_tool(
-        self, 
-        ctx: Union[Task, Environment], 
-        tool_call: ToolCallRequest, 
-        **kwargs: dict, 
-    ) -> ToolCallResult:
-        """Call a tool. 
-        If there is any error caused by the tool call, the flag `is_error` will be set to True. 
-        However, if there is any error caused by the MCP client connection, this should raise a RuntimeError.  
-        
-        Args:
-            ctx (Union[Task, Environment]):
-                The task or environment to call the tool.
-            tool_call (ToolCallRequest): 
-                The tool call request including the tool call id and the tool call arguments.
-            **kwargs (dict):
-                The additional keyword arguments for calling the tool.
-
-        Returns:
-            ToolCallResult: 
-                The result of the tool call. 
-        """
-        return ToolCallResult(
-            tool_call_id=tool_call.id,
-            content="Dummy agent is calling tool.",
-            is_error=False,
-        )
-        
-    async def observe(self, env: Union[Task, Environment]) -> str:
-        """Observe the environment.
-        
-        Args:
-            env (Union[Task, Environment]):
-                The task or environment to observe.
-
-        Returns:
-            str:
-                The up to date information observed from the environment.  
-        """
-        return "Dummy agent is observing the environment."
-    
-    def register_counter(self, counter: StepCounter) -> None:
-        """Register a step counter to the dummy agent.
-        
-        Args:
-            counter (StepCounter):
-                The step counter to register.
-        """
-        self.step_counters[counter.uid] = counter
-        
 
 class BaseAgent(Agent):
-    """BaseAgent is the base class for all the agents.
+    """BaseAgent is the base class for all the agents that can:
+    - Observe the environment or task.
+    - Think about the environment or task.
+    - Call the tools.
+    - Run the agent.
     
     Attributes:
+        uid (str):
+            The unique identifier of the agent.
+        name (str):
+            The name of the agent.
+        type (AgentType):
+            The type of the agent.
+        profile (str):
+            The profile of the agent.
         llm (LLM):
-            The LLM to use for the agent.
-        debug (bool, defaults to False):
-            The debug flag to use for the agent.
-        custom_logger (Logger, defaults to logger):
-            The custom logger to use for the agent.
-        context (BaseContext):
-            The context of the tool call.
-            
+            The LLM to use for the agent. 
         mcp_client (MCPClient):
             The MCP client to use for the agent.
-        tools (list[dict[str, str]]):
-            The tool descriptions can be used for the agent. 
-            
+        tools (dict[str, FastMcpTool]):
+            The tools to use for the agent.
+        workflow (Workflow):
+            The workflow to that the agent is running on.
+        env (Environment):
+            The environment to that the agent is running on.
         step_counters (dict[str, StepCounter]):
-            The step counters to use for the agent. 
+            The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
+        lock (Lock):
+            The synchronization lock of the agent. The agent can only work on one task at a time. 
+            If the agent is running concurrently, the global context may not be working properly.
     """
+    # Basic information
+    uid: str
+    name: str
+    type: AgentType
+    profile: str
+    # LLM and MCP client
     llm: LLM
-    debug: bool
-    custom_logger: Logger
-    context: BaseContext
-    
-    # Stateless tools
-    mcp_client: MCPClient 
-    tools: list[dict[str, str]]
-    
-    # Max auto steps
+    mcp_client: MCPClient
+    # Tools
+    tools: dict[str, FastMcpTool]
+    # Workflow and environment
+    workflow: Workflow
+    env: Environment
+    # Step counters for the agent
     step_counters: dict[str, StepCounter]
+    # Concurrency limit
+    lock: Lock
     
     def __init__(
         self, 
+        name: str, 
+        type: AgentType, 
+        profile: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
-        custom_logger: Optional[Logger] = logger, 
-        debug: bool = False, 
+        *args, 
+        **kwargs, 
     ) -> None:
         """Initialize the BaseAgent.
         
         Args:
+            name (str):
+                The name of the agent.
+            type (AgentType):
+                The type of the agent.
+            profile (str):
+                The profile of the agent.
             llm (LLM):
-                The LLM to use for the agent.
+                The LLM to use for the agent. 
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
-                The MCP client to use for the agent. If not provided, No MCP tools can be used. 
-            custom_logger (Logger, defaults to logger):
-                The custom logger to use for the agent. If not provided, the default loguru logger will be used. 
-            debug (bool, defaults to False):
-                The debug flag to use for the agent.
-        """
-        self.llm = llm
-        self.debug = debug
-        self.custom_logger = custom_logger
-        self.context = BaseContext(
-            prev=None,
-            next=None,
-            key_values={}
-        )
-        
-        # Initialize the MCP client
-        self.mcp_client = mcp_client
-        
-        # Initialize the tool descriptions
-        self.tools = []
-        if self.mcp_client is not None:
-            tools = self.mcp_client.list_tools()
-            for tool in tools:
-                self.tools.append(tool_schema(tool, self.llm.provider))
-        
-        # Initialize the max auto steps
-        self.step_counters = {counter.uid: counter for counter in step_counters}
-        
-    @overload
-    async def observe(self, env: Environment) -> str:
-        """Observe the environment.
-        
-        Args:
-            env (Environment): 
-                The environment to observe. 
-                
-        Returns:
-            str:
-                The up to date information observed from the environment.  
-        """
-        pass
-    
-    @overload
-    async def observe(self, env: Task) -> str:
-        """Observe the Task.    
-        
-        Args:
-            env (Task): 
-                The task to observe. 
-
-        Returns:
-            str:
-                The up to date information observed from the environment.  
-        """
-        pass
-    
-    async def observe(self, env: Union[Environment, Task], **kwargs) -> str:
-        """Observe the Task.    
-        
-        Args:
-            env (Union[Environment, Task]): 
-                The environment or task to observe. 
+                The MCP client to use for the agent. If not provided, No MCP tools can be used.  
+            *args:
+                The arguments to be passed to the parent class.
             **kwargs:
-                The additional keyword arguments for observing the environment or task. 
+                The keyword arguments to be passed to the parent class.
+        """
+        # Initialize the parent class
+        super().__init__(*args, **kwargs)
+        
+        # Initialize the basic information
+        self.uid = str(uuid4())
+        self.name = name
+        self.type = type
+        self.profile = profile
+        # Initialize the LLM and MCP client
+        self.llm = llm
+        self.mcp_client = mcp_client
+        self.tools = {}
+        
+        # Initialize the workflow and environment
+        self.workflow = None
+        self.env = None
+        # Initialize the step counters
+        self.step_counters = {counter.uid: counter for counter in step_counters}
+        # Initialize the synchronization lock
+        self.lock = Lock()
+    
+    async def observe(
+        self, 
+        target: Union[Stateful, Any], 
+        format: str, 
+        observe_func: Optional[Callable[..., Awaitable[Union[str, list[dict]]]]] = None, 
+        **kwargs, 
+    ) -> Union[str, list[dict]]:
+        """Observe the target. If the target is not a task or environment, you should provide the observe 
+        function to get the string or list of dicts observation. 
+        
+        Args:
+            target (Union[Stateful, Any]): 
+                The stateful entity or any other entity to observe. 
+            format (str):
+                The format of the observation. 
+            observe_func (Callable[..., Awaitable[Union[str, list[dict]]]], optional):
+                The function to observe the target. If not provided, the default observe function will 
+                be used. The function should have the following signature:
+                - target (Union[Stateful, Any]): The stateful entity or any other entity to observe.
+                - format (str): The format of the observation.
+                - **kwargs: The additional keyword arguments for observing the target.
+                The function should return the observation in the following format:
+                - str: The string observation. 
+                - list[dict]: The list of dicts observation. If the observation is multi-modal.
+            **kwargs:
+                The additional keyword arguments for observing the target. 
             
         Returns:
-            str:
-                The up to date information observed from the environment.  
+            Union[str, list[dict]]:
+                The up to date information observed from the stateful entity or any other entity.  
         """
-        
-        if isinstance(env, Environment):
-            raise NotImplementedError("Environment is not supported for observation.")
-        elif isinstance(env, Task):
-            observation = TaskContextView(env).format()
-        else:
-            raise ValueError(f"Unsupported environment type: {type(env)}")
-        
+        # Check if the target is observable
+        if not isinstance(target, Stateful):
+            if observe_func is None:
+                raise ValueError("The target is not observable and the observe function is not provided.")
+            else:
+                observation = await observe_func(target, format, **kwargs)
+                return observation
+
+        # Call the observe function of the target
+        observation = await target.observe(format, **kwargs)
         return observation
         
     async def think(
         self, 
-        observe: list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]], 
-        allow_tools: bool, 
-        external_tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
-        tool_choice: str = "auto", 
-        stream: bool = False, 
-        queue: Optional[Queue] = None, 
+        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
+        tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
+        tool_choice: Optional[str] = None, 
         **kwargs, 
-    ) -> CompletionMessage:
+    ) -> AssistantMessage:
         """Think about the environment.
         
         Args:
-            observe (list[Union[CompletionMessage, ToolCallRequest, ToolCallResult]]):
+            observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
                 The messages observed from the environment. 
-            allow_tools (bool):
-                Whether to allow the tools provided by the agent to be used. This do not affect the 
-                external tools provided by the workflow. 
-            external_tools (dict[str, Union[FastMcpTool, MCPTool]]):
-                The external tools to use for the agent.  
-            tool_choice (str, defaults to "auto"):
+            tools (Optional[dict[str, Union[FastMcpTool, MCPTool]]], defaults to {}):
+                The tools allowed to be used for the agent. 
+            tool_choice (Optional[str], defaults to None):
                 The tool choice to use for the agent. This is used to control the tool calling. 
-                - "auto": The agent will automatically choose the tool to use. 
+                - None: The agent will automatically choose the tool to use. 
+                - "tool_name": The agent will use the tool with the name "tool_name". 
             **kwargs: 
                 The additional keyword arguments for thinking about the observed messages. 
 
         Returns:
-            CompletionMessage:
+            AssistantMessage:
                 The completion message thought about by the LLM. 
         """
         # Check if the limit of the step counters is reached
@@ -597,20 +192,13 @@ class BaseAgent(Agent):
             await step_counter.check_limit()
         
         # Get the available tools
-        external_tools_list = list(external_tools.values())
-        external_tools_list = [tool_schema(tool, self.llm.provider) for tool in external_tools_list]
-        if allow_tools:
-            available_tools = self.tools + external_tools_list
-        else:
-            available_tools = external_tools_list
+        tools = [tool_schema(tool, self.llm.provider) for tool in tools.values()]
         
         # Call for completion from the LLM
         message = await self.llm.completion(
             observe, 
-            available_tools=available_tools, 
+            available_tools=tools, 
             tool_choice=tool_choice, 
-            stream=stream, 
-            queue=queue, 
             **kwargs
         )
         
@@ -630,19 +218,12 @@ class BaseAgent(Agent):
         # Return the response
         return message
     
-    async def call_tool(
-        self, 
-        ctx: Union[Task, Environment], 
-        tool_call: ToolCallRequest, 
-        **kwargs, 
-    ) -> ToolCallResult:
+    async def act(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
         """Call a tool. 
         If there is any error caused by the tool call, the flag `is_error` will be set to True. 
         However, if there is any error caused by the MCP client connection, this should raise a RuntimeError.  
         
         Args:
-            ctx (Union[Task, Environment]):
-                The task or environment to call the tool.
             tool_call (ToolCallRequest): 
                 The tool call request including the tool call id and the tool call arguments.
             **kwargs:
@@ -655,8 +236,18 @@ class BaseAgent(Agent):
             RuntimeError:
                 The runtime error raised by the MCP client connection. 
         """
-        # Create a new context
-        self.context = self.context.create_next(ctx=ctx, **kwargs)
+        # Check if the tool call belongs to the agent
+        if tool_call.name not in self.tools:
+            if tool_call.name in self.env.tools:
+                # Call the tool from the environment
+                result = await self.env.call_tool(tool_call, **kwargs)
+                return result
+            elif tool_call.name in self.workflow.tools:
+                # Call the tool from the workflow
+                result = await self.workflow.call_tool(tool_call, **kwargs)
+                return result
+            else:
+                raise ValueError(f"Tool {tool_call.name} is not registered to the agent or environment.")
         
         # Get the tool call id and the tool call arguments
         tool_call_id = tool_call.id
@@ -668,7 +259,7 @@ class BaseAgent(Agent):
             res = await self.mcp_client.call_tool(tool_call_name, tool_call_args)
         except ClientError as e:
             # Record and return the error
-            self.custom_logger.error(f"Error calling tool {tool_call_name}: {e}")
+            logger.error(f"Error calling tool {tool_call_name}: {e}")
             return ToolCallResult(
                 tool_call_id=tool_call_id, 
                 content=str(e), 
@@ -676,18 +267,100 @@ class BaseAgent(Agent):
             )
         except RuntimeError as e:
             # Raise the error 
-            self.custom_logger.error(f"{e}, traceback: {traceback.format_exc()}")
+            logger.error(f"{e}, traceback: {traceback.format_exc()}")
             raise e
-        
-        # Done the current context
-        self.context = self.context.done()
         
         # Return the result
         return ToolCallResult(
             tool_call_id=tool_call_id, 
-            content=res, 
-            is_error=False, 
+            content=res.content, 
+            is_error=res.is_error, 
         )
+
+    async def run(
+        self, 
+        target: Stateful, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        prompts: dict[str, str] = {}, 
+        completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
+        *args, 
+        **kwargs
+    ) -> AssistantMessage:
+        """Run the agent on the task or environment. Before running the agent, you should get the lock of the agent. 
+        
+        Args:
+            target (Stateful): 
+                The stateful entity to run the agent on. 
+            max_error_retry (int, optional, defaults to 3): 
+                The maximum number of times to retry the agent when the target is errored. 
+            max_idle_thinking (int, optional, defaults to 1): 
+                The maximum number of times to idle thinking the agent. 
+            prompts (dict[str, str], optional, defaults to {}):
+                The prompts of the agent. The key is the prompt name and the value is the prompt content. 
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the agent. The following completion config are supported:
+                - "tool_choice": The tool choice to use for the agent. 
+                - "exclude_tools": The tools to exclude from the tool choice. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. 
+            *args:
+                The additional arguments for running the agent.
+            **kwargs:
+                The additional keyword arguments for running the agent.
+                
+        Returns:
+            AssistantMessage:
+                The assistant message returned by the agent after running on the stateful entity or any other entity.
+        """
+        # Check if the workflow is registered
+        if self.workflow is None:
+            # Log the error
+            logger.error("The workflow is not registered to the agent.")
+            raise ValueError("The workflow is not registered to the agent.")
+        
+        # Check if the environment is registered
+        if self.env is None:
+            # Log the error
+            logger.error("The environment is not registered to the agent.")
+            raise ValueError("The environment is not registered to the agent.")
+
+        # Initialize the tools
+        if self.mcp_client is not None:
+            # Get a new loop for running the coroutine
+            tools = await self.mcp_client.list_tools()
+            for tool in tools:
+                self.tools[tool.name] = tool
+        
+        # Get the lock of the agent
+        await self.lock.acquire()
+        
+        # Call for running the workflow
+        target = await self.workflow.run(
+            target=target, 
+            max_error_retry=max_error_retry, 
+            max_idle_thinking=max_idle_thinking, 
+            prompts=prompts, 
+            completion_config=completion_config, 
+            observe_args=observe_args, 
+            *args, 
+            **kwargs,
+        )
+        
+        # Release the lock of the agent
+        self.lock.release()
+        
+        # Observe the target
+        observe = await self.observe(target, **observe_args["agent"])
+        # Create a new assistant message
+        message = AssistantMessage(content=f"已完成任务，【观察】：{observe}")
+        # Log the message
+        if logger.level == "DEBUG":
+            logger.debug(f"Full Assistant Message: \n{message}")
+        else:
+            logger.info(f"Assistant Message: \n{message.content}")
+        return message
 
     def register_counter(self, counter: StepCounter) -> None:
         """Register a step counter to the base agent.
@@ -697,3 +370,52 @@ class BaseAgent(Agent):
                 The step counter to register.
         """
         self.step_counters[counter.uid] = counter
+
+
+    def register_workflow(self, workflow: Workflow) -> None:
+        """Register a workflow to the base agent.
+        
+        Args:
+            workflow (Workflow):
+                The workflow to register.
+                
+        Raises:
+            ValueError:
+                If the type of the workflow is not valid.
+            ValueError:
+                If the workflow is already registered to the agent.
+        """
+        # Check if the workflow is available
+        if not isinstance(workflow, Workflow):
+            raise ValueError(f"The type of the workflow is not valid. Expected Workflow, but got {type(workflow)}.")
+        
+        # Check if the workflow is already registered
+        if self.workflow is not None:
+            raise ValueError("The workflow is already registered to the agent.")
+        
+        # Register the workflow
+        self.workflow = workflow
+        
+    def register_env(self, env: Environment) -> None:
+        """Register an environment to the base agent.
+        
+        Args:
+            env (Environment):
+                The environment to register.
+                
+        Raises:
+            ValueError:
+                If the type of the environment is not valid.
+            ValueError:
+                If the environment is already registered to the agent.
+        """
+        # Check if the environment is available
+        if not isinstance(env, Environment):
+            raise ValueError(f"The type of the environment is not valid. Expected Environment, but got {type(env)}.")
+        
+        # Check if the environment is already registered
+        if self.env is not None:
+            raise ValueError("The environment is already registered to the agent.")
+        
+        # Register the environment
+        self.env = env

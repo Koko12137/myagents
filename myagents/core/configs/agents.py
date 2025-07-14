@@ -23,14 +23,14 @@ class AgentConfig(BaseModel):
     """The configuration for the agent.
 
     Args:
-        name (str):
-            The name of the agent.
+        type (str):
+            The type of the agent.
         llm (LLMConfig):
             The configuration for the LLM.
         mcp_client (MCPConfig, optional):
             The configuration for the MCP client. 
     """
-    name: str = Field(description="The name of the agent.")
+    type: str = Field(description="The type of the agent.")
     llm: LLMConfig = Field(description="The configuration for the LLM.")
     mcp_client: Optional[MCPConfig] = Field(
         description="The configuration for the MCP client.", 

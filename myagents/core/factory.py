@@ -1,53 +1,36 @@
 import sys
-from typing import Union, Optional
+from typing import Union, Optional, Any
 
-from loguru import logger
 from fastmcp.client import Client as MCPClient
 from pydantic import BaseModel, Field
 
 from myagents.core.configs.agents import CounterConfig, AgentConfig
 from myagents.core.configs.llms import LLMConfig
 from myagents.core.configs.mcps import MCPConfig
-from myagents.core.configs.workflows import WorkflowConfig
 from myagents.core.configs.envs import EnvironmentConfig
-from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Logger, Environment
-from myagents.core.llms import DummyLLM, OpenAiLLM, QueueLLM
-from myagents.core.agents import DummyAgent, BaseAgent, BaseStepCounter, MaxStepCounter, TokenStepCounter
-from myagents.core.workflows import ActionFlow, PlanFlow, ReasonPlanActFlow
-from myagents.core.envs import Query
+from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment
+from myagents.core.llms import OpenAiLLM
+from myagents.core.agents import AgentType, ReActAgent, OrchestrateAgent, PlanAndExecAgent
+from myagents.core.envs import Query, EnvironmentType
+from myagents.core.utils.step_counters import BaseStepCounter, MaxStepCounter, TokenStepCounter
 from myagents.core.utils.logger import init_logger
+from myagents.core.utils.name_generator import generate_name
 
-    
+
 class AutoAgentConfig(BaseModel):
     """AutoAgentConfig is the configuration for the AutoAgent.
     
     Attributes:
-        step_counters (list[CounterConfig]):
-            The step counters for the auto agent. Any of one reach the limit, the auto agent will be stopped. 
-        environment (EnvironmentConfig, optional):
+        environment (EnvironmentConfig):
             The configuration for the environment.
-        workflow (WorkflowConfig, optional):
-            The configuration for the workflow.
-        debug (bool):
+        debug (bool, optional, defaults to False):
             Whether to enable the debug mode for the auto agent.
-        log_level (str, defaults to "INFO"):
+        log_level (str, optional, defaults to "INFO"):
             The log level for the auto agent.
-        save_dir (str, defaults to "stdout"):
+        save_dir (str, optional, defaults to "stdout"):
             The directory to save the logs for the auto agent.
     """
-    step_counters: list[CounterConfig] = Field(
-        default_factory=list[CounterConfig], 
-        description="The step counters for the auto agent. Any of one reach the limit, the auto agent will be stopped."
-    )
-    environment: Optional[EnvironmentConfig] = Field(
-        default=None, 
-        description="The configuration for the environment."
-    )
-    workflow: Optional[WorkflowConfig] = Field(
-        default=None, 
-        description="The configuration for the workflow."
-    )
-    
+    environment: EnvironmentConfig = Field(description="The configuration for the environment.")
     # Debug and logging settings
     debug: bool = Field(default=False, description="Whether to enable the debug mode for the auto agent.")
     log_level: str = Field(default="INFO", description="The log level for the auto agent.")
@@ -57,6 +40,10 @@ class AutoAgentConfig(BaseModel):
 class AutoAgent:
     """AutoAgent is a factory for creating agents and allocating them to the environment and workflows.
     """
+    
+    def __init__(self):
+        """Initialize the AutoAgent factory."""
+        self._existing_names = []  # 跟踪已创建的agent名字
     
     def build_counter(self, config: CounterConfig) -> StepCounter:
         """Build a step counter.
@@ -77,21 +64,12 @@ class AutoAgent:
             case _:
                 raise ValueError(f"Invalid step counter name: {name}")
     
-    def __build_llm(
-        self, 
-        config: LLMConfig, 
-        custom_logger: Logger = logger, 
-        debug: bool = False, 
-    ) -> LLM:
+    def __build_llm(self, config: LLMConfig) -> LLM:
         """Build a LLM.
         
         Args:
             config (LLMConfig):
                 The configuration for the LLM.
-            custom_logger (Logger, optional):
-                The custom logger for the LLM. Defaults to loguru logger.
-            debug (bool, optional):
-                Whether to enable the debug mode for the LLM. Defaults to False.
                 
         Returns:
             LLM:
@@ -100,8 +78,8 @@ class AutoAgent:
         provider = config.provider
         
         # Create kwargs for the LLM
-        kwargs = {}
-        if config.extra_body is not {}:
+        kwargs: dict[str, Any] = {}
+        if config.extra_body != {}:
             kwargs["extra_body"] = config.extra_body
         if config.api_key_field is not None:
             kwargs["api_key_field"] = config.api_key_field
@@ -112,26 +90,6 @@ class AutoAgent:
                     base_url=config.base_url,
                     model=config.model,
                     temperature=config.temperature, 
-                    custom_logger=custom_logger,
-                    debug=debug,
-                    **kwargs, 
-                )
-            case "queue":
-                return QueueLLM(
-                    model=config.model,
-                    base_url=config.base_url,
-                    temperature=config.temperature,
-                    custom_logger=custom_logger,
-                    debug=debug,
-                    **kwargs, 
-                )
-            case "dummy":
-                return DummyLLM(
-                    model=config.model,
-                    base_url=config.base_url,
-                    temperature=config.temperature,
-                    custom_logger=custom_logger,
-                    debug=debug,
                     **kwargs, 
                 )
             case _:
@@ -163,13 +121,7 @@ class AutoAgent:
         return mcp_client
         
         
-    def __build_agent(
-        self, 
-        config: AgentConfig, 
-        step_counters: list[StepCounter], 
-        custom_logger: Logger = logger, 
-        debug: bool = False, 
-    ) -> Agent:
+    def __build_agent(self, config: AgentConfig, step_counters: list[StepCounter]) -> Agent:
         """Build an agent.
         
         Args:
@@ -177,127 +129,72 @@ class AutoAgent:
                 The configuration for the agent.
             step_counters (list[StepCounter]):
                 The step counters for the agent. Any of one reach the limit, the agent will be stopped. 
-            custom_logger (Logger, optional):
-                The custom logger for the agent. Defaults to loguru logger.
-            debug (bool, optional):
-                Whether to enable the debug mode for the agent. Defaults to False.
         
         Returns:
             Agent:
                 The agent.
         """
-        name = config.name
+        agent_type = AgentType(config.type)
         
         # Build the LLM
-        llm = self.__build_llm(config.llm, custom_logger, debug)
+        llm = self.__build_llm(config.llm)
         # Build the MCP client
         mcp_client = self.__build_mcp_client(config.mcp_client)
         
-        match name:
-            case "base": 
-                AGENT = BaseAgent
-            case "dummy":
-                AGENT = DummyAgent
+        # 生成唯一的agent名字
+        agent_name = generate_name(excluded_names=self._existing_names)
+        # 添加到已存在名字列表
+        self._existing_names.append(agent_name)
+        
+        match agent_type:
+            case AgentType.REACT:
+                AGENT = ReActAgent
+            case AgentType.ORCHESTRATE:
+                AGENT = OrchestrateAgent
+            case AgentType.PLAN_AND_EXECUTE:
+                AGENT = PlanAndExecAgent
             case _:
-                raise ValueError(f"Invalid agent name: {name}")
+                raise ValueError(f"Invalid agent type: {agent_type}")
         
         # Build the agent
         return AGENT(
+            name=agent_name,
             llm=llm, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
-            custom_logger=custom_logger, 
-            debug=debug, 
-        )
-    
-    def __build_workflow(
-        self, 
-        config: WorkflowConfig, 
-        step_counters: list[StepCounter], 
-        custom_logger: Logger = logger, 
-        debug: bool = False, 
-    ) -> Workflow:
-        """Build a workflow.
-        
-        Args:
-            config (WorkflowConfig):
-                The configuration for the workflow. 
-            step_counters (list[StepCounter]):
-                The step counters for the workflow. Any of one reach the limit, the workflow will be stopped. 
-            custom_logger (Logger, optional):
-                The custom logger for the workflow. Defaults to loguru logger.
-            debug (bool, optional):
-                Whether to enable the debug mode for the workflow. Defaults to False.
-        """
-        flows: dict[str, Workflow] = {}
-        # Build workflows recursively
-        if len(config.workflows) > 0:
-            for workflow in config.workflows:
-                flows[workflow.name] = self.__build_workflow(workflow, step_counters, custom_logger, debug)
-        
-        # Build agents for action flow
-        agent = self.__build_agent(config.agent, step_counters)
-        
-        match config.name:
-            case "action":
-                WORKFLOW = ActionFlow
-            case "plan":
-                WORKFLOW = PlanFlow
-            case "rpa":
-                WORKFLOW = ReasonPlanActFlow
-            case _:
-                raise ValueError(f"Invalid workflow name: {config.name}") 
-        
-        # Build the workflow
-        return WORKFLOW(
-            agent=agent, 
-            custom_logger=custom_logger, 
-            debug=debug, 
-            workflows=flows,
         )
             
-    def __build_environment(
-        self, 
-        config: EnvironmentConfig, 
-        step_counters: list[StepCounter], 
-        custom_logger: Logger = logger, 
-        debug: bool = False, 
-    ) -> Environment:
+    def __build_environment(self, config: EnvironmentConfig) -> Environment:
         """Build an environment.
         
         Args:
             config (EnvironmentConfig):
                 The configuration for the environment.
-            step_counters (list[StepCounter]):
-                The step counters for the environment. Any of one reach the limit, the environment will be stopped. 
-            custom_logger (Logger, optional):
-                The custom logger for the environment. Defaults to loguru logger.
-            debug (bool, optional):
-                Whether to enable the debug mode for the environment. Defaults to False.
         
         Returns:
             Environment:
                 The environment.
         """
-        agent = self.__build_agent(config.agent, step_counters, custom_logger, debug)
-        # Build the workflows
-        workflows: dict[str, Workflow] = {}
-        for workflow in config.workflows:
-            workflows[workflow.name] = self.__build_workflow(workflow, step_counters, custom_logger, debug)
-            
-        name = config.name
+        # Build Global Step Counter
+        counters = [self.build_counter(counter) for counter in config.step_counters]
+        # Build the agents
+        agents = [self.__build_agent(agent, counters) for agent in config.agents]
         
+        env_type = EnvironmentType(config.type)
         # Build the environment
-        match name:
-            case "query":
-                return Query(
-                    agent=agent, 
-                    workflows=workflows, 
-                    custom_logger=custom_logger, 
-                    debug=debug, 
-                )
+        match env_type:
+            case EnvironmentType.QUERY:
+                env = Query()
+                # Register the agents to the environment
+                for agent in agents:
+                    # Register the agent to the environment
+                    env.register_agent(agent)
+                    # Register the environment to the agent
+                    agent.register_env(env)
+                # Return the environment
+                return env
             case _:
-                raise ValueError(f"Invalid environment name: {name}")
+                raise ValueError(f"Invalid environment type: {env_type}")
             
     def auto_build(self, config: AutoAgentConfig) -> Union[Environment, Workflow]:
         """Build an auto agent.
@@ -314,12 +211,6 @@ class AutoAgent:
             ValueError:
                 If both environment and workflow are provided. Or no environment or workflow is provided. 
         """
-        # Check if both environment and workflow are provided
-        if config.environment is not None and config.workflow is not None:
-            raise ValueError("Both environment and workflow are provided. Please provide only one of them.")
-        elif config.environment is None and config.workflow is None:
-            raise ValueError("No environment or workflow is provided. Please provide one of them.")
-        
         # Set the debug and log level
         log_level = "DEBUG" if config.debug else "INFO"
         # Create a logger
@@ -332,21 +223,7 @@ class AutoAgent:
         if config.save_dir != "stdout":
             custom_logger.add(sys.stdout, level=log_level, colorize=True)
         
-        # Build the step counter
-        step_counters = [self.build_counter(step_counter) for step_counter in config.step_counters]
-        assert len(step_counters) > 0, "No step counters are provided."
-        
-        # Check if `environment` is provided
-        if config.environment is not None:
-            # Build the environment
-            environment = self.__build_environment(config.environment, step_counters, custom_logger, config.debug)
-            # Return the environment
-            return environment
-        elif config.workflow is not None:
-            # Build the workflow
-            workflow = self.__build_workflow(config.workflow, step_counters, custom_logger, config.debug)
-            # Return the workflow
-            return workflow
-        
-        # No environment or workflow is provided
-        raise ValueError("No environment or workflow is provided.")
+        # Build the environment
+        environment = self.__build_environment(config.environment)
+        # Return the environment
+        return environment
