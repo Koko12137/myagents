@@ -1,12 +1,16 @@
+import json
 from typing import Callable, Any
 
+from json_repair import repair_json
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.interface import Agent, Stateful, Context, TreeTaskNode
-from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage
+from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, StopReason
 from myagents.core.workflows.react import ReActFlow
+from myagents.core.tasks import BaseTreeTaskNode, ToDoTaskView
 from myagents.core.utils.extractor import extract_by_label
+from myagents.core.utils.strings import normalize_string
 from myagents.prompts.workflows.orchestrate import PROFILE, SYSTEM_PROMPT, THINK_PROMPT, ACTION_PROMPT, REFLECT_PROMPT
 
 
@@ -78,8 +82,68 @@ class OrchestrateFlow(ReActFlow):
             "react_think": react_think if react_think != "" else ACTION_PROMPT,
             "react_reflect": react_reflect if react_reflect != "" else REFLECT_PROMPT,
         })
+    
+    def create_task(
+        self, 
+        parent: TreeTaskNode, 
+        orchestration: str, 
+        current_error: int = 0, 
+    ) -> tuple[UserMessage, int]:
+        """Create a new task based on the orchestration blueprint.
         
-    async def __reason(
+        Args:
+            parent (TreeTaskNode):
+                The parent task to create the new task.
+            orchestration (str):
+                The orchestration blueprint to create the new task.
+            current_error (int, optional, defaults to 0):
+                The current error counter. 
+                
+        Returns:
+            UserMessage:
+                The user message after creating the new task.
+            int:
+                The current error counter.
+        """
+        try:
+            # Repair the json
+            orchestration = repair_json(orchestration)
+            # Parse the orchestration
+            orchestration: dict[str, dict[str, str]] = json.loads(orchestration)
+            
+            # Traverse the orchestration
+            for key, value in orchestration.items():
+                # Convert the value to string
+                key_outputs = ""
+                for k, output in value.items():
+                    key_outputs += f"{k}: {output}; "
+                
+                # Create a new task
+                new_task = BaseTreeTaskNode(
+                    question=normalize_string(key), 
+                    description=key_outputs, 
+                    sub_task_depth=parent.sub_task_depth - 1,
+                )
+                # Link the new task to the parent task
+                new_task.parent = parent
+                # Add the new task to the parent task
+                parent.sub_tasks[new_task.question] = new_task
+                # If the sub task depth is 0, then set the task status to running
+                if new_task.sub_task_depth == 0:
+                    new_task.to_running()
+                    
+            # Format the task to ToDoTaskView
+            view = ToDoTaskView(task=parent).format()
+            # Return the user message
+            return UserMessage(content=f"【成功】：任务创建成功。任务ToDo视图：\n{view}"), current_error
+        
+        except Exception as e:
+            # Log the error
+            logger.error(f"Error creating task: {e}")
+            # Return the user message
+            return UserMessage(content=f"【失败】：任务创建失败。错误信息：{e}"), current_error + 1
+    
+    async def reason(
         self, 
         target: TreeTaskNode, 
         max_idle_thinking: int = 1, 
@@ -109,7 +173,11 @@ class OrchestrateFlow(ReActFlow):
         # Log the observation
         logger.info(f"Observe: \n{observe}")
         # Create a new message for the current observation
-        message = UserMessage(content=self.prompts["orchestrate_think"].format(observe=observe))
+        message = UserMessage(content=self.prompts["orchestrate_think"])
+        # Update the target with the user message
+        target.update(message)
+        # Create new user message with the observe
+        message = UserMessage(content=message.content + f"\n\n## 观察\n以下是观察到的信息:\n{observe}")
         # Append the reason prompt to the task history
         target.update(message)
     
@@ -117,7 +185,10 @@ class OrchestrateFlow(ReActFlow):
             # Call for completion
             message: AssistantMessage = await self.agent.think(target.get_history())
             # Log the message
-            logger.info(f"Assistant Message: \n{message.content}")
+            if logger.level == "DEBUG":
+                logger.debug(f"Full Assistant Message: \n{message}")
+            else:
+                logger.info(f"Assistant Message: \n{message.content}")
             # Record the completion message
             target.update(message)
             
@@ -155,6 +226,89 @@ class OrchestrateFlow(ReActFlow):
                 logger.warning(f"模型回复中没有找到规划蓝图，提醒模型重新思考。")
         
         return target
+    
+    async def reason_act(
+        self, 
+        target: Stateful, 
+        react_think: str, 
+        max_error_retry: int = 3, 
+        current_error: int = 0, 
+        max_idle_thinking: int = 1, 
+        current_thinking: int = 0, 
+        completion_config: dict[str, Any] = {}, 
+        observe_args: dict[str, dict[str, Any]] = {}, 
+        *args, 
+        **kwargs,
+    ) -> tuple[Stateful, int, int]:
+        """Reason and act on the target.
+        
+        Args:
+            target (Stateful):
+                The target to reason and act on.
+            react_think (str):
+                The think prompt of the workflow.
+            max_error_retry (int, optional, defaults to 3):
+                The maximum number of times to retry the agent when the target is errored.
+            current_error (int, optional, defaults to 0):
+                The current error counter.
+            max_idle_thinking (int, optional, defaults to 1):
+                The maximum number of times to idle thinking the agent. 
+            current_thinking (int, optional, defaults to 0):
+                The current thinking counter.
+            completion_config (dict[str, Any], optional, defaults to {}):
+                The completion config of the workflow. 
+            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
+                The additional keyword arguments for observing the target. The following observe args must be provided:
+                - "react_think": The observe args for the think stage.
+                - "react_reflect": The observe args for the reflect stage.
+            *args:
+                The additional arguments for running the agent.
+            **kwargs:
+                The additional keyword arguments for running the agent.
+                
+        Returns:
+            tuple[Stateful, int, int]:
+                The target, the current error counter and the current thinking counter.
+        """
+        # Observe the target
+        observe = await self.agent.observe(target, **observe_args["react_think"])
+        # Log the observe
+        logger.info(f"Observe: \n{observe}")
+        # Create new user message
+        message = UserMessage(content=react_think)
+        # Update the target with the user message
+        target.update(message)
+        # Create new user message with the observe
+        message = UserMessage(content=message.content + f"\n\n## 观察\n以下是观察到的信息:\n{observe}")
+        # Update the target with the user message
+        target.update(message)
+        
+        # Think about the target
+        message = await self.agent.think(target.get_history(), format_json=True)
+        # Log the assistant message
+        if logger.level == "DEBUG":
+            logger.debug(f"Full Assistant Message: \n{message}")
+        else:
+            logger.info(f"Assistant Message: \n{message.content}")
+        # Update the target with the assistant message
+        target.update(message)
+
+        # Create new tasks based on the orchestration json
+        message, current_error = self.create_task(target, message.content, current_error)
+        # Log the message
+        logger.info(f"Create Task Message: \n{message.content}")
+        # Update the target with the user message
+        target.update(message)
+        
+        # Check if the current error is greater than the max error retry
+        if current_error >= max_error_retry:
+            # Set the target to error
+            target.to_error()
+            # Log the error
+            logger.error(f"重试次数达到上限，错误重试次数: {current_error}/{max_error_retry}，`创建子任务`执行失败。")
+            
+        # Return the target, current error and current thinking
+        return target, current_error, current_thinking
         
     async def run(
         self, 
@@ -205,7 +359,7 @@ class OrchestrateFlow(ReActFlow):
         # Check if the target is running
         if running_checker(target):
             # Reason about the task and get the orchestration blueprint
-            await self.__reason(
+            await self.reason(
                 target=target, 
                 max_idle_thinking=max_idle_thinking, 
                 observe_args=observe_args, 
@@ -221,7 +375,7 @@ class OrchestrateFlow(ReActFlow):
         # Run the ReActFlow to create the tasks
         if running_checker(target):
             # Run the react flow
-            await super().run(
+            target = await super().run(
                 target=target, 
                 max_error_retry=max_error_retry, 
                 max_idle_thinking=max_idle_thinking, 

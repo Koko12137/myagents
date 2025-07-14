@@ -1,13 +1,18 @@
+import json
 from typing import Callable, Any
 
+from json_repair import repair_json
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import SystemMessage, UserMessage
 from myagents.core.interface import Agent, TaskStatus, Context, Stateful, TreeTaskNode
 from myagents.core.workflows.react import ReActFlow
-from myagents.core.tasks import DocumentTaskView, ToDoTaskView
+from myagents.core.workflows.orchestrate import OrchestrateFlow
+from myagents.core.tasks import DocumentTaskView, ToDoTaskView, BaseTreeTaskNode
 from myagents.core.utils.extractor import extract_by_label
+from myagents.core.utils.strings import normalize_string
+from myagents.prompts.workflows.orchestrate import REFLECT_PROMPT as ORCHESTRATE_REFLECT_PROMPT
 from myagents.prompts.workflows.plan_and_exec import (
     PROFILE, 
     PLAN_SYSTEM_PROMPT, 
@@ -18,9 +23,9 @@ from myagents.prompts.workflows.plan_and_exec import (
 )
 
 
-class PlanAndExecFlow(ReActFlow):
+class PlanAndExecFlow(OrchestrateFlow):
     """
-    PlanFlow is a workflow for splitting a task into sub-tasks.
+    PlanAndExecFlow is a workflow for splitting a task into sub-tasks and executing the sub-tasks.
     
         
     Attributes:
@@ -54,6 +59,7 @@ class PlanAndExecFlow(ReActFlow):
         profile: str = "", 
         plan_system_prompt: str = "", 
         plan_think_prompt: str = "", 
+        plan_reflect_prompt: str = "", 
         exec_system_prompt: str = "", 
         exec_think_prompt: str = "", 
         error_prompt: str = "", 
@@ -69,6 +75,8 @@ class PlanAndExecFlow(ReActFlow):
                 The system prompt of the workflow.
             plan_think_prompt (str, optional, defaults to ""):
                 The think prompt of the workflow.
+            plan_reflect_prompt (str, optional, defaults to ""):
+                The reflect prompt of the workflow.
             plan_reflect_prompt (str, optional, defaults to ""):
                 The reflect prompt of the workflow.
             exec_system_prompt (str, optional, defaults to ""):
@@ -92,6 +100,7 @@ class PlanAndExecFlow(ReActFlow):
         self.prompts.update({
             "plan_system": plan_system_prompt if plan_system_prompt != "" else PLAN_SYSTEM_PROMPT,
             "plan_think": plan_think_prompt if plan_think_prompt != "" else PLAN_THINK_PROMPT,
+            "plan_reflect": plan_reflect_prompt if plan_reflect_prompt != "" else ORCHESTRATE_REFLECT_PROMPT,
             "exec_system": exec_system_prompt if exec_system_prompt != "" else EXEC_SYSTEM_PROMPT,
             "exec_think": exec_think_prompt if exec_think_prompt != "" else EXEC_THINK_PROMPT,
             "error_prompt": error_prompt if error_prompt != "" else ERROR_PROMPT,
@@ -99,6 +108,85 @@ class PlanAndExecFlow(ReActFlow):
         
         # Post initialize to initialize the tools
         self.post_init()
+    
+    def create_task(
+        self, 
+        parent: TreeTaskNode, 
+        orchestration: str, 
+        current_error: int = 0, 
+    ) -> tuple[UserMessage, int]:
+        """Create a new task based on the orchestration blueprint.
+        
+        Args:
+            parent (TreeTaskNode):
+                The parent task to create the new task.
+            orchestration (str):
+                The orchestration blueprint to create the new task.
+            current_error (int, optional, defaults to 0):
+                The current error counter. 
+                
+        Returns:
+            UserMessage:
+                The user message after creating the new task.
+            int:
+                The current error counter.
+        """
+        def dfs_create_task(
+            parent: TreeTaskNode, 
+            orchestration: dict[str, dict], 
+            sub_task_depth: int, 
+        ) -> None:
+            if sub_task_depth == 0:
+                # Set the task status to running
+                parent.to_running()
+                return 
+            
+            # Traverse the orchestration
+            for question, value in orchestration.items():
+                # Convert the value to string
+                key_outputs = ""
+                for k, output in value['问题描述'].items():
+                    key_outputs += f"{k}: {output}; "
+                    
+                # Create a new task
+                new_task = BaseTreeTaskNode(
+                    question=normalize_string(question), 
+                    description=key_outputs, 
+                    sub_task_depth=sub_task_depth - 1,
+                )
+                # Create the sub-tasks
+                dfs_create_task(
+                    parent=new_task, 
+                    orchestration=value['子任务'], 
+                    sub_task_depth=sub_task_depth - 1, 
+                )
+                # Link the new task to the parent task
+                new_task.parent = parent
+                # Add the new task to the parent task
+                parent.sub_tasks[question] = new_task
+        
+        try:
+            # Repair the json
+            orchestration = repair_json(orchestration)
+            # Parse the orchestration
+            orchestration: dict[str, dict[str, str]] = json.loads(orchestration)
+            
+            # Create the task
+            dfs_create_task(
+                parent=parent, 
+                orchestration=orchestration, 
+                sub_task_depth=parent.sub_task_depth - 1, 
+            )
+            # Format the task to ToDoTaskView
+            view = ToDoTaskView(task=parent).format()
+            # Return the user message
+            return UserMessage(content=f"【成功】：任务创建成功。任务ToDo视图：\n{view}"), current_error
+        
+        except Exception as e:
+            # Log the error
+            logger.error(f"Error creating task: {e}")
+            # Return the user message
+            return UserMessage(content=f"【失败】：任务创建失败。错误信息：{e}"), current_error + 1
         
     async def run(
         self, 
@@ -273,10 +361,12 @@ class PlanAndExecFlow(ReActFlow):
         # Prepare the prompts 
         plan_system = prompts.pop("plan_system", self.prompts["plan_system"])
         plan_think = prompts.pop("plan_think", self.prompts["plan_think"])
+        plan_reflect = prompts.pop("plan_reflect", self.prompts["plan_reflect"])
         # Update the prompts
         prompts = {
             "react_system": plan_system,
             "react_think": plan_think.format(detail_level=target.sub_task_depth),
+            "react_reflect": plan_reflect,
         }
         # Create a new running checker
         running_checker = lambda target: target.is_created()
@@ -523,7 +613,8 @@ class PlanAndExecFlow(ReActFlow):
         
         while target.is_running():
             # === Reason and Act Stage ===
-            target, current_error, current_thinking = await self.reason_act(
+            target, current_error, current_thinking = await ReActFlow.reason_act(
+                self, 
                 target, 
                 react_think=react_think,
                 max_error_retry=max_error_retry, 

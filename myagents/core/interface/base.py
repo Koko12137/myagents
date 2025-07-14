@@ -137,6 +137,16 @@ class Agent(Protocol):
     # Synchronization lock
     lock: Lock
     
+    # @abstractmethod
+    # async def memory(self, *args, **kwargs) -> Any:
+    #     """Get the memory of the agent.
+        
+    #     Returns:
+    #         Any:
+    #             The memory of the agent.
+    #     """
+    #     pass
+    
     @abstractmethod
     async def observe(
         self, 
@@ -169,7 +179,7 @@ class Agent(Protocol):
             Union[str, list[dict]]:
                 The up to date information observed from the target.  
         """
-        pass
+        pass    # TODO: 以后需要在 observe 中实现调用 memory，同时通过 Agent属性 来确定 观察格式，禁止通过参数传递，定义一个 workflow 的状态，传入 observe 中，以确定当前的观察方式
     
     @abstractmethod
     async def think(
@@ -197,7 +207,7 @@ class Agent(Protocol):
             AssistantMessage:
                 The completion message thought about by the LLM. 
         """
-        pass
+        pass    # TODO: 以后需要在 think 中实现更新 memory, 同时通过 Agent属性 和 workflow状态 来确定 Prompt，禁止通过参数传递，定义一个 workflow 的状态，传入 think 中，以确定当前的思考方式
     
     @abstractmethod
     async def act(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
@@ -218,7 +228,7 @@ class Agent(Protocol):
             ValueError:
                 If the tool call name is not registered to the workflow or environment.  
         """
-        pass
+        pass    # TODO: 以后需要在 act 中实现更新 memory
     
     @abstractmethod
     async def run(

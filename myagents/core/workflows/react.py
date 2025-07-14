@@ -285,8 +285,12 @@ class ReActFlow(BaseWorkflow):
         observe = await self.agent.observe(target, **observe_args["react_think"])
         # Log the observe
         logger.info(f"Observe: \n{observe}")
-        # Create new user message
-        message = UserMessage(content=react_think.format(observe=observe))
+        # Create new user message with the think prompt
+        message = UserMessage(content=react_think)
+        # Update the target with the user message
+        target.update(message)
+        # Create new user message with the observe
+        message = UserMessage(content=message.content + f"\n\n## 观察\n以下是观察到的信息:\n{observe}")
         # Update the target with the user message
         target.update(message)
         # Prepare the thinking kwargs
@@ -300,7 +304,10 @@ class ReActFlow(BaseWorkflow):
         # Think about the target
         message = await self.agent.think(target.get_history(), **think_kwargs)
         # Log the assistant message
-        logger.info(f"Assistant Message: \n{message}")
+        if logger.level == "DEBUG":
+            logger.debug(f"Full Assistant Message: \n{message}")
+        else:
+            logger.info(f"Assistant Message: \n{message.content}")
         # Update the target with the assistant message
         target.update(message)
         
@@ -387,14 +394,21 @@ class ReActFlow(BaseWorkflow):
         observe = await self.agent.observe(target, **observe_args["react_reflect"])
         # Log the observe
         logger.info(f"Observe: \n{observe}")
-        # Create new user message
-        message = UserMessage(content=react_reflect.format(observe=observe))
+        # Create new user message with the reflect prompt
+        message = UserMessage(content=react_reflect)
+        # Update the target with the user message
+        target.update(message)
+        # Create new user message with the observe
+        message = UserMessage(content=message.content + f"\n\n## 观察\n以下是观察到的信息:\n{observe}")
         # Update the target with the user message
         target.update(message)
         # Reflect the action taken on the target
         message = await self.agent.think(target.get_history(), tools=self.tools)
         # Log the assistant message
-        logger.info(f"Assistant Message: \n{message}")
+        if logger.level == "DEBUG":
+            logger.debug(f"Full Assistant Message: \n{message}")
+        else:
+            logger.info(f"Assistant Message: \n{message.content}")
         # Update the target with the assistant message
         target.update(message)
         

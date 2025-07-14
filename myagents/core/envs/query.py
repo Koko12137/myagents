@@ -436,7 +436,7 @@ class Query(BaseEnvironment):
         
         while not target.is_finished():
             # Check the status of the target
-            if target.is_created():
+            if self.is_created():
                 # Call for global orchestration
                 target = await self.orchestrate(
                     target=target, 
@@ -459,7 +459,7 @@ class Query(BaseEnvironment):
                     }, 
                 )
             
-            elif target.is_running():
+            elif self.is_running():
                 # Plan and execute the task
                 target = await self.plan_and_exec(
                     target=target, 
@@ -485,11 +485,11 @@ class Query(BaseEnvironment):
                     }, 
                 )
             
-            elif target.is_finished():
+            elif self.is_finished():
                 # Break the loop
                 break
             
-            elif target.is_error():
+            elif self.is_error():
                 # Get all the sub-tasks that are not finished
                 sub_tasks = [sub_task for sub_task in target.sub_tasks.values() if not sub_task.is_finished()]
                 # Delete all the sub-tasks that are not finished
@@ -498,6 +498,8 @@ class Query(BaseEnvironment):
                 
                 # Rollback the target to created status
                 target.to_created()
+                # Rollback the self to created status
+                self.to_created()
                 # Record the error information
                 current_result = DocumentTaskView(target).format()
                 # Create a new user message to record the error and the current result
@@ -512,7 +514,7 @@ class Query(BaseEnvironment):
                 # Clean up the error information
                 target.answer = ""
             
-            elif target.is_cancelled():
+            elif self.is_cancelled():
                 # Increment the error retry count
                 current_error += 1
                 # Log the error
@@ -525,8 +527,10 @@ class Query(BaseEnvironment):
                     # Raise the error
                     raise RuntimeError(f"Task {target.question} is in error state. Max error retry count reached.")
                 
-                # Rollback the target to error status and call for error handling
+                # Rollback the target to error status
                 target.to_error()
+                # Rollback the self to error status
+                self.to_error()
                 
             else:
                 # Log the error
@@ -565,7 +569,7 @@ class Query(BaseEnvironment):
         """
         # Prepare the completion config
         completion_config = {
-            "tool_choice": "create_task", # The tool to use for the agent. 
+            "exclude_tools": ["select_answer", "diff_modify"],
         }
         
         # Record the question
@@ -579,11 +583,19 @@ class Query(BaseEnvironment):
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
             prompts=prompts, 
-            completion_config=completion_config, 
+            completion_config=completion_config,
             observe_args=observe_args, 
         )
         # Update the environment history
         self.update(message)
+        
+        if not target.is_error(): 
+            # Set self to running
+            self.to_running()
+        else:
+            # Set self to error
+            self.to_error()
+        
         # Return the target
         return target
 
@@ -614,7 +626,9 @@ class Query(BaseEnvironment):
                 The planned and executed task.
         """
         # Prepare the completion config
-        completion_config = {}
+        completion_config = {
+            "exclude_tools": ["select_answer", "diff_modify"],
+        }
         
         # Record the question
         self.update(UserMessage(
@@ -637,7 +651,7 @@ class Query(BaseEnvironment):
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
                     prompts=prompts, 
-                    completion_config=completion_config, 
+                    completion_config=completion_config,
                     observe_args=observe_args, 
                 )
                 # Update the environment history
@@ -658,6 +672,19 @@ class Query(BaseEnvironment):
                     logger.info(f"所有子任务已处理完成。")
                     # Break the loop
                     break
+                
+        # Check if the target is finished
+        if target.is_finished():
+            # Set self to finished
+            self.to_finished()
+        elif target.is_error():
+            # Set self to error
+            self.to_error()
+        elif target.is_cancelled():
+            # Set self to cancelled
+            self.to_cancelled()
+        else:
+            raise RuntimeError(f"Task {target.question} is in error state. Invalid status.")
         
         return target
 

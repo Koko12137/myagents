@@ -192,7 +192,7 @@ class BaseAgent(Agent):
             await step_counter.check_limit()
         
         # Get the available tools
-        tools = [tool_schema(tool, self.llm.provider) for tool in tools]
+        tools = [tool_schema(tool, self.llm.provider) for tool in tools.values()]
         
         # Call for completion from the LLM
         message = await self.llm.completion(
@@ -354,7 +354,12 @@ class BaseAgent(Agent):
         # Observe the target
         observe = await self.observe(target, **observe_args["agent"])
         # Create a new assistant message
-        message = AssistantMessage(content=observe)
+        message = AssistantMessage(content=f"已完成任务，【观察】：{observe}")
+        # Log the message
+        if logger.level == "DEBUG":
+            logger.debug(f"Full Assistant Message: \n{message}")
+        else:
+            logger.info(f"Assistant Message: \n{message.content}")
         return message
 
     def register_counter(self, counter: StepCounter) -> None:

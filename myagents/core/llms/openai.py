@@ -65,7 +65,8 @@ class OpenAiLLM(LLM):
         self, 
         messages: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]], 
         available_tools: Optional[list[dict[str, str]]] = None, 
-        tool_choice: Union[str, FastMcpTool] = "auto",
+        tool_choice: Union[str, FastMcpTool] = "auto", 
+        format_json: bool = False, 
         stream: bool = False, 
         queue: Optional[Queue] = None, 
         **kwargs, 
@@ -80,7 +81,15 @@ class OpenAiLLM(LLM):
             tool_choice (str, defaults to "auto"):
                 The tool choice to use for the agent. This is used to control the tool calling. 
                 - "auto": The agent will automatically choose the tool to use. 
-            
+            format_json (bool, defaults to False):
+                Whether to format the json in the assistant message.
+            stream (bool, defaults to False):
+                Whether to stream the completion.
+            queue (Optional[Queue], optional):
+                The queue to use for the completion.
+            **kwargs:
+                The additional keyword arguments.
+                
         Raises:
             ValueError: 
                 The value error raised by the unsupported message type.
@@ -89,7 +98,12 @@ class OpenAiLLM(LLM):
             AssistantMessage: 
                 The completed message.
         """
-        kwargs = self.__prepare_kwargs(available_tools=available_tools, tool_choice=tool_choice, **kwargs)
+        kwargs = self.__prepare_kwargs(
+            available_tools=available_tools, 
+            tool_choice=tool_choice, 
+            format_json=format_json, 
+            **kwargs,
+        )
         
         # Create the generation history
         history = to_openai_dict(messages)
@@ -165,15 +179,6 @@ class OpenAiLLM(LLM):
             "temperature": kwargs.get("temperature", self.temperature), 
             "parallel_tool_calls": kwargs.get("parallel_tool_calls", True), 
         }
-        
-        # Check output format
-        response_format = kwargs.get("response_format", None)
-        if response_format is not None:
-            arguments["response_format"] = {
-                "type": "json_object",
-            }
-            # Log the response format
-            logger.warning(f"Response format is set to {response_format}")
             
         # Check the output token limit
         max_tokens = kwargs.get("max_tokens", None)
@@ -181,6 +186,17 @@ class OpenAiLLM(LLM):
             arguments["max_tokens"] = max_tokens
             # Log the max tokens
             logger.info(f"Max tokens is set to {max_tokens}")
+            
+        # Check the format json
+        if kwargs.get("format_json", False):
+            arguments["response_format"] = {
+                "type": "json_object",
+            }
+            # Log the response format
+            logger.warning(f"Response format is set to {arguments['response_format']}")
+            
+            # Return the arguments, JSON format does not support tools and tool choice
+            return arguments
         
         # Check tools are provided
         available_tools: list[dict[str, str]] = kwargs.get("available_tools", None)
