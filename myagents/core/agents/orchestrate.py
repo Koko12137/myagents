@@ -7,12 +7,12 @@ from fastmcp.tools import Tool as FastMcpTool
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.types import AgentType
 from myagents.core.interface import LLM, Workflow, Environment, StepCounter
-from myagents.core.workflows import OrchestrateFlow
-from myagents.prompts.workflows.orchestrate import PROFILE as WORKFLOW_PROFILE
+from myagents.core.workflows import OrchestrateFlow, OrchestrateStage
+from myagents.prompts.workflows.orchestrate import PROFILE, SYSTEM_PROMPT, THINK_PROMPT, ACTION_PROMPT, REFLECT_PROMPT, REACT_SYSTEM_PROMPT
 
 
-PROFILE = """
-我叫{name}，是一个会按照“编排-反思”的流程来编排任务总体目标的助手。
+AGENT_PROFILE = """
+我叫 {name} ，是一个会按照“编排-反思”的流程来编排任务总体目标的助手。
 
 以下是我的工作流信息：
 {workflow}
@@ -69,6 +69,14 @@ class OrchestrateAgent(BaseAgent):
         llm: LLM, 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
+        orchestrate_system: str = "", 
+        orchestrate_think: str = "", 
+        orchestrate_react_system: str = "", 
+        orchestrate_action: str = "", 
+        orchestrate_reflect: str = "", 
+        orchestrate_think_format: str = "todo", 
+        orchestrate_action_format: str = "todo", 
+        orchestrate_reflect_format: str = "todo", 
         *args, 
         **kwargs, 
     ) -> None:        
@@ -84,30 +92,66 @@ class OrchestrateAgent(BaseAgent):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
+            orchestrate_system (str, optional):
+                The system prompt of the reason stage.
+            orchestrate_think (str, optional):
+                The think prompt of the reason stage.
+            orchestrate_react_system (str, optional):
+                The react system prompt of the react stage.
+            orchestrate_action (str, optional):
+                The action prompt of the action stage.
+            orchestrate_reflect (str, optional):
+                The reflect prompt of the reflect stage.
+            orchestrate_think_format (str, optional):
+                The observation format of the reason stage.
+            orchestrate_action_format (str, optional):
+                The observation format of the action stage.
+            orchestrate_reflect_format (str, optional):
+                The observation format of the reflect stage.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # Prepare the prompts
+        system_prompt = orchestrate_system if orchestrate_system != "" else SYSTEM_PROMPT.format(profile=PROFILE)
+        think_prompt = orchestrate_think if orchestrate_think != "" else THINK_PROMPT
+        react_system_prompt = orchestrate_react_system if orchestrate_react_system != "" else REACT_SYSTEM_PROMPT
+        action_prompt = orchestrate_action if orchestrate_action != "" else ACTION_PROMPT
+        reflect_prompt = orchestrate_reflect if orchestrate_reflect != "" else REFLECT_PROMPT
+        
+        # Initialize the parent class
         super().__init__(
             llm=llm, 
             name=name, 
             type=AgentType.ORCHESTRATE, 
-            profile=PROFILE.format(name=name, workflow=WORKFLOW_PROFILE), 
+            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
+            prompts={
+                OrchestrateStage.REASON_INIT: system_prompt, 
+                OrchestrateStage.REASON: think_prompt, 
+                OrchestrateStage.REACT_INIT: react_system_prompt, 
+                OrchestrateStage.REASON_ACT: action_prompt, 
+                OrchestrateStage.REFLECT: reflect_prompt, 
+            }, 
+            observe_format={
+                OrchestrateStage.REASON: orchestrate_think_format, 
+                OrchestrateStage.REASON_ACT: orchestrate_action_format, 
+                OrchestrateStage.REFLECT: orchestrate_reflect_format, 
+            }, 
             *args, 
             **kwargs,
         )
         
         # Read the workflow profile
         # Initialize the workflow for the agent
-        self.workflow = OrchestrateFlow()
+        self.workflow = OrchestrateFlow(profile=system_prompt)
         # Register the agent to the workflow
         self.workflow.register_agent(self)
 
     def __str__(self) -> str:
-        return f"OrchestrateAgent(uid={self.uid}, name={self.name}, profile={self.profile})"
+        return f"OrchestrateAgent({self.name})"
     
     def __repr__(self) -> str:
         return self.__str__()

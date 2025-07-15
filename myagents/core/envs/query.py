@@ -152,7 +152,6 @@ class Query(BaseEnvironment):
         
         # Initialize the tasks
         self.tasks = OrderedDict()
-        
         # Post initialize
         self.post_init()
         
@@ -287,6 +286,9 @@ class Query(BaseEnvironment):
         elif sub_task_depth > 5:
             raise ValueError("The sub task depth must be less than 5.")
         
+        # Update the environment status to created
+        self.to_created()
+        
         # Append the system prompt to the history
         self.update(SystemMessage(
             content=self.prompts["system"].format(
@@ -309,7 +311,7 @@ class Query(BaseEnvironment):
         task = await self.process_task(task)
         
         # Check the task status
-        if task.status != TaskStatus.FINISHED:
+        if not task.is_finished():
             # Log the error
             logger.critical(f"Task {task.question} is not finished.")
             # Raise the error
@@ -343,28 +345,14 @@ class Query(BaseEnvironment):
                 AgentType.REACT, 
                 target=task, 
                 document=document, 
-                prompts={
-                    "react_system": self.prompts["doc"],
-                },
                 completion_config={
                     "exclude_tools": ["select_answer"],
-                },
-                observe_args={
-                    "react_think": {
-                        "format": "document",
-                    },
-                    "react_reflect": {
-                        "format": "document",
-                    },
-                    "agent": {
-                        "format": "document",
-                    },
                 },
             )
             # Update the environment history
             self.update(message)
             # Log the answer
-            logger.info(f"模型回复: \n{message.content}")
+            logger.info(f"Agent Response: \n{message.content}")
             # Return the answer
             return message.content
         
@@ -380,28 +368,14 @@ class Query(BaseEnvironment):
             message: AssistantMessage = await self.call_agent(
                 AgentType.REACT, 
                 target=task, 
-                prompts={
-                    "react_system": self.prompts["select"],
-                },
                 completion_config={
                     "tool_choice": "select_answer",
-                },
-                observe_args={
-                    "react_think": {
-                        "format": "document",
-                    },
-                    "react_reflect": {
-                        "format": "document",
-                    },
-                    "agent": {
-                        "format": "answer",
-                    },
                 },
             )
             # Update the environment history
             self.update(message)
             # Log the answer
-            logger.info(f"模型回复: \n{message.content}")
+            logger.info(f"Agent Response: \n{message.content}")
             # Return the answer
             return message.content
         
@@ -413,19 +387,16 @@ class Query(BaseEnvironment):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
     ) -> TreeTaskNode:
         """Process the task.
         
         Args:
             target (TreeTaskNode):
                 The target task to be processed.
-            max_error_retry (int, optional, defaults to 3):
+            max_error_retry (int, optional):
                 The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional, defaults to 1):
+            max_idle_thinking (int, optional):
                 The maximum number of times to idle thinking the agent. 
-            prompts (dict[str, str], optional, defaults to {}):
-                The prompts of the agent. The key is the prompt name and the value is the prompt content. 
         
         Returns:
             TreeTaskNode:
@@ -442,21 +413,6 @@ class Query(BaseEnvironment):
                     target=target, 
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
-                    prompts=prompts, 
-                    observe_args={
-                        "orchestrate_think": {
-                            "format": "todo",
-                        }, 
-                        "react_think": {
-                            "format": "todo",
-                        },
-                        "react_reflect": {
-                            "format": "todo",
-                        },
-                        "agent": {
-                            "format": "todo",
-                        }
-                    }, 
                 )
             
             elif self.is_running():
@@ -465,24 +421,6 @@ class Query(BaseEnvironment):
                     target=target, 
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
-                    prompts=prompts, 
-                    observe_args={
-                        "plan_react_think": {
-                            "format": "todo",
-                        },
-                        "plan_react_reflect": {
-                            "format": "todo",
-                        },
-                        "exec_react_think": {
-                            "format": "todo",
-                        },
-                        "exec_react_reflect": {
-                            "format": "document",
-                        },
-                        "agent": {
-                            "format": "todo",
-                        },
-                    }, 
                 )
             
             elif self.is_finished():
@@ -494,7 +432,7 @@ class Query(BaseEnvironment):
                 sub_tasks = [sub_task for sub_task in target.sub_tasks.values() if not sub_task.is_finished()]
                 # Delete all the sub-tasks that are not finished
                 for sub_task in sub_tasks:
-                    del target.sub_tasks[sub_task.uid]
+                    del target.sub_tasks[sub_task.question]
                 
                 # Rollback the target to created status
                 target.to_created()
@@ -546,8 +484,6 @@ class Query(BaseEnvironment):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
     ) -> TreeTaskNode:
         """Orchestrate the task. 
         
@@ -558,10 +494,6 @@ class Query(BaseEnvironment):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of times to idle thinking the agent. 
-            prompts (dict[str, str], optional, defaults to {}):
-                The prompts of the agent. The key is the prompt name and the value is the prompt content. 
-            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
-                The additional keyword arguments for observing the target. 
         
         Returns:    
             TreeTaskNode:
@@ -573,21 +505,25 @@ class Query(BaseEnvironment):
         }
         
         # Record the question
-        self.update(UserMessage(
+        message = UserMessage(
             content=self.prompts["orchestration"].format(task=ToDoTaskView(target).format()),
-        ))
+        )
+        # Update the environment history
+        self.update(message)
+        # Log the message
+        logger.info(f"Observe: \n{message.content}")
         # Call for global orchestration
         message: AssistantMessage = await self.call_agent(
             AgentType.ORCHESTRATE, 
             target=target, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
-            prompts=prompts, 
             completion_config=completion_config,
-            observe_args=observe_args, 
         )
         # Update the environment history
         self.update(message)
+        # Log the message
+        logger.info(f"Agent Response: \n{message.content}")
         
         if not target.is_error(): 
             # Set self to running
@@ -604,8 +540,6 @@ class Query(BaseEnvironment):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
     ) -> TreeTaskNode:
         """Plan and execute the task.
         
@@ -616,10 +550,6 @@ class Query(BaseEnvironment):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of times to idle thinking the agent. 
-            prompts (dict[str, str], optional, defaults to {}):
-                The prompts of the agent. The key is the prompt name and the value is the prompt content. 
-            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
-                The additional keyword arguments for observing the target. 
         
         Returns:
             TreeTaskNode:
@@ -631,31 +561,45 @@ class Query(BaseEnvironment):
         }
         
         # Record the question
-        self.update(UserMessage(
+        message = UserMessage(
             content=self.prompts["plan_and_execute"].format(task=ToDoTaskView(target).format()),
-        ))
+        )
+        # Update the environment history
+        self.update(message)
+        # Log the message
+        logger.info(f"Observe: \n{message.content}")
+        
         sub_tasks = target.sub_tasks
         # Create a iterator for the sub-tasks
         sub_tasks_iter = iter(sub_tasks.values())
         # Get the first sub-task
         sub_task = next(sub_tasks_iter)
         
-        while not target.is_finished():
+        while not self.is_finished():
 
             # Process the created status
-            if sub_task.is_created():
+            if sub_task.is_created() or sub_task.is_running():
+                # Create a new user message to record the question
+                message = UserMessage(
+                    content=self.prompts["plan_and_execute"].format(task=ToDoTaskView(sub_task).format()),
+                )
+                # Update the environment history
+                self.update(message)
+                # Log the message
+                logger.info(f"Observe: \n{message.content}")
+                
                 # Call for plan and execute
                 message: AssistantMessage = await self.call_agent(
                     AgentType.PLAN_AND_EXECUTE, 
                     target=sub_task, 
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
-                    prompts=prompts, 
                     completion_config=completion_config,
-                    observe_args=observe_args, 
                 )
                 # Update the environment history
                 self.update(message)
+                # Log the message
+                logger.info(f"Agent Response: \n{message.content}")
                 
             elif sub_task.is_cancelled():
                 # Log the error
@@ -668,23 +612,15 @@ class Query(BaseEnvironment):
                 try:
                     sub_task = next(sub_tasks_iter)
                 except StopIteration:
+                    # Set self to finished
+                    self.to_finished()
                     # Log the content
                     logger.info(f"所有子任务已处理完成。")
                     # Break the loop
                     break
-                
-        # Check if the target is finished
-        if target.is_finished():
-            # Set self to finished
-            self.to_finished()
-        elif target.is_error():
-            # Set self to error
-            self.to_error()
-        elif target.is_cancelled():
-            # Set self to cancelled
-            self.to_cancelled()
-        else:
-            raise RuntimeError(f"Task {target.question} is in error state. Invalid status.")
+            
+            else:
+                raise RuntimeError(f"Task {target.question} is in error state. Invalid status.")
         
         return target
 

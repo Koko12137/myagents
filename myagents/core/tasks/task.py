@@ -116,6 +116,10 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         for sub_task in self.sub_tasks.values():
             if not sub_task.is_finished():
                 sub_task.to_cancelled()
+        
+        # Check if sub task depth is 0
+        if self.sub_task_depth == 0:
+            self.to_running()
     
     def is_created(self) -> bool:
         """Check if the task status is created.
@@ -141,17 +145,9 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         return self.status == TaskStatus.RUNNING
     
     def to_finished(self) -> None:
-        """Set the task status to finished. This will also set the parent task to finished if the parent task is running and 
-        all the sub-tasks are finished.
+        """Set the task status to finished. 
         """
         self.status = TaskStatus.FINISHED
-        
-        # Convert the parent task to finished
-        if self.parent:
-            # Check if the parent task is running and all the sub-tasks are finished
-            if self.parent.is_running() and all(sub_task.is_finished() for sub_task in self.parent.sub_tasks.values()):
-                # Convert the parent task to finished
-                self.parent.to_finished()
     
     def is_finished(self) -> bool:
         """Check if the task status is finished.
@@ -171,12 +167,12 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
     def to_cancelled(self) -> None:
         """Set the task status to cancelled.
         """
-        self.status = TaskStatus.CANCELLED
+        self.status = TaskStatus.CANCELED
         
     def is_cancelled(self) -> bool:
         """Check if the task status is cancelled.
         """
-        return self.status == TaskStatus.CANCELLED
+        return self.status == TaskStatus.CANCELED
 
 
 class AnswerTaskView(TaskView):
@@ -220,7 +216,7 @@ class ToDoTaskView(TaskView):
             The template of the task view.
     """
     task: TreeTaskNode
-    template: str = """{status_value}{question}\n\t - 描述: {description}\n\t - 任务状态: {status}"""
+    template: str = """{status_value} {question}\n\t - 描述: {description}"""
     
     def __init__(self, task: TreeTaskNode) -> None:
         self.task = task
@@ -250,9 +246,9 @@ class ToDoTaskView(TaskView):
         # Check if the sub-tasks is not empty
         if len(sub_tasks) > 0:
             sub_tasks_str = '\n'.join(sub_tasks)
-            sub_tasks = f"\t - Sub-Tasks: \n{sub_tasks_str}"
+            sub_tasks = f"\t - 子任务: \n{sub_tasks_str}"
         else:
-            sub_tasks = f"\t - Sub-Tasks: \n\t\t No sub-tasks now"
+            sub_tasks = f"\t - 子任务: \n\t\t 没有子任务"
         view = f"{view}\n{sub_tasks}"
             
         return view
