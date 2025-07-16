@@ -8,6 +8,7 @@ from fastmcp import Client as MCPClient
 from mcp import Tool as MCPTool
 
 from myagents.core.interface.core import Stateful, ToolsCaller, Context
+from myagents.core.interface.scheduler import TaskScheduler
 from myagents.core.interface.llm import LLM
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
@@ -119,6 +120,10 @@ class Agent(Protocol):
             The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
         lock (Lock):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
+        prompts (dict[Enum, str]):
+            The prompts for specific workflow of the agent. The key is the workflow type and the value is the prompt content. 
+        observe_format (dict[Enum, str]):
+            The format of the observation. The key is the workflow type and the value is the format content. 
     """
     # Basic information
     uid: str
@@ -136,6 +141,9 @@ class Agent(Protocol):
     step_counters: dict[str, StepCounter]
     # Synchronization lock
     lock: Lock
+    # Prompt for specific workflow
+    prompts: dict[Enum, str]
+    observe_format: dict[Enum, str]
     
     # @abstractmethod
     # async def memory(self, *args, **kwargs) -> Any:
@@ -151,7 +159,6 @@ class Agent(Protocol):
     async def observe(
         self, 
         target: Union[Stateful, Any], 
-        format: str, 
         observe_func: Optional[Callable[..., Awaitable[Union[str, list[dict]]]]] = None, 
         **kwargs, 
     ) -> Union[str, list[dict]]:
@@ -161,8 +168,6 @@ class Agent(Protocol):
         Args:
             target (Union[Stateful, Any]):
                 The stateful entity or any other entity to observe. 
-            format (str):
-                The format of the observation. 
             observe_func (Optional[Callable[..., Awaitable[Union[str, list[dict]]]]], optional, defaults to None):
                 The function to observe the target. If not provided, the default observe function will 
                 be used. The function should have the following signature:
@@ -236,9 +241,8 @@ class Agent(Protocol):
         target: Stateful, 
         max_error_retry: int, 
         max_idle_thinking: int, 
-        prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
+        running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs
     ) -> AssistantMessage:
@@ -251,14 +255,12 @@ class Agent(Protocol):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent. 
-            prompts (dict[str, str], optional, defaults to {}):
-                The prompts for running specific workflow of the agent. 
             completion_config (dict[str, Any], optional, defaults to {}):
                 The completion config of the agent. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
-            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
-                The additional keyword arguments for observing the target. 
+            running_checker (Callable[[Stateful], bool], optional):
+                The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -306,23 +308,27 @@ class Workflow(ToolsCaller):
     The workflow is not responsible for the state of the task or environment. 
     
     Attributes:
-        profile (str):
-            The profile of the workflow.
-        agent (Agent):
-            The agent that is used to work with the workflow.
-        prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
         context (Context):
             The context of the workflow.
         tools (dict[str, FastMcpTool]):
             The tools provided by the workflow. These tools can be used to control the workflow. 
+        
+        profile (str):
+            The profile of the workflow.
+        agent (Agent):
+            The agent that is used to work with the workflow.
+        stage (Enum):
+            The stage of the workflow. The stage is used to determine the observation format of the agent. 
+        sub_workflows (dict[str, 'Workflow']):
+            The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the sub-workflow instance. 
     """
+    # Basic information
     profile: str
     agent: Agent
-    prompts: dict[str, str]
-    # Context and tools
-    context: Context
-    tools: dict[str, FastMcpTool]
+    # Workflow stage
+    stage: Enum
+    # Sub-worflows
+    sub_workflows: dict[str, 'Workflow']
     
     @abstractmethod
     def register_agent(self, agent: Agent) -> None:
@@ -344,9 +350,7 @@ class Workflow(ToolsCaller):
         target: Stateful, 
         max_error_retry: int, 
         max_idle_thinking: int, 
-        prompts: dict[str, str], 
         completion_config: dict[str, Any], 
-        observe_args: dict[str, dict[str, Any]], 
         running_checker: Callable[[Stateful], bool], 
         *args, 
         **kwargs, 
@@ -360,14 +364,10 @@ class Workflow(ToolsCaller):
                 The maximum number of times to retry the workflow when the target is errored.
             max_idle_thinking (int):
                 The maximum number of times to idle thinking the workflow.
-            prompts (dict[str, str]):
-                The prompts for running specific workflow of the workflow. 
             completion_config (dict[str, Any]):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
-            observe_args (dict[str, dict[str, Any]]):
-                The additional keyword arguments for observing the target. 
             running_checker (Callable[[Stateful], bool]):
                 The checker to check if the workflow should be running. 
             *args:
@@ -386,9 +386,7 @@ class Workflow(ToolsCaller):
             target: Stateful, 
             max_error_retry: int, 
             max_idle_thinking: int, 
-            prompts: dict[str, str], 
             completion_config: dict[str, Any], 
-            observe_args: dict[str, dict[str, Any]], 
             running_checker: Callable[[Stateful], bool], 
             *args, 
             **kwargs,
@@ -441,6 +439,16 @@ class Environment(Stateful, ToolsCaller):
     modify the environment. The tools can be used to modify the environment. 
     
     Attributes:
+        status (EnvironmentStatus):
+            The status of the environment.
+        history (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
+            The history messages of the environment. 
+            
+        tools (dict[str, FastMcpTool]):
+            The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
+        context (Context):
+            The context of the environment.
+        
         uid (str):
             The unique identifier of the environment. 
         name (str):
@@ -459,14 +467,6 @@ class Environment(Stateful, ToolsCaller):
             The map of the agent type to the agent name. The key is the agent type and the value is the agent name list. 
         agent_type_semaphore (dict[Enum, Semaphore]):
             The semaphore of the agent type. The key is the agent type and the value is the semaphore. 
-        tools (dict[str, FastMcpTool]):
-            The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
-        context (Context):
-            The context of the environment.
-        status (EnvironmentStatus):
-            The status of the environment.
-        history (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
-            The history messages of the environment. 
     """
     uid: str
     name: str
@@ -478,12 +478,6 @@ class Environment(Stateful, ToolsCaller):
     agents: dict[str, Agent]
     agent_type_map: dict[Enum, list[str]]
     agent_type_semaphore: dict[Enum, Semaphore]
-    # Tools Mixin
-    tools: dict[str, FastMcpTool]
-    context: Context
-    # Stateful Mixin
-    status: EnvironmentStatus
-    history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
     
     @abstractmethod
     def register_agent(self, agent: Agent) -> None:
@@ -512,9 +506,8 @@ class Environment(Stateful, ToolsCaller):
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
+        running_checker: Callable[[Stateful], bool] = None, 
         designated_agent: str = None, 
         *args, 
         **kwargs, 
@@ -534,14 +527,12 @@ class Environment(Stateful, ToolsCaller):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of times to idle thinking the agent. 
-            prompts (dict[str, str], optional, defaults to {}):
-                The prompts for running specific workflow of the agent. 
             completion_config (dict[str, Any], optional, defaults to {}):
                 The completion config of the agent. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
-            observe_args (dict[str, dict[str, Any]], optional):
-                The additional keyword arguments for observing the target. 
+            running_checker (Callable[[Stateful], bool], optional):
+                The checker to check if the workflow should be running.
             designated_agent (str, optional, defaults to None):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:

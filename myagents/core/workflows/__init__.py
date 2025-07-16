@@ -1,9 +1,9 @@
 from enum import Enum
 
 from .base import BaseWorkflow
-from .react import ReActFlow
-from .plan_and_exec import PlanAndExecFlow
-from .orchestrate import OrchestrateFlow
+from .react import ReActFlow, ReActStage
+from .plan_and_exec import PlanAndExecFlow, PlanAndExecStage
+from .orchestrate import OrchestrateFlow, OrchestrateStage
 
 
 class WorkflowType(Enum):
@@ -22,4 +22,13 @@ class WorkflowType(Enum):
     ORCHESTRATE = "OrchestrateFlow"
 
 
-__all__ = ["ReActFlow", "PlanAndExecFlow", "OrchestrateFlow", "BaseWorkflow", "WorkflowType"]
+__all__ = [
+    "ReActFlow", 
+    "ReActStage", 
+    "PlanAndExecFlow", 
+    "PlanAndExecStage", 
+    "OrchestrateFlow", 
+    "OrchestrateStage", 
+    "BaseWorkflow", 
+    "WorkflowType",
+]

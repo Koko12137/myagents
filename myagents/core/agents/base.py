@@ -1,7 +1,7 @@
-import asyncio
 import traceback
 from uuid import uuid4
 from asyncio import Lock
+from enum import Enum
 from typing import Union, Optional, Callable, Awaitable, Any
 
 from loguru import logger
@@ -48,6 +48,10 @@ class BaseAgent(Agent):
         lock (Lock):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
             If the agent is running concurrently, the global context may not be working properly.
+        prompts (dict[Enum, str]):
+            The prompts for running specific workflow of the workflow. 
+        observe_format (dict[Enum, str]):
+            The format of the observation. The key is the workflow type and the value is the format content. 
     """
     # Basic information
     uid: str
@@ -66,6 +70,9 @@ class BaseAgent(Agent):
     step_counters: dict[str, StepCounter]
     # Concurrency limit
     lock: Lock
+    # Prompts and observe format
+    prompts: dict[Enum, str]
+    observe_format: dict[Enum, str]
     
     def __init__(
         self, 
@@ -75,6 +82,8 @@ class BaseAgent(Agent):
         llm: LLM, 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
+        prompts: dict[Enum, str] = {}, 
+        observe_format: dict[Enum, str] = {}, 
         *args, 
         **kwargs, 
     ) -> None:
@@ -93,6 +102,10 @@ class BaseAgent(Agent):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent. If not provided, No MCP tools can be used.  
+            prompts (dict[Enum, str], optional):
+                The prompts for running specific workflow of the workflow. 
+            observe_format (dict[Enum, str], optional):
+                The format of the observation. The key is the workflow type and the value is the format content. 
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
@@ -118,11 +131,13 @@ class BaseAgent(Agent):
         self.step_counters = {counter.uid: counter for counter in step_counters}
         # Initialize the synchronization lock
         self.lock = Lock()
+        # Initialize the prompts and observe format
+        self.prompts = prompts
+        self.observe_format = observe_format
     
     async def observe(
         self, 
         target: Union[Stateful, Any], 
-        format: str, 
         observe_func: Optional[Callable[..., Awaitable[Union[str, list[dict]]]]] = None, 
         **kwargs, 
     ) -> Union[str, list[dict]]:
@@ -138,7 +153,6 @@ class BaseAgent(Agent):
                 The function to observe the target. If not provided, the default observe function will 
                 be used. The function should have the following signature:
                 - target (Union[Stateful, Any]): The stateful entity or any other entity to observe.
-                - format (str): The format of the observation.
                 - **kwargs: The additional keyword arguments for observing the target.
                 The function should return the observation in the following format:
                 - str: The string observation. 
@@ -158,10 +172,14 @@ class BaseAgent(Agent):
                 observation = await observe_func(target, format, **kwargs)
                 return observation
 
+        # Get the observe format
+        format = self.observe_format[self.workflow.stage]
         # Call the observe function of the target
         observation = await target.observe(format, **kwargs)
-        return observation
-        
+        # Get the prompt
+        prompt = self.prompts[self.workflow.stage]
+        return f"{prompt}\n\n## 观察\n以下是观察到的信息:\n{observation}"
+    
     async def think(
         self, 
         observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
@@ -282,9 +300,8 @@ class BaseAgent(Agent):
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
+        running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs
     ) -> AssistantMessage:
@@ -297,14 +314,12 @@ class BaseAgent(Agent):
                 The maximum number of times to retry the agent when the target is errored. 
             max_idle_thinking (int, optional, defaults to 1): 
                 The maximum number of times to idle thinking the agent. 
-            prompts (dict[str, str], optional, defaults to {}):
-                The prompts of the agent. The key is the prompt name and the value is the prompt content. 
             completion_config (dict[str, Any], optional, defaults to {}):
                 The completion config of the agent. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
-            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
-                The additional keyword arguments for observing the target. 
+            running_checker (Callable[[Stateful], bool], optional):
+                The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -341,9 +356,8 @@ class BaseAgent(Agent):
             target=target, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
-            prompts=prompts, 
             completion_config=completion_config, 
-            observe_args=observe_args, 
+            running_checker=running_checker, 
             *args, 
             **kwargs,
         )
@@ -351,8 +365,8 @@ class BaseAgent(Agent):
         # Release the lock of the agent
         self.lock.release()
         
-        # Observe the target
-        observe = await self.observe(target, **observe_args["agent"])
+        # Observe the target    # BUG: 这里 Agent 处理完后没有专属的 observe format，需要单独实现
+        observe = await self.observe(target)    # BUG: 这里没有判断任务执行后的状态，如果任务执行后是error，应该返回error message
         # Create a new assistant message
         message = AssistantMessage(content=f"已完成任务，【观察】：{observe}")
         # Log the message

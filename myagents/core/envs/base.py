@@ -3,7 +3,7 @@ from abc import abstractmethod
 from asyncio import Semaphore
 from enum import Enum
 from uuid import uuid4
-from typing import Union, Any
+from typing import Union, Any, Callable
 
 from fastmcp.tools import Tool as FastMCPTool
 
@@ -16,6 +16,12 @@ from myagents.core.tools_mixin import ToolsMixin
 
 class EnvironmentStatus(Enum):
     """EnvironmentStatus is the status of the environment.
+    
+    - CREATED: The environment is created.
+    - RUNNING: The environment is running.
+    - FINISHED: The environment is finished.
+    - ERROR: The environment is error.
+    - CANCELLED: The environment is cancelled.
     """
     CREATED = "created"
     RUNNING = "running"
@@ -165,9 +171,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
+        running_checker: Callable[[Stateful], bool] = None, 
         designated_agent: str = None, 
         *args, 
         **kwargs
@@ -187,14 +192,12 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional):
                 The maximum number of times to idle thinking the agent.
-            prompts (dict[str, str], optional):
-                The prompts for running specific workflow of the agent. 
             completion_config (dict[str, Any], optional):
                 The completion config of the agent. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
-            observe_args (dict[str, dict[str, Any]], optional):
-                The additional keyword arguments for observing the target. 
+            running_checker (Callable[[Stateful], bool], optional):
+                The checker to check if the workflow should be running.
             designated_agent (str, optional):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:
@@ -240,9 +243,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             target, 
             max_error_retry, 
             max_idle_thinking, 
-            prompts, 
             completion_config, 
-            observe_args, 
+            running_checker=running_checker, 
             *args, 
             **kwargs,
         )

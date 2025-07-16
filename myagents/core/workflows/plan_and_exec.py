@@ -1,4 +1,5 @@
 import json
+from enum import Enum
 from typing import Callable, Any
 
 from json_repair import repair_json
@@ -12,15 +13,35 @@ from myagents.core.workflows.orchestrate import OrchestrateFlow
 from myagents.core.tasks import DocumentTaskView, ToDoTaskView, BaseTreeTaskNode
 from myagents.core.utils.extractor import extract_by_label
 from myagents.core.utils.strings import normalize_string
-from myagents.prompts.workflows.orchestrate import REFLECT_PROMPT as ORCHESTRATE_REFLECT_PROMPT
-from myagents.prompts.workflows.plan_and_exec import (
-    PROFILE, 
-    PLAN_SYSTEM_PROMPT, 
-    PLAN_THINK_PROMPT, 
-    EXEC_SYSTEM_PROMPT, 
-    EXEC_THINK_PROMPT, 
-    ERROR_PROMPT
-)
+from myagents.prompts.workflows.plan_and_exec import PROFILE
+
+
+class PlanAndExecStage(Enum):
+    """The stage of the plan and exec workflow.
+    
+    Attributes:
+        PLAN_INIT (int):
+            The init stage of the plan stage.
+        PLAN_REASON_ACT (int):
+            The reason and act stage of the plan stage.
+        PLAN_REFLECT (int):
+            The reflect stage of the plan stage.
+        EXEC_INIT (int):
+            The init stage of the exec stage.
+        EXEC_REASON_ACT (int):
+            The reason and act stage of the exec stage.
+        EXEC_REFLECT (int):
+            The reflect stage of the exec stage.
+        ERROR (int):
+            The error stage of the workflow.
+    """
+    PLAN_INIT = 0
+    PLAN_REASON_ACT = 1
+    PLAN_REFLECT = 2
+    EXEC_INIT = 3
+    EXEC_REASON_ACT = 4
+    EXEC_REFLECT = 5
+    ERROR = 6
 
 
 class PlanAndExecFlow(OrchestrateFlow):
@@ -33,79 +54,41 @@ class PlanAndExecFlow(OrchestrateFlow):
             The profile of the workflow.
         agent (Agent): 
             The agent that is used to orchestrate the task.
-        prompts (dict[str, str]):
-            The prompts for running specific workflow of the workflow. 
-            The following prompts are supported:
-            - "plan_system": The system prompt of the workflow.
-            - "plan_think": The think prompt of the workflow.
-            - "exec_system": The system prompt of the workflow.
-            - "exec_think": The think prompt of the workflow.
-            - "exec_reflect": The reflect prompt of the workflow.
         context (Context):
             The global context container of the workflow.
         tools (dict[str, FastMcpTool]):
             The tools can be used for the agent. 
+        stage (Enum):
+            The stage of the workflow.
     """
     # Basic information
     profile: str
     agent: Agent
-    prompts: dict[str, str]
     # Context and tools
     context: Context
     tools: dict[str, FastMcpTool]
+    # Workflow stage
+    stage: Enum
     
     def __init__(
         self, 
-        profile: str = "", 
-        plan_system_prompt: str = "", 
-        plan_think_prompt: str = "", 
-        plan_reflect_prompt: str = "", 
-        exec_system_prompt: str = "", 
-        exec_think_prompt: str = "", 
-        error_prompt: str = "", 
+        profile: str = PROFILE, 
         *args, 
         **kwargs, 
     ) -> None:
         """Initialize the PlanAndExecFlow workflow.
         
         Args:
-            profile (str, optional, defaults to ""):
+            profile (str, optional, defaults to PROFILE):
                 The profile of the workflow.
-            plan_system_prompt (str, optional, defaults to ""):
-                The system prompt of the workflow.
-            plan_think_prompt (str, optional, defaults to ""):
-                The think prompt of the workflow.
-            plan_reflect_prompt (str, optional, defaults to ""):
-                The reflect prompt of the workflow.
-            plan_reflect_prompt (str, optional, defaults to ""):
-                The reflect prompt of the workflow.
-            exec_system_prompt (str, optional, defaults to ""):
-                The system prompt of the workflow.
-            exec_think_prompt (str, optional, defaults to ""):
-                The think prompt of the workflow.
-            exec_reflect_prompt (str, optional, defaults to ""):
-                The reflect prompt of the workflow.
-            error_prompt (str, optional, defaults to ""):
-                The error prompt of the workflow.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
         super().__init__(*args, **kwargs)
-        
         # Initialize the basic information
-        self.profile = profile if profile != "" else PROFILE
-        # Update the prompts
-        self.prompts.update({
-            "plan_system": plan_system_prompt if plan_system_prompt != "" else PLAN_SYSTEM_PROMPT,
-            "plan_think": plan_think_prompt if plan_think_prompt != "" else PLAN_THINK_PROMPT,
-            "plan_reflect": plan_reflect_prompt if plan_reflect_prompt != "" else ORCHESTRATE_REFLECT_PROMPT,
-            "exec_system": exec_system_prompt if exec_system_prompt != "" else EXEC_SYSTEM_PROMPT,
-            "exec_think": exec_think_prompt if exec_think_prompt != "" else EXEC_THINK_PROMPT,
-            "error_prompt": error_prompt if error_prompt != "" else ERROR_PROMPT,
-        })
-        
+        self.profile = profile
         # Post initialize to initialize the tools
         self.post_init()
     
@@ -136,22 +119,23 @@ class PlanAndExecFlow(OrchestrateFlow):
             orchestration: dict[str, dict], 
             sub_task_depth: int, 
         ) -> None:
-            if sub_task_depth == 0:
+            if sub_task_depth <= 0:
                 # Set the task status to running
                 parent.to_running()
                 return 
             
             # Traverse the orchestration
-            for question, value in orchestration.items():
+            for uid, value in orchestration.items():
                 # Convert the value to string
                 key_outputs = ""
-                for k, output in value['问题描述'].items():
-                    key_outputs += f"{k}: {output}; "
-                    
+                for output in value['关键产出']:
+                    key_outputs += f"{output}; "
+                
                 # Create a new task
                 new_task = BaseTreeTaskNode(
-                    question=normalize_string(question), 
-                    description=key_outputs, 
+                    uid=uid, 
+                    objective=normalize_string(value['目标描述']), 
+                    key_results=key_outputs, 
                     sub_task_depth=sub_task_depth - 1,
                 )
                 # Create the sub-tasks
@@ -163,7 +147,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                 # Link the new task to the parent task
                 new_task.parent = parent
                 # Add the new task to the parent task
-                parent.sub_tasks[question] = new_task
+                parent.sub_tasks[uid] = new_task
         
         try:
             # Repair the json
@@ -193,9 +177,7 @@ class PlanAndExecFlow(OrchestrateFlow):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs,
@@ -205,23 +187,14 @@ class PlanAndExecFlow(OrchestrateFlow):
         Args:
             target (TreeTaskNode):
                 The target to plan and execute.
-            max_error_retry (int, optional, defaults to 3):
+            max_error_retry (int, optiona):
                 The maximum number of error retries.
-            max_idle_thinking (int, optional, defaults to 1):
+            max_idle_thinking (int, optional):
                 The maximum number of idle thinking.
-            prompts (dict[str, str], optional, defaults to {}):
-                The prompts of the workflow. The following prompts are supported:
-                - "plan_system": The system prompt of the workflow.
-                - "plan_think": The think prompt of the workflow.
-                - "exec_system": The system prompt of the workflow.
-                - "exec_think": The think prompt of the workflow.
-                - "exec_reflect": The reflect prompt of the workflow.
-            completion_config (dict[str, Any], optional, defaults to {}):
+            completion_config (dict[str, Any], optional):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
-            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
-                The additional keyword arguments for observing the target. 
             running_checker (Callable[[Stateful], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
@@ -238,7 +211,8 @@ class PlanAndExecFlow(OrchestrateFlow):
             # Set the running checker to the default checker
             running_checker = lambda target: not target.is_finished()
 
-        error_prompt = prompts.pop("error_prompt", self.prompts["error_prompt"])
+        # Get the error prompt from the agent
+        error_prompt = self.agent.prompts[PlanAndExecStage.ERROR]
         
         # Record the current error retry count
         current_error_retry = 0
@@ -252,9 +226,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                     target=target, 
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
-                    prompts=prompts, 
                     completion_config=completion_config, 
-                    observe_args=observe_args, 
                 )
             
             elif target.is_running():
@@ -263,9 +235,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                     target=target, 
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
-                    prompts=prompts, 
                     completion_config=completion_config, 
-                    observe_args=observe_args, 
                 )
                 # Check if the target is created, if True, then process the error
                 if target.is_created():
@@ -291,12 +261,12 @@ class PlanAndExecFlow(OrchestrateFlow):
                 message = UserMessage(content=error_prompt.format(
                     error_retry=current_error_retry, 
                     max_error_retry=max_error_retry, 
-                    error_reason=target.answer,
+                    error_reason=target.results,
                     current_result=current_result,
                 ))
                 target.update(message)
                 # Clean up the error information
-                target.answer = ""
+                target.results = ""
                 
             elif target.is_cancelled():
                 # Increment the error retry count
@@ -309,7 +279,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                     # Log the error
                     logger.error(f"错误次数 {current_error_retry} 超过最大错误次数 {max_error_retry}，任务终止。")
                     # Record the error information to the answer of the parent task
-                    target.parent.answer = target.answer
+                    target.parent.outputs = target.results
                     # Break the loop
                     break
                 
@@ -330,9 +300,7 @@ class PlanAndExecFlow(OrchestrateFlow):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -342,49 +310,35 @@ class PlanAndExecFlow(OrchestrateFlow):
         Args:
             target (TreeTaskNode):
                 The task to plan.
-            max_idle_thinking (int):
-                The maximum number of idle thinking.
-            prompts (dict[str, str]):
-                The prompts of the workflow. The following prompts are supported:
-                - "plan_system": The system prompt of the workflow.
-                - "plan_think": The think prompt of the workflow.
-            completion_config (dict[str, Any]):
+            max_error_retry (int, optional):
+                The maximum number of error retries.
+            max_idle_thinking (int, optional):
+                The maximum number of idle thinking. 
+            completion_config (dict[str, Any], optional):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
-            observe_args (dict[str, dict[str, Any]]):
-                The additional keyword arguments for observing the target. 
 
         Returns:
             TreeTaskNode: 
                 The target after planning.
         """
-        # Prepare the prompts 
-        plan_system = prompts.pop("plan_system", self.prompts["plan_system"])
-        plan_think = prompts.pop("plan_think", self.prompts["plan_think"])
-        plan_reflect = prompts.pop("plan_reflect", self.prompts["plan_reflect"])
-        # Update the prompts
-        prompts = {
-            "react_system": plan_system,
-            "react_think": plan_think.format(detail_level=target.sub_task_depth),
-            "react_reflect": plan_reflect,
-        }
         # Create a new running checker
         running_checker = lambda target: target.is_created()
-        # Prepare the observe args
-        observe_args = {
-            "react_think": observe_args.pop("plan_react_think"),
-            "react_reflect": observe_args.pop("plan_react_reflect"),
+        # Prepare valid stages
+        valid_stages = {
+            "init": PlanAndExecStage.PLAN_INIT, 
+            "reason_act": PlanAndExecStage.PLAN_REASON_ACT, 
+            "reflect": PlanAndExecStage.PLAN_REFLECT, 
         }
         
         # Call the parent class to reason and act
-        await super().reason_act_reflect(
+        target = await super().reason_act_reflect(
             target, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
-            prompts=prompts, 
             completion_config=completion_config, 
-            observe_args=observe_args, 
             running_checker=running_checker, 
+            valid_stages=valid_stages,
         )
         return target
     
@@ -393,9 +347,7 @@ class PlanAndExecFlow(OrchestrateFlow):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -404,20 +356,14 @@ class PlanAndExecFlow(OrchestrateFlow):
         Args:
             target (TreeTaskNode):
                 The task to deep first execute.
-            max_error_retry (int):
+            max_error_retry (int, optional):
                 The maximum number of error retries.
-            max_idle_thinking (int):
+            max_idle_thinking (int, optional):
                 The maximum number of idle thinking. 
-            prompts (dict[str, str]):
-                The prompts of the workflow. The following prompts are supported:
-                - "exec_system": The system prompt of the workflow.
-                - "exec_think": The think prompt of the workflow.
-            completion_config (dict[str, Any]):
+            completion_config (dict[str, Any], optional):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
-            observe_args (dict[str, dict[str, Any]]):
-                The additional keyword arguments for observing the target. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -441,7 +387,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                 # Log the error
                 logger.error(f"子任务执行中出现错误: \n{ToDoTaskView(sub_task).format()}")
                 # Record the error information to the answer of the parent task
-                target.answer = sub_task.answer
+                target.results = sub_task.outputs
                 # Cancel all the unfinished sub-tasks
                 for sub_task in target.sub_tasks.values():
                     if not sub_task.is_finished():
@@ -464,9 +410,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                     sub_task, 
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
-                    prompts=prompts, 
                     completion_config=completion_config, 
-                    observe_args=observe_args, 
                 )
 
             # Check if the sub-task is failed, if True, then retry the sub-task
@@ -476,14 +420,14 @@ class PlanAndExecFlow(OrchestrateFlow):
                 # Set the sub-task status to error
                 sub_task.to_cancelled()
                 # Record the error information to the answer of the parent task
-                target.answer += sub_task.answer
+                target.results += sub_task.outputs
             
             # Check if the sub-task is cancelled, if True, set the parent task status to created and stop the traverse
             elif sub_task.is_cancelled():
                 # Log the cancelled sub-task
                 logger.error(f"取消所有未执行或执行失败的子任务: \n{ToDoTaskView(target).format()}")
                 # Record the error information to the answer of the parent task
-                target.answer = sub_task.answer
+                target.results = sub_task.outputs
                 
                 # Cancel all the sub-tasks
                 for sub_task in target.sub_tasks.values():
@@ -514,23 +458,12 @@ class PlanAndExecFlow(OrchestrateFlow):
         # Post traverse the task
         # All the sub-tasks are finished, then reason, act and reflect on the task
         if all(sub_task.is_finished() for sub_task in target.sub_tasks.values()):
-            # Prepare the prompts
-            exec_system = prompts.pop("exec_system", self.prompts["exec_system"])
-            exec_think = prompts.pop("exec_think", self.prompts["exec_think"])
-            # Update the prompts
-            prompts = {
-                "react_system": exec_system,
-                "react_think": exec_think,
-            }
-            
             # Call the parent class to reason, act and reflect
             target = await self.execute_one(
                 target=target, 
                 max_error_retry=max_error_retry, 
                 max_idle_thinking=max_idle_thinking, 
-                prompts=prompts, 
                 completion_config=completion_config, 
-                observe_args=observe_args, 
                 *args, 
                 **kwargs,
             )
@@ -541,10 +474,8 @@ class PlanAndExecFlow(OrchestrateFlow):
         self, 
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
+        max_idle_thinking: int = 2, 
         completion_config: dict[str, Any] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -553,24 +484,17 @@ class PlanAndExecFlow(OrchestrateFlow):
         Args:
             target (TreeTaskNode):
                 The task to reason, act and reflect.
-            max_error_retry (int):
+            max_error_retry (int, optional):
                 The maximum number of error retries.
-            max_idle_thinking (int):
+            max_idle_thinking (int, optional):
                 The maximum number of idle thinking. 
-            prompts (dict[str, str]):
-                The prompts of the workflow. The following prompts are supported:
-                - "exec_system": The system prompt of the workflow.
-                - "exec_think": The think prompt of the workflow.
-                - "exec_reflect": The reflect prompt of the workflow.
-            completion_config (dict[str, Any]):
+            completion_config (dict[str, Any], optional):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
-            observe_args (dict[str, dict[str, Any]], optional, defaults to {}):
-                The additional keyword arguments for observing the target. 
-            *args:
+            *args: 
                 The additional arguments for running the agent.
-            **kwargs:
+            **kwargs: 
                 The additional keyword arguments for running the agent.
                 
         Returns:
@@ -583,15 +507,8 @@ class PlanAndExecFlow(OrchestrateFlow):
             logger.warning(f"任务 {target.question} 不是运行状态。")
             return target
         
-        # Prepare the prompts
-        react_system = prompts.pop("react_system", self.prompts["react_system"])
-        react_think = prompts.pop("react_think", self.prompts["react_think"])
-        react_reflect = prompts.pop("react_reflect", self.prompts["react_reflect"])
-        # Prepare the observe args
-        observe_args = {
-            "react_think": observe_args.pop("exec_react_think"),
-            "react_reflect": observe_args.pop("exec_react_reflect"),
-        }
+        # Get the prompts from the agent
+        exec_system = self.agent.prompts[PlanAndExecStage.EXEC_INIT]
         
         # Get the blueprint from the context
         blueprint = self.agent.env.context.get("blueprint")
@@ -601,7 +518,7 @@ class PlanAndExecFlow(OrchestrateFlow):
         task_result = DocumentTaskView(task).format()
         
         # Append the system prompt to the history
-        message = SystemMessage(content=react_system.format(
+        message = SystemMessage(content=exec_system.format(
             blueprint=blueprint, 
             task_result=task_result,
         ))
@@ -613,44 +530,74 @@ class PlanAndExecFlow(OrchestrateFlow):
         
         while target.is_running():
             # === Reason and Act Stage ===
-            target, current_error, current_thinking = await ReActFlow.reason_act(
+            target, error_flag, tool_call_flag = await ReActFlow.reason_act(
                 self, 
                 target, 
-                react_think=react_think,
-                max_error_retry=max_error_retry, 
-                current_error=current_error, 
-                max_idle_thinking=max_idle_thinking, 
-                current_thinking=current_thinking, 
+                to_stage=PlanAndExecStage.EXEC_REASON_ACT, 
                 completion_config=completion_config, 
-                observe_args=observe_args, 
             )
+            
+            # Check if the error flag is set
+            if error_flag:
+                # Increment the error counter
+                current_error += 1
+                # Notify the error limit to Agent
+                message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                target.update(message)
+                # Log the error message
+                logger.info(f"Error Message: \n{message}")
+                # Check if the error counter is greater than the max error retry
+                if current_error >= max_error_retry:
+                    # Set the task status to error
+                    target.to_error()
+                    # Record the error as answer
+                    target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
+                    # Force the react loop to finish
+                    break
+            
             # Get the last message
             message = target.get_history()[-1]
             # Extract the final output from the message
             final_output = extract_by_label(message.content, "final_output", "final answer", "output", "answer")
             if final_output != "":
                 # Set the answer of the task
-                target.answer = final_output
+                target.results = final_output
             
             # Check if the task is cancelled
-            if target.status == TaskStatus.CANCELLED:
+            if target.status == TaskStatus.CANCELED:
                 # The task is cancelled, end the workflow
                 break
             
             # === Reflect Stage ===
             target, finish_flag = await self.reflect(
                 target, 
-                react_reflect=react_reflect,
-                observe_args=observe_args, 
+                to_stage=PlanAndExecStage.EXEC_REFLECT, 
             )
+            # Check if the target is finished
             if finish_flag:
                 # Set the task status to finished
                 target.to_finished()
+            
+            # Check if the tool call flag is not set
+            elif not tool_call_flag:
+                # Increment the idle thinking counter
+                current_thinking += 1
+                # Notify the idle thinking limit to Agent
+                message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                target.update(message)
+                # Log the idle thinking message
+                logger.info(f"Idle Thinking Message: \n{message}")
+                # Check if the idle thinking counter is greater than the max idle thinking
+                if current_thinking >= max_idle_thinking:
+                    # Set the task status to error
+                    target.to_error()
+                    # Record the error as answer
+                    target.results += f"\n连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。"
         
         # Set the answer of the task
-        if not target.answer: 
-            target.answer = "任务执行结束，但未提供答案，执行可能存在未知错误。"
+        if not target.results: 
+            target.results = "任务执行结束，但未提供答案，执行可能存在未知错误。"
             
         # Log the answer
-        logger.info(f"任务执行结束: \n{ToDoTaskView(target).format()}")
+        logger.info(f"任务执行结束: \n{DocumentTaskView(target).format()}")
         return target

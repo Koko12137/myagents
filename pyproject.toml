@@ -20,6 +20,7 @@ dependencies = [
     "loguru>=0.7.3",
     "mcp>=1.8.0",
     "megatron-core>=0.12.1",
+    "mem0ai>=0.1.114",
     "omegaconf>=2.3.0",
     "openai>=1.78.0",
     "peft>=0.15.2",

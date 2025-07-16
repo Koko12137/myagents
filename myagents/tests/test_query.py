@@ -37,9 +37,10 @@ async def test_async_query():
     answer = await query.run(
         question="请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A,B,C,D中的一个", 
         description=data[0]["question"],
-        sub_task_depth=2,
+        sub_task_depth=1,
         output_type=OutputType.SELECTION,
     )
     print("-" * 100)
-    # Print the answer
-    print(answer)
+    # Check the answer and the correct answer
+    print("answer: ", answer)
+    print("correct answer: ", data[0]["answer"])

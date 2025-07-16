@@ -39,12 +39,13 @@ def tool_schema(
             "function": {
                 "name": tool.name,
                 "description": tool.description, 
+                "strict": True, 
             }
         }
 
         if isinstance(tool, FastMcpTool):
             parameters = tool.parameters
-            parameters = parameters['properties']
+            # parameters = parameters['properties']
             description['function']['annotations'] = tool.annotations
             description['function'][DESCRIPTION_TYPE_MAP[provider]] = parameters
         elif isinstance(tool, MCPTool):

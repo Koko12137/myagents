@@ -1,5 +1,5 @@
-import asyncio
 from abc import abstractmethod
+from enum import Enum
 from typing import Callable, Any
 
 from fastmcp.tools import Tool as FastMcpTool
@@ -14,23 +14,27 @@ class BaseWorkflow(Workflow, ToolsMixin):
     """BaseWorkflow is the base class for all the workflows.
     
     Attributes:
-        profile (str):
-            The profile of the workflow.
-        agent (Agent):
-            The agent that is used to work with the workflow.
-        prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
         context (BaseContext):
             The context of the tool call.
         tools (dict[str, FastMcpTool]):
             The tools of the workflow.
+        
+        profile (str):
+            The profile of the workflow.
+        agent (Agent):
+            The agent that is used to work with the workflow.
+        stage (Enum):
+            The stage of the workflow. The stage is used to determine the observation format of the agent. 
+        
     """
-    profile: str
-    agent: Agent
-    prompts: dict[str, str]
     # Tools Mixin
     context: BaseContext
     tools: dict[str, FastMcpTool]
+    # Basic information
+    profile: str
+    agent: Agent
+    # Workflow stage
+    stage: Enum
     
     def __init__(self, *args, **kwargs) -> None:
         """Initialize the BaseWorkflow. This will run the post_init method automatically. 
@@ -47,7 +51,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
         # Initialize the workflow components
         self.profile = None
         self.agent = None
-        self.prompts = {}
+        self.stage = None
+        self.sub_workflows = {}
 
         # Post initialize
         self.post_init()
@@ -104,9 +109,7 @@ class BaseWorkflow(Workflow, ToolsMixin):
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        prompts: dict[str, str] = {}, 
         completion_config: dict[str, Any] = {}, 
-        observe_args: dict[str, dict[str, Any]] = {}, 
         running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs, 
@@ -116,19 +119,15 @@ class BaseWorkflow(Workflow, ToolsMixin):
         Args:
             target (Stateful): 
                 The stateful entity to run the workflow.
-            max_error_retry (int, defaults to 3):
+            max_error_retry (int, optional):
                 The maximum number of times to retry the workflow when the target is errored.
-            max_idle_thinking (int, defaults to 1):
+            max_idle_thinking (int, optional):
                 The maximum number of times to idle thinking the workflow.
-            prompts (dict[str, str], defaults to {}):
-                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
             completion_config (dict[str, Any], defaults to {}):
                 The completion config of the workflow. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
-            observe_args (dict[str, dict[str, Any]], defaults to {}):
-                The additional keyword arguments for observing the target. 
-            running_checker (Callable[[Stateful], bool], defaults to None):
+            running_checker (Callable[[Stateful], bool], optional):
                 The checker to check if the workflow should be running. 
             *args:
                 The additional arguments for running the workflow.
@@ -146,7 +145,6 @@ class BaseWorkflow(Workflow, ToolsMixin):
             target: Stateful, 
             max_error_retry: int = 3, 
             max_idle_thinking: int = 1, 
-            prompts: dict[str, str] = {}, 
             completion_config: dict[str, Any] = {}, 
             running_checker: Callable[[Stateful], bool] = None, 
             *args, 
