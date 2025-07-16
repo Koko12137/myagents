@@ -7,6 +7,7 @@ from fastmcp.tools import Tool as FastMcpTool
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.types import AgentType
 from myagents.core.interface import LLM, Workflow, Environment, StepCounter, Stateful
+from myagents.core.tasks.task import DocumentTaskView
 from myagents.core.workflows import PlanAndExecFlow, PlanAndExecStage
 from myagents.prompts.workflows.plan_and_exec import (
     PROFILE, 
@@ -17,6 +18,8 @@ from myagents.prompts.workflows.plan_and_exec import (
     EXEC_THINK_PROMPT, 
     ERROR_PROMPT, 
     PLAN_LAYER_LIMIT, 
+    BLUEPRINT_FORMAT,
+    TASK_RESULT_FORMAT,
 )
 from myagents.prompts.workflows.react import REFLECT_PROMPT
 
@@ -93,14 +96,14 @@ class PlanAndExecAgent(BaseAgent):
         llm: LLM, 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
-        plan_system_prompt: str = "", 
-        plan_think_prompt: str = "", 
-        plan_reflect_prompt: str = "", 
-        exec_system_prompt: str = "", 
-        exec_think_prompt: str = "", 
-        exec_reflect_prompt: str = "", 
-        plan_layer_limit: str = "", 
-        error_prompt: str = "", 
+        plan_system_prompt: str = PLAN_SYSTEM_PROMPT, 
+        plan_think_prompt: str = PLAN_THINK_PROMPT, 
+        plan_reflect_prompt: str = PLAN_REFLECT_PROMPT, 
+        exec_system_prompt: str = EXEC_SYSTEM_PROMPT, 
+        exec_think_prompt: str = EXEC_THINK_PROMPT, 
+        exec_reflect_prompt: str = REFLECT_PROMPT, 
+        plan_layer_limit: str = PLAN_LAYER_LIMIT, 
+        error_prompt: str = ERROR_PROMPT, 
         plan_think_format: str = "todo", 
         plan_reflect_format: str = "todo", 
         exec_think_format: str = "todo", 
@@ -148,13 +151,18 @@ class PlanAndExecAgent(BaseAgent):
                 The keyword arguments to be passed to the parent class.
         """
         # Prepare the prompts
-        plan_system_prompt = plan_system_prompt if plan_system_prompt != "" else PLAN_SYSTEM_PROMPT
-        plan_think_prompt = plan_think_prompt if plan_think_prompt != "" else PLAN_THINK_PROMPT
-        plan_reflect_prompt = plan_reflect_prompt if plan_reflect_prompt != "" else PLAN_REFLECT_PROMPT
-        exec_system_prompt = exec_system_prompt if exec_system_prompt != "" else EXEC_SYSTEM_PROMPT
-        exec_think_prompt = exec_think_prompt if exec_think_prompt != "" else EXEC_THINK_PROMPT
-        exec_reflect_prompt = exec_reflect_prompt if exec_reflect_prompt != "" else REFLECT_PROMPT
-        error_prompt = error_prompt if error_prompt != "" else ERROR_PROMPT
+        self.plan_system_prompt = plan_system_prompt
+        self.plan_think_prompt = plan_think_prompt
+        self.plan_reflect_prompt = plan_reflect_prompt
+        self.exec_system_prompt = exec_system_prompt
+        self.exec_think_prompt = exec_think_prompt
+        self.exec_reflect_prompt = exec_reflect_prompt
+        self.error_prompt = error_prompt
+        # Prepare the observe formats
+        self.plan_think_format = plan_think_format
+        self.plan_reflect_format = plan_reflect_format
+        self.exec_think_format = exec_think_format
+        self.exec_reflect_format = exec_reflect_format
         
         # Additional prompts
         self.plan_layer_limit = plan_layer_limit if plan_layer_limit != "" else PLAN_LAYER_LIMIT
@@ -167,19 +175,19 @@ class PlanAndExecAgent(BaseAgent):
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             prompts={
-                PlanAndExecStage.PLAN_INIT: plan_system_prompt, 
-                PlanAndExecStage.PLAN_REASON_ACT: plan_think_prompt, 
-                PlanAndExecStage.PLAN_REFLECT: plan_reflect_prompt, 
-                PlanAndExecStage.EXEC_INIT: exec_system_prompt, 
-                PlanAndExecStage.EXEC_REASON_ACT: exec_think_prompt, 
-                PlanAndExecStage.EXEC_REFLECT: exec_reflect_prompt, 
-                PlanAndExecStage.ERROR: error_prompt, 
+                PlanAndExecStage.PLAN_INIT: self.plan_system_prompt, 
+                PlanAndExecStage.PLAN_REASON_ACT: self.plan_think_prompt, 
+                PlanAndExecStage.PLAN_REFLECT: self.plan_reflect_prompt, 
+                PlanAndExecStage.EXEC_INIT: self.exec_system_prompt, 
+                PlanAndExecStage.EXEC_REASON_ACT: self.exec_think_prompt, 
+                PlanAndExecStage.EXEC_REFLECT: self.exec_reflect_prompt, 
+                PlanAndExecStage.ERROR: self.error_prompt, 
             }, 
             observe_format={
-                PlanAndExecStage.PLAN_REASON_ACT: plan_think_format, 
-                PlanAndExecStage.PLAN_REFLECT: plan_reflect_format, 
-                PlanAndExecStage.EXEC_REASON_ACT: exec_think_format, 
-                PlanAndExecStage.EXEC_REFLECT: exec_reflect_format, 
+                PlanAndExecStage.PLAN_REASON_ACT: self.plan_think_format, 
+                PlanAndExecStage.PLAN_REFLECT: self.plan_reflect_format, 
+                PlanAndExecStage.EXEC_REASON_ACT: self.exec_think_format, 
+                PlanAndExecStage.EXEC_REFLECT: self.exec_reflect_format, 
             }, 
             *args, 
             **kwargs,
@@ -224,6 +232,23 @@ class PlanAndExecAgent(BaseAgent):
             observe = self.plan_layer_limit.format(
                 plan_layer_limit=target.sub_task_depth, 
             )
-            return f"{raw_result}\n\n## 其他限制\n\n{observe}"
+            observe = f"{raw_result}\n\n## 其他限制\n\n{observe}"
+            
+            # Prepare the blueprint
+            blueprint = self.env.context.get("blueprint")
+            if blueprint != "" and blueprint is not None:
+                blueprint_format = BLUEPRINT_FORMAT.format(blueprint=blueprint)
+                # Append the blueprint to the observe
+                observe = f"{observe}\n\n{blueprint_format}"
+                
+        elif self.workflow.stage == PlanAndExecStage.EXEC_REASON_ACT:
+            # Prepare the current result
+            task = self.env.context.get("task")
+            task_result = DocumentTaskView(task).format()
+            if task_result != "":
+                task_result_format = TASK_RESULT_FORMAT.format(task_result=task_result)
+                observe = f"{raw_result}\n\n{task_result_format}"
         else:
-            return raw_result
+            observe = raw_result
+        
+        return observe

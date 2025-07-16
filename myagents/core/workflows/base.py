@@ -14,25 +14,25 @@ class BaseWorkflow(Workflow, ToolsMixin):
     """BaseWorkflow is the base class for all the workflows.
     
     Attributes:
-        profile (str):
-            The profile of the workflow.
-        agent (Agent):
-            The agent that is used to work with the workflow.
-        prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
         context (BaseContext):
             The context of the tool call.
         tools (dict[str, FastMcpTool]):
             The tools of the workflow.
+        
+        profile (str):
+            The profile of the workflow.
+        agent (Agent):
+            The agent that is used to work with the workflow.
         stage (Enum):
             The stage of the workflow. The stage is used to determine the observation format of the agent. 
+        
     """
-    profile: str
-    agent: Agent
-    prompts: dict[str, str]
     # Tools Mixin
     context: BaseContext
     tools: dict[str, FastMcpTool]
+    # Basic information
+    profile: str
+    agent: Agent
     # Workflow stage
     stage: Enum
     
@@ -51,9 +51,9 @@ class BaseWorkflow(Workflow, ToolsMixin):
         # Initialize the workflow components
         self.profile = None
         self.agent = None
-        self.prompts = {}
         self.stage = None
-        
+        self.sub_workflows = {}
+
         # Post initialize
         self.post_init()
         

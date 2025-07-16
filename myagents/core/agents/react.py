@@ -79,11 +79,11 @@ class ReActAgent(BaseAgent):
         llm: LLM, 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
-        react_system: str = "", 
-        react_think: str = "", 
-        react_reflect: str = "", 
-        react_think_format: str = "todo", 
-        react_reflect_format: str = "document", 
+        react_system_prompt: str = SYSTEM_PROMPT, 
+        react_think_prompt: str = THINK_PROMPT, 
+        react_reflect_prompt: str = REFLECT_PROMPT, 
+        react_think_format: str = "document", 
+        react_reflect_format: str = "todo", 
         *args, 
         **kwargs, 
     ) -> None:        
@@ -99,11 +99,11 @@ class ReActAgent(BaseAgent):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
-            react_system (str):
+            react_system_prompt (str):
                 The system prompt of the workflow.
-            react_think (str):
+            react_think_prompt (str):
                 The think prompt of the workflow.
-            react_reflect (str):
+            react_reflect_prompt (str):
                 The reflect prompt of the workflow.
             react_think_format (str):
                 The observation format of the think stage.
@@ -114,10 +114,16 @@ class ReActAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        if react_system_prompt == SYSTEM_PROMPT:
+            react_system_prompt = SYSTEM_PROMPT.format(profile=PROFILE)
+        
         # Prepare the prompts
-        system_prompt = react_system if react_system != "" else SYSTEM_PROMPT.format(profile=PROFILE)
-        think_prompt = react_think if react_think != "" else THINK_PROMPT
-        reflect_prompt = react_reflect if react_reflect != "" else REFLECT_PROMPT
+        self.react_system_prompt = react_system_prompt
+        self.react_think_prompt = react_think_prompt
+        self.react_reflect_prompt = react_reflect_prompt
+        # Prepare the observe formats
+        self.react_think_format = react_think_format
+        self.react_reflect_format = react_reflect_format
         
         # Initialize the parent class
         super().__init__(
@@ -128,13 +134,13 @@ class ReActAgent(BaseAgent):
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             prompts={
-                ReActStage.INIT: system_prompt, 
-                ReActStage.REASON_ACT: think_prompt, 
-                ReActStage.REFLECT: reflect_prompt, 
+                ReActStage.INIT: self.react_system_prompt, 
+                ReActStage.REASON_ACT: self.react_think_prompt, 
+                ReActStage.REFLECT: self.react_reflect_prompt, 
             }, 
             observe_format={
-                ReActStage.REASON_ACT: react_think_format, 
-                ReActStage.REFLECT: react_reflect_format, 
+                ReActStage.REASON_ACT: self.react_think_format, 
+                ReActStage.REFLECT: self.react_reflect_format, 
             }, 
             *args, 
             **kwargs,

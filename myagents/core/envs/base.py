@@ -3,7 +3,7 @@ from abc import abstractmethod
 from asyncio import Semaphore
 from enum import Enum
 from uuid import uuid4
-from typing import Union, Any
+from typing import Union, Any, Callable
 
 from fastmcp.tools import Tool as FastMCPTool
 
@@ -172,6 +172,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
         completion_config: dict[str, Any] = {}, 
+        running_checker: Callable[[Stateful], bool] = None, 
         designated_agent: str = None, 
         *args, 
         **kwargs
@@ -195,6 +196,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The completion config of the agent. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            running_checker (Callable[[Stateful], bool], optional):
+                The checker to check if the workflow should be running.
             designated_agent (str, optional):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:
@@ -241,6 +244,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             max_error_retry, 
             max_idle_thinking, 
             completion_config, 
+            running_checker=running_checker, 
             *args, 
             **kwargs,
         )

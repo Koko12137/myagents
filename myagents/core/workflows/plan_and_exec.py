@@ -125,16 +125,17 @@ class PlanAndExecFlow(OrchestrateFlow):
                 return 
             
             # Traverse the orchestration
-            for question, value in orchestration.items():
+            for uid, value in orchestration.items():
                 # Convert the value to string
                 key_outputs = ""
-                for k, output in value['问题描述'].items():
-                    key_outputs += f"{k}: {output}; "
-                    
+                for output in value['关键产出']:
+                    key_outputs += f"{output}; "
+                
                 # Create a new task
                 new_task = BaseTreeTaskNode(
-                    question=normalize_string(question), 
-                    description=key_outputs, 
+                    uid=uid, 
+                    objective=normalize_string(value['目标描述']), 
+                    key_results=key_outputs, 
                     sub_task_depth=sub_task_depth - 1,
                 )
                 # Create the sub-tasks
@@ -146,7 +147,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                 # Link the new task to the parent task
                 new_task.parent = parent
                 # Add the new task to the parent task
-                parent.sub_tasks[question] = new_task
+                parent.sub_tasks[uid] = new_task
         
         try:
             # Repair the json
@@ -250,7 +251,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                 cancelled_sub_tasks = [sub_task for sub_task in target.sub_tasks.values() if sub_task.is_cancelled()]
                 # Delete the cancelled sub-tasks
                 for sub_task in cancelled_sub_tasks:
-                    del target.sub_tasks[sub_task.question]
+                    del target.sub_tasks[sub_task.uid]
                 
                 # Convert to created status and call for re-planning
                 target.to_created()
@@ -260,12 +261,12 @@ class PlanAndExecFlow(OrchestrateFlow):
                 message = UserMessage(content=error_prompt.format(
                     error_retry=current_error_retry, 
                     max_error_retry=max_error_retry, 
-                    error_reason=target.answer,
+                    error_reason=target.results,
                     current_result=current_result,
                 ))
                 target.update(message)
                 # Clean up the error information
-                target.answer = ""
+                target.results = ""
                 
             elif target.is_cancelled():
                 # Increment the error retry count
@@ -278,7 +279,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                     # Log the error
                     logger.error(f"错误次数 {current_error_retry} 超过最大错误次数 {max_error_retry}，任务终止。")
                     # Record the error information to the answer of the parent task
-                    target.parent.answer = target.answer
+                    target.parent.outputs = target.results
                     # Break the loop
                     break
                 
@@ -386,7 +387,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                 # Log the error
                 logger.error(f"子任务执行中出现错误: \n{ToDoTaskView(sub_task).format()}")
                 # Record the error information to the answer of the parent task
-                target.answer = sub_task.answer
+                target.results = sub_task.outputs
                 # Cancel all the unfinished sub-tasks
                 for sub_task in target.sub_tasks.values():
                     if not sub_task.is_finished():
@@ -419,14 +420,14 @@ class PlanAndExecFlow(OrchestrateFlow):
                 # Set the sub-task status to error
                 sub_task.to_cancelled()
                 # Record the error information to the answer of the parent task
-                target.answer += sub_task.answer
+                target.results += sub_task.outputs
             
             # Check if the sub-task is cancelled, if True, set the parent task status to created and stop the traverse
             elif sub_task.is_cancelled():
                 # Log the cancelled sub-task
                 logger.error(f"取消所有未执行或执行失败的子任务: \n{ToDoTaskView(target).format()}")
                 # Record the error information to the answer of the parent task
-                target.answer = sub_task.answer
+                target.results = sub_task.outputs
                 
                 # Cancel all the sub-tasks
                 for sub_task in target.sub_tasks.values():
@@ -550,7 +551,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                     # Set the task status to error
                     target.to_error()
                     # Record the error as answer
-                    target.answer += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
+                    target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
                     # Force the react loop to finish
                     break
             
@@ -560,7 +561,7 @@ class PlanAndExecFlow(OrchestrateFlow):
             final_output = extract_by_label(message.content, "final_output", "final answer", "output", "answer")
             if final_output != "":
                 # Set the answer of the task
-                target.answer = final_output
+                target.results = final_output
             
             # Check if the task is cancelled
             if target.status == TaskStatus.CANCELED:
@@ -591,11 +592,11 @@ class PlanAndExecFlow(OrchestrateFlow):
                     # Set the task status to error
                     target.to_error()
                     # Record the error as answer
-                    target.answer += f"\n连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。"
+                    target.results += f"\n连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。"
         
         # Set the answer of the task
-        if not target.answer: 
-            target.answer = "任务执行结束，但未提供答案，执行可能存在未知错误。"
+        if not target.results: 
+            target.results = "任务执行结束，但未提供答案，执行可能存在未知错误。"
             
         # Log the answer
         logger.info(f"任务执行结束: \n{DocumentTaskView(target).format()}")

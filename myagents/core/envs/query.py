@@ -1,16 +1,14 @@
-import uuid
-import inspect
 from asyncio import Semaphore
 from collections import OrderedDict
 from enum import Enum
 from traceback import format_exc
-from typing import Union, Any
+from typing import Union
 
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
-from myagents.core.interface import Agent, TreeTaskNode, Context, TaskStatus
+from myagents.core.interface import Agent, TreeTaskNode, Context
 from myagents.core.agents import AgentType
 from myagents.core.tasks import BaseTreeTaskNode, DocumentTaskView, ToDoTaskView
 from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
@@ -101,6 +99,7 @@ class Query(BaseEnvironment):
     history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
     # Additional components
     tasks: OrderedDict[str, TreeTaskNode]
+    answers: OrderedDict[str, str]
     
     def __init__(
         self, 
@@ -152,6 +151,8 @@ class Query(BaseEnvironment):
         
         # Initialize the tasks
         self.tasks = OrderedDict()
+        # Initialize the answers
+        self.answers = OrderedDict()
         # Post initialize
         self.post_init()
         
@@ -216,11 +217,11 @@ class Query(BaseEnvironment):
                     选项（不允许包含除选项外的任何字符）或者填空的内容。
             """
             # Get the task
-            task: TreeTaskNode = self.context.get("task")
+            task: TreeTaskNode = self.context.get("target")
             # Get the tool call
             tool_call = self.context.get("tool_call")
             # Set the answer to self.answers
-            self.answers[task.question] = answer
+            self.answers[task.uid] = answer
             # Set the status to finished
             self.to_finished()
             # Create a new tool call result
@@ -298,14 +299,15 @@ class Query(BaseEnvironment):
         ))
         # Create a new Task
         task = BaseTreeTaskNode(
-            question=question, 
-            description=description, 
+            uid=f"任务{len(self.tasks) + 1}",
+            objective=question, 
+            key_results=description, 
             sub_task_depth=sub_task_depth,
         )
         # Set the task as the sub-task
-        self.tasks[task.question] = task
+        self.tasks[task.uid] = task
         # Log the task
-        logger.info(f"任务创建: \n{task.question}")
+        logger.info(f"任务创建: \n{task.objective}")
         
         # Process the task
         task = await self.process_task(task)
@@ -313,18 +315,18 @@ class Query(BaseEnvironment):
         # Check the task status
         if not task.is_finished():
             # Log the error
-            logger.critical(f"Task {task.question} is not finished.")
+            logger.critical(f"Task {task.objective} is not finished.")
             # Raise the error
-            raise RuntimeError(f"Task {task.question} is not finished.")
+            raise RuntimeError(f"Task {task.objective} is not finished.")
         
         # Check the output type
         if output_type == OutputType.SUMMARY:
             # Log the content
-            logger.info(f"最终答案: \n{task.answer}")
+            logger.info(f"最终答案: \n{task.outputs}")
             # Record the answer
-            self.answers[task.question] = task.answer
+            self.answers[task.uid] = task.outputs
             # Return the answer
-            return task.answer
+            return task.outputs
         
         elif output_type == OutputType.DOCUMENT:
             # Set the answer view of the task as the output history
@@ -336,14 +338,12 @@ class Query(BaseEnvironment):
             line_view = document.format(FormatType.LINE)
             # Log the content
             logger.info(f"文档按[行号-内容]输出: \n{line_view}")
-            # Append as the assistant response
-            self.update(UserMessage(content=QUERY_DOC_PROMPT.format(task_lines=line_view)))
             
             """ [[ ## Post process the answer ## ]] """
             # Call for react agent to modify the document or select the answer
             message: AssistantMessage = await self.call_agent(
                 AgentType.REACT, 
-                target=task, 
+                target=self, 
                 document=document, 
                 completion_config={
                     "exclude_tools": ["select_answer"],
@@ -357,27 +357,18 @@ class Query(BaseEnvironment):
             return message.content
         
         elif output_type == OutputType.SELECTION:
-            # Set the answer view of the task as the output history
-            # This is used for the selection output type. 
-            content = DocumentTaskView(task).format()
-            # Create a new UserMessage
-            user_message = UserMessage(content=QUERY_SELECT_PROMPT.format(task=content))
-            # Update the environment history
-            self.update(user_message)
             # Call for react agent to select the answer
             message: AssistantMessage = await self.call_agent(
                 AgentType.REACT, 
-                target=task, 
+                target=self, 
                 completion_config={
                     "tool_choice": "select_answer",
                 },
             )
-            # Update the environment history
-            self.update(message)
             # Log the answer
             logger.info(f"Agent Response: \n{message.content}")
             # Return the answer
-            return message.content
+            return self.answers[task.uid]
         
         else:
             raise ValueError(f"Unknown output type: {output_type}")
@@ -423,16 +414,12 @@ class Query(BaseEnvironment):
                     max_idle_thinking=max_idle_thinking, 
                 )
             
-            elif self.is_finished():
-                # Break the loop
-                break
-            
             elif self.is_error():
                 # Get all the sub-tasks that are not finished
                 sub_tasks = [sub_task for sub_task in target.sub_tasks.values() if not sub_task.is_finished()]
                 # Delete all the sub-tasks that are not finished
                 for sub_task in sub_tasks:
-                    del target.sub_tasks[sub_task.question]
+                    del target.sub_tasks[sub_task.uid]
                 
                 # Rollback the target to created status
                 target.to_created()
@@ -444,26 +431,26 @@ class Query(BaseEnvironment):
                 message = UserMessage(content=self.prompts["error"].format(
                     error_retry=current_error, 
                     max_error_retry=max_error_retry, 
-                    error_reason=target.answer,
+                    error_reason=target.results,
                     current_result=current_result,
-                ))
+                ))  # BUG: 这里要先记录错误状态，再提示重试
                 # Update the environment history
                 self.update(message)
                 # Clean up the error information
-                target.answer = ""
+                target.results = ""
             
             elif self.is_cancelled():
                 # Increment the error retry count
                 current_error += 1
                 # Log the error
-                logger.error(f"任务 {target.question} 处理失败，重试次数: {current_error} / {max_error_retry}。")
+                logger.error(f"任务 {target.objective} 处理失败，重试次数: {current_error} / {max_error_retry}。")
                 
                 # Check the error retry count
                 if current_error >= max_error_retry:
                     # Log the error
-                    logger.error(f"任务 {target.question} 处理失败，达到最大重试次数。")
+                    logger.error(f"任务 {target.objective} 处理失败，达到最大重试次数。")
                     # Raise the error
-                    raise RuntimeError(f"Task {target.question} is in error state. Max error retry count reached.")
+                    raise RuntimeError(f"Task {target.objective} is in error state. Max error retry count reached.")
                 
                 # Rollback the target to error status
                 target.to_error()
@@ -472,9 +459,14 @@ class Query(BaseEnvironment):
                 
             else:
                 # Log the error
-                logger.critical(f"任务 {target.question} 当前处于非法状态 {target.get_status()}。")
+                logger.critical(f"任务 {target.objective} 当前处于非法状态 {target.get_status()}。")
                 # Raise the error
-                raise RuntimeError(f"Task {target.question} is in error state. Invalid status.")
+                raise RuntimeError(f"Task {target.objective} is in error state. Invalid status.")
+            
+            # Check if the target is finished
+            if target.is_finished():
+                # Break the loop
+                break
         
         # Return the answer
         return target
@@ -602,26 +594,69 @@ class Query(BaseEnvironment):
                 logger.info(f"Agent Response: \n{message.content}")
                 
             elif sub_task.is_cancelled():
+                # Get all the sub-tasks that are not finished
+                sub_tasks = [t for t in target.sub_tasks.values() if not t.is_finished()]
+                # Delete all the sub-tasks that are not finished
+                for t in sub_tasks:
+                    del target.sub_tasks[t.uid]
+                # Rollback the target to created status
+                target.to_created()
+                # Rollback the self to created status
+                self.to_created()
                 # Log the error
-                logger.error(f"子任务 {sub_task.question} 已取消。")
+                logger.error(f"任务 {target.objective} 的所有未完成子任务已取消。")
                 # Break the loop
-                break
+                return target
             
             elif sub_task.is_finished():
                 # Get the next sub-task
                 try:
                     sub_task = next(sub_tasks_iter)
                 except StopIteration:
-                    # Set self to finished
-                    self.to_finished()
                     # Log the content
                     logger.info(f"所有子任务已处理完成。")
                     # Break the loop
                     break
             
             else:
-                raise RuntimeError(f"Task {target.question} is in error state. Invalid status.")
+                raise RuntimeError(f"Task {target.objective} is in error state. Invalid status.")
         
+        # Check all the sub-tasks are finished
+        if not all(sub_task.is_finished() for sub_task in sub_tasks.values()):
+            # Get all the sub-tasks that are not finished
+            sub_tasks = [t for t in target.sub_tasks.values() if not t.is_finished()]
+            # Delete all the sub-tasks that are not finished
+            for t in sub_tasks:
+                del target.sub_tasks[t.uid]
+            # Rollback the target to created status
+            target.to_created()
+            # Rollback the self to created status
+            self.to_created()
+            # Log the error
+            logger.error(f"任务 {target.objective} 的所有未完成子任务已取消。")
+            # Return the target
+            return target
+        
+        # Create a new user message to record the question
+        message = UserMessage(
+            content=self.prompts["plan_and_execute"].format(task=ToDoTaskView(target).format()),
+        )
+        # Update the environment history
+        self.update(message)
+        # Log the message
+        logger.info(f"Observe: \n{message.content}")
+        # Call for plan and execute
+        message: AssistantMessage = await self.call_agent(
+            AgentType.PLAN_AND_EXECUTE, 
+            target=target, 
+            max_error_retry=max_error_retry, 
+            max_idle_thinking=max_idle_thinking, 
+            completion_config=completion_config, 
+        )
+        # Update the environment history
+        self.update(message)
+        # Log the message
+        logger.info(f"Agent Response: \n{message.content}")
         return target
 
     async def observe(self, format: str = "document") -> str:
@@ -639,7 +674,7 @@ class Query(BaseEnvironment):
         # Return the document of the task
         if format == "document":
             return DocumentTaskView(task).format()
-        elif format == "summary":
+        elif format == "todo":
             return ToDoTaskView(task).format()
         else:
             raise ValueError(f"Unknown format: {format}")

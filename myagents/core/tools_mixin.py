@@ -130,11 +130,17 @@ class ToolsMixin(ToolsCaller):
             raise ValueError(f"Tool {tool_call.name} is not registered.")
         
         # Put the tool_call and keyword arguments to the context
-        self.context.create_next(tool_call=tool_call, **kwargs)
+        self.context = self.context.create_next(tool_call=tool_call, **kwargs)
         
         try:
             # Call the tool
             result = await self.tools[tool_call.name].run(tool_call.args)
+            # Format the result
+            result = ToolCallResult(
+                tool_call_id=tool_call.id, 
+                content=result.content, 
+                is_error=False, 
+            )
         except Exception as e:
             # Log the error
             logger.error(f"Error calling tool {tool_call.name}: {e}")
@@ -146,6 +152,6 @@ class ToolsMixin(ToolsCaller):
             )
             
         # Resume the context
-        self.context.done()
+        self.context = self.context.done()
         # Return the tool call result
         return result

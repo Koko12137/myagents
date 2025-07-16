@@ -301,6 +301,7 @@ class BaseAgent(Agent):
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
         completion_config: dict[str, Any] = {}, 
+        running_checker: Callable[[Stateful], bool] = None, 
         *args, 
         **kwargs
     ) -> AssistantMessage:
@@ -317,6 +318,8 @@ class BaseAgent(Agent):
                 The completion config of the agent. The following completion config are supported:
                 - "tool_choice": The tool choice to use for the agent. 
                 - "exclude_tools": The tools to exclude from the tool choice. 
+            running_checker (Callable[[Stateful], bool], optional):
+                The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -354,6 +357,7 @@ class BaseAgent(Agent):
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config, 
+            running_checker=running_checker, 
             *args, 
             **kwargs,
         )
@@ -361,8 +365,8 @@ class BaseAgent(Agent):
         # Release the lock of the agent
         self.lock.release()
         
-        # Observe the target
-        observe = await self.observe(target)
+        # Observe the target    # BUG: 这里 Agent 处理完后没有专属的 observe format，需要单独实现
+        observe = await self.observe(target)    # BUG: 这里没有判断任务执行后的状态，如果任务执行后是error，应该返回error message
         # Create a new assistant message
         message = AssistantMessage(content=f"已完成任务，【观察】：{observe}")
         # Log the message

@@ -1,4 +1,4 @@
-from typing import Union, Optional
+from typing import Union, Optional, Any
 
 from pydantic import BaseModel, Field
 
@@ -35,4 +35,8 @@ class AgentConfig(BaseModel):
     mcp_client: Optional[MCPConfig] = Field(
         description="The configuration for the MCP client.", 
         default=None, 
+    )
+    extra_config: dict[str, Any] = Field(
+        description="The extra configuration for the agent.",
+        default={},
     )

@@ -210,7 +210,7 @@ class ReActFlow(BaseWorkflow):
                     # Set the task status to error
                     target.to_error()
                     # Record the error as answer
-                    target.answer += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
+                    target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
                     # Force the react loop to finish
                     break
             
@@ -241,7 +241,7 @@ class ReActFlow(BaseWorkflow):
                     # Set the task status to error
                     target.to_error()
                     # Record the error as answer
-                    target.answer += f"\n连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。"
+                    target.results += f"\n连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。"
             
         return target
     
@@ -429,7 +429,7 @@ class ReActFlow(BaseWorkflow):
             # Set the tool choice
             arguments["tool_choice"] = tool_choice
             # Set the tools
-            arguments["tools"] = [tools[tool_choice]]
+            arguments["tools"] = {tool_choice: tools[tool_choice]}
         else:
             arguments["tools"] = tools
         

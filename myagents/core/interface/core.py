@@ -387,62 +387,58 @@ class Task(Stateful):
     """Task is the protocol for all the tasks. It is a general task that can be used for the workflow.
     
     Attributes:
-        uid (str):
-            The unique identifier of the task. Do not specify this field. It will be automatically generated.
-        question (str):
-            The question to be answered. 
-        description (str):
-            The detail information and limitation of the task. 
         status (TaskStatus):
             The status of the current task.
         history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
             The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
             The value is a list of the history messages. 
+            
+        uid (str):
+            The unique identifier of the task. Do not specify this field. It will be automatically generated.
+        objective (str):
+            The objective of the task.
+        key_results (str):
+            The key results of the task and the verification method for the results.
+        results (str):
+            The results of the task. If the task is not finished, the results is None.
     """
     uid: str
-    question: str
-    description: str
-    # Status and history
-    status: TaskStatus
-    history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
+    objective: str
+    key_results: str
+    results: str
 
 
 class TreeTaskNode(Task):
     """TreeTaskNode is the protocol for all the tasks. It is a tree structure of the tasks.
     
     Attributes:
-        uid (str): 
-            The unique identifier of the task. Do not specify this field. It will be automatically generated.
-        question (str): 
-            The question to be answered. 
-        description (str):
-            The detail information and limitation of the task. 
         status (TaskStatus):
             The status of the current task.
         history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
             The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
             The value is a list of the history messages. 
+        
+        uid (str): 
+            The unique identifier of the task. Do not specify this field. It will be automatically generated.
+        objective (str):
+            The objective of the task.
+        key_results (str):
+            The key results of the task and the verification method for the results.
+        results (str):
+            The results of the task. If the task is not finished, the results is None
+            
         parent (TreeTaskNode):
             The parent task of the current task. If the task does not have a parent task, the parent is None.
         sub_tasks (OrderedDict[str, TreeTaskNode]):
             The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
         sub_task_depth (int):
-            The sub task depth is the number of layers of sub-question layers that can be split from the question.
-        answer (str):
-            The answer to the question. If the task is not finished, the answer is None
+            The sub task depth is the number of layers of sub-objective layers that can be split from the objective.
     """
-    uid: str
-    question: str
-    description: str
-    # Status and history
-    status: TaskStatus
-    history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
     # Parent and sub-tasks
     parent: 'TreeTaskNode'
-    # NOTE: The key should be the question of the sub-task, the value should be the sub-task instance. 
+    # NOTE: The key should be the objective of the sub-task, the value should be the sub-task instance. 
     sub_tasks: OrderedDict[str, 'TreeTaskNode']
     sub_task_depth: int
-    answer: str
     
     @abstractmethod
     def to_created(self) -> None:
@@ -470,31 +466,26 @@ class GraphTaskNode(Task):
     """GraphTaskNode is the protocol for all the tasks. It is a graph structure of the tasks.
     
     Attributes:
-        uid (str):
-            The unique identifier of the task. Do not specify this field. It will be automatically generated.
-        question (str):
-            The question to be answered. 
-        description (str):
-            The detail information and limitation of the task. 
-        dependencies (OrderedDict[str, GraphTaskNode]):
-            The dependencies of the task. The key is the unique identifier of the dependency task, and the value is the dependency task.
-        answer (str):
-            The answer to the question. If the task is not finished, the answer is None.
         status (TaskStatus):
             The status of the current task.
         history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
             The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
             The value is a list of the history messages. 
+        
+        uid (str):
+            The unique identifier of the task. Do not specify this field. It will be automatically generated.
+        objective (str):
+            The objective of the task.
+        key_results (str):
+            The key results of the task and the verification method for the results.
+        results (str):
+            The results of the task. If the task is not finished, the results is None.
+        
+        dependencies (OrderedDict[str, GraphTaskNode]):
+            The dependencies of the task. The key is the unique identifier of the dependency task, and the value is the dependency task.
     """
-    uid: str
-    question: str
-    description: str
-    # Status and history
-    status: TaskStatus
-    history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
-    # Dependencies and answer
+    # Dependencies
     dependencies: OrderedDict[str, 'GraphTaskNode']
-    answer: Optional[str]
 
 
 @runtime_checkable
@@ -520,27 +511,5 @@ class TaskView(Protocol):
         Returns: 
             str:
                 The formatted task view. 
-        """
-        pass
-
-
-
-@runtime_checkable
-class TreeTaskScheduler(Protocol):
-    """TreeTaskScheduler is a protocol for the tree task scheduler. It is used to schedule the tree task.
-    
-    Attributes:
-        tasks (OrderedDict[str, TreeTaskNode]):
-            The tasks to be scheduled.
-    """
-    tasks: OrderedDict[str, TreeTaskNode]
-    
-    @abstractmethod
-    def schedule(self, task: TreeTaskNode) -> None:
-        """Schedule the tree tasks.
-        
-        Args:
-            tasks (OrderedDict[str, TreeTaskNode]):
-                The tasks to be scheduled.
         """
         pass

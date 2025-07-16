@@ -206,7 +206,7 @@ def write_to_file_sync(output_file: str, record: Dict[str, Any]) -> None:
 
 
 async def process_single_question(
-    question: str, 
+    description: str, 
     ground_truth: str, 
     semaphore: asyncio.Semaphore
 ) -> Dict[str, Any]:
@@ -214,7 +214,7 @@ async def process_single_question(
     处理单个问题的并发函数
     
     Args:
-        question (str): 问题
+        description (str): 问题描述
         ground_truth (str): 真实答案
         semaphore (asyncio.Semaphore): 信号量控制并发
         
@@ -239,12 +239,13 @@ async def process_single_question(
         query_env: Query = factory.auto_build(config=config)
         
         # 构建描述，让最终答案放到query的answer里``
-        description = f"请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A/B/C/D中的一个。"
+        question = f"请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A/B/C/D中的一个。"
         
         # 使用query环境的summary模式提问
         response = await query_env.run(
             question=question,
-            description=description,
+            description=description, 
+            sub_task_depth=1, 
             output_type=OutputType.SELECTION, # 选择题
         )
         
@@ -253,17 +254,17 @@ async def process_single_question(
         normalized_gt = normalize_answer(ground_truth)
         
         return {
-            "question": question,
+            "question": description,
             "ground_truth": normalized_gt,
             "predicted_answer": predicted_answer,
             "is_correct": predicted_answer == normalized_gt
         }
         
     except Exception as e:
-        logger.error(f"处理问题时出错: {question[:50]}... 错误: {str(e)}")
+        logger.error(f"处理问题时出错: {description[:50]}... 错误: {str(e)}")
         
         return {
-            "question": question,
+            "question": description,
             "ground_truth": normalize_answer(ground_truth),
             "predicted_answer": "",
             "is_correct": False,
@@ -314,7 +315,7 @@ async def run_benchmark(
     dataset_path: str = "datasets/GAOKAO-Math-Bench",
     max_samples: int = 200,
     output_file: str = "benchmark_results.jsonl",
-    concurrency: int = 5
+    concurrency: int = 1
 ) -> Dict[str, Any]:
     """
     运行基准测试

@@ -106,22 +106,23 @@ class OrchestrateFlow(ReActFlow):
             orchestration: dict[str, dict[str, str]] = json.loads(orchestration)
             
             # Traverse the orchestration
-            for key, value in orchestration.items():
+            for uid, value in orchestration.items():
                 # Convert the value to string
                 key_outputs = ""
-                for k, output in value.items():
-                    key_outputs += f"{k}: {output}; "
+                for output in value['关键产出']:
+                    key_outputs += f"{output}; "
                 
                 # Create a new task
                 new_task = BaseTreeTaskNode(
-                    question=normalize_string(key), 
-                    description=key_outputs, 
+                    uid=uid, 
+                    objective=normalize_string(value['目标描述']), 
+                    key_results=key_outputs, 
                     sub_task_depth=parent.sub_task_depth - 1,
                 )
                 # Link the new task to the parent task
                 new_task.parent = parent
                 # Add the new task to the parent task
-                parent.sub_tasks[new_task.question] = new_task
+                parent.sub_tasks[uid] = new_task
                 # If the sub task depth is 0, then set the task status to running
                 if new_task.sub_task_depth == 0:
                     new_task.to_running()
@@ -371,7 +372,7 @@ class OrchestrateFlow(ReActFlow):
             # Log the error
             logger.error("The target is not running after reasoning, the workflow is not executed.")
             # Set the target to error
-            target.to_error()
+            target.to_error()   # BUG: 这里不知道为什么有时候会被设为error，检查前面出错时重试后是否会走到这里
             # Return the target
             return target
         
