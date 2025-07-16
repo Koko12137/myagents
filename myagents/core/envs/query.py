@@ -217,13 +217,11 @@ class Query(BaseEnvironment):
                     选项（不允许包含除选项外的任何字符）或者填空的内容。
             """
             # Get the task
-            task: TreeTaskNode = self.context.get("target")
+            target: TreeTaskNode = self.context.get("target")
             # Get the tool call
             tool_call = self.context.get("tool_call")
             # Set the answer to self.answers
-            self.answers[task.uid] = answer
-            # Set the status to finished
-            self.to_finished()
+            self.answers[target.tasks[f"任务{len(self.tasks)}"].uid] = answer
             # Create a new tool call result
             result = ToolCallResult(
                 tool_call_id=tool_call.id, 
@@ -365,6 +363,8 @@ class Query(BaseEnvironment):
                     "tool_choice": "select_answer",
                 },
             )
+            # Set the status to finished
+            self.to_finished()
             # Log the answer
             logger.info(f"Agent Response: \n{message.content}")
             # Return the answer
