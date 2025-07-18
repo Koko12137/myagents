@@ -1,184 +1,110 @@
-import json
-from enum import Enum
-from typing import Callable, Any
+from typing import Callable
 
-from json_repair import repair_json
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import SystemMessage, UserMessage
-from myagents.core.interface import Agent, TaskStatus, Context, Stateful, TreeTaskNode
-from myagents.core.workflows.react import ReActFlow
-from myagents.core.workflows.orchestrate import OrchestrateFlow
-from myagents.core.tasks import DocumentTaskView, ToDoTaskView, BaseTreeTaskNode
+from myagents.core.interface import Agent, Context, TreeTaskNode, ReActFlow, CompletionConfig
+from myagents.core.workflows.react import BaseReActFlow
+from myagents.core.workflows.plan import PlanWorkflow
+from myagents.core.tasks import DocumentTaskView, ToDoTaskView
 from myagents.core.utils.extractor import extract_by_label
-from myagents.core.utils.strings import normalize_string
 from myagents.prompts.workflows.plan_and_exec import PROFILE
 
 
-class PlanAndExecStage(Enum):
-    """The stage of the plan and exec workflow.
-    
-    Attributes:
-        PLAN_INIT (int):
-            The init stage of the plan stage.
-        PLAN_REASON_ACT (int):
-            The reason and act stage of the plan stage.
-        PLAN_REFLECT (int):
-            The reflect stage of the plan stage.
-        EXEC_INIT (int):
-            The init stage of the exec stage.
-        EXEC_REASON_ACT (int):
-            The reason and act stage of the exec stage.
-        EXEC_REFLECT (int):
-            The reflect stage of the exec stage.
-        ERROR (int):
-            The error stage of the workflow.
-    """
-    PLAN_INIT = 0
-    PLAN_REASON_ACT = 1
-    PLAN_REFLECT = 2
-    EXEC_INIT = 3
-    EXEC_REASON_ACT = 4
-    EXEC_REFLECT = 5
-    ERROR = 6
-
-
-class PlanAndExecFlow(OrchestrateFlow):
+class PlanAndExecFlow(BaseReActFlow):
     """
     PlanAndExecFlow is a workflow for splitting a task into sub-tasks and executing the sub-tasks.
     
         
     Attributes:
-        profile (str):
-            The profile of the workflow.
-        agent (Agent): 
-            The agent that is used to orchestrate the task.
         context (Context):
             The global context container of the workflow.
         tools (dict[str, FastMcpTool]):
             The tools can be used for the agent. 
-        stage (Enum):
-            The stage of the workflow.
+        
+        profile (str):
+            The profile of the workflow.
+        agent (Agent): 
+            The agent that is used to orchestrate the task.
+        prompts (dict[str, str]):
+            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+        observe_format (str):
+            The format of the observation.
+        sub_workflows (dict[str, ReActFlow]):
+            The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the 
+            sub-workflow instance. 
     """
-    # Basic information
-    profile: str
-    agent: Agent
     # Context and tools
     context: Context
     tools: dict[str, FastMcpTool]
-    # Workflow stage
-    stage: Enum
+    # Basic information
+    profile: str
+    agent: Agent
+    prompts: dict[str, str]
+    observe_format: str
+    # Sub-worflows
+    sub_workflows: dict[str, ReActFlow]
     
     def __init__(
         self, 
-        profile: str = PROFILE, 
+        prompts: dict[str, str] = {}, 
+        observe_formats: dict[str, str] = {}, 
         *args, 
-        **kwargs, 
+        **kwargs,
     ) -> None:
-        """Initialize the PlanAndExecFlow workflow.
-        
+        """Initialize the OrchestrateFlow.
+
         Args:
-            profile (str, optional, defaults to PROFILE):
-                The profile of the workflow.
+            prompts (dict[str, str], optional):
+                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+                The following prompts are required:
+                 - "plan_system_prompt": The system prompt for the plan workflow.
+                 - "plan_reason_act_prompt": The reason act prompt for the plan workflow.
+                 - "plan_reflect_prompt": The reflect prompt for the plan workflow.
+                 - "execute_system_prompt": The system prompt for the execute workflow.
+                 - "execute_reason_act_prompt": The reason act prompt for the execute workflow.
+                 - "execute_reflect_prompt": The reflect prompt for the execute workflow.
+                
+            observe_formats (dict[str, str], optional):
+                The formats of the observation. The key is the observation name and the value is the format method name. 
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        super().__init__(*args, **kwargs)
-        # Initialize the basic information
-        self.profile = profile
-        # Post initialize to initialize the tools
-        self.post_init()
-    
-    def create_task(
-        self, 
-        parent: TreeTaskNode, 
-        orchestration: str, 
-        current_error: int = 0, 
-    ) -> tuple[UserMessage, int]:
-        """Create a new task based on the orchestration blueprint.
+        # Create the sub-workflows
+        sub_workflows = {
+            "plan": PlanWorkflow(
+                prompts={
+                    "system_prompt": prompts["plan_system_prompt"], 
+                    "reason_act_prompt": prompts["plan_reason_act_prompt"], 
+                    "reflect_prompt": prompts["plan_reflect_prompt"], 
+                }, 
+                observe_formats={
+                    "reason_act": observe_formats['plan_reason_act'], 
+                    "reflect": observe_formats['plan_reflect'], 
+                }, 
+            ), 
+        }
         
-        Args:
-            parent (TreeTaskNode):
-                The parent task to create the new task.
-            orchestration (str):
-                The orchestration blueprint to create the new task.
-            current_error (int, optional, defaults to 0):
-                The current error counter. 
-                
-        Returns:
-            UserMessage:
-                The user message after creating the new task.
-            int:
-                The current error counter.
-        """
-        def dfs_create_task(
-            parent: TreeTaskNode, 
-            orchestration: dict[str, dict], 
-            sub_task_depth: int, 
-        ) -> None:
-            if sub_task_depth <= 0:
-                # Set the task status to running
-                parent.to_running()
-                return 
-            
-            # Traverse the orchestration
-            for uid, value in orchestration.items():
-                # Convert the value to string
-                key_outputs = ""
-                for output in value['关键产出']:
-                    key_outputs += f"{output}; "
-                
-                # Create a new task
-                new_task = BaseTreeTaskNode(
-                    uid=uid, 
-                    objective=normalize_string(value['目标描述']), 
-                    key_results=key_outputs, 
-                    sub_task_depth=sub_task_depth - 1,
-                )
-                # Create the sub-tasks
-                dfs_create_task(
-                    parent=new_task, 
-                    orchestration=value['子任务'], 
-                    sub_task_depth=sub_task_depth - 1, 
-                )
-                # Link the new task to the parent task
-                new_task.parent = parent
-                # Add the new task to the parent task
-                parent.sub_tasks[uid] = new_task
-        
-        try:
-            # Repair the json
-            orchestration = repair_json(orchestration)
-            # Parse the orchestration
-            orchestration: dict[str, dict[str, str]] = json.loads(orchestration)
-            
-            # Create the task
-            dfs_create_task(
-                parent=parent, 
-                orchestration=orchestration, 
-                sub_task_depth=parent.sub_task_depth - 1, 
-            )
-            # Format the task to ToDoTaskView
-            view = ToDoTaskView(task=parent).format()
-            # Return the user message
-            return UserMessage(content=f"【成功】：任务创建成功。任务ToDo视图：\n{view}"), current_error
-        
-        except Exception as e:
-            # Log the error
-            logger.error(f"Error creating task: {e}")
-            # Return the user message
-            return UserMessage(content=f"【失败】：任务创建失败。错误信息：{e}"), current_error + 1
+        super().__init__(
+            profile=PROFILE, 
+            prompts=prompts, 
+            observe_formats=observe_formats, 
+            sub_workflows=sub_workflows, 
+            *args, 
+            **kwargs,
+        )
         
     async def run(
         self, 
         target: TreeTaskNode, 
+        sub_task_depth: int = -1, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        completion_config: dict[str, Any] = {}, 
-        running_checker: Callable[[Stateful], bool] = None, 
+        completion_config: CompletionConfig = None, 
+        running_checker: Callable[[TreeTaskNode], bool] = None, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -186,16 +112,17 @@ class PlanAndExecFlow(OrchestrateFlow):
 
         Args:
             target (TreeTaskNode):
-                The target to plan and execute.
+                The target to plan and execute. 
+            sub_task_depth (int): 
+                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
+                inferred from the target.
             max_error_retry (int, optiona):
                 The maximum number of error retries.
             max_idle_thinking (int, optional):
                 The maximum number of idle thinking.
-            completion_config (dict[str, Any], optional):
-                The completion config of the workflow. The following completion config are supported:
-                - "tool_choice": The tool choice to use for the agent. 
-                - "exclude_tools": The tools to exclude from the tool choice. 
-            running_checker (Callable[[Stateful], bool], optional, defaults to None):
+            completion_config (CompletionConfig, optional):
+                The completion config of the workflow. 
+            running_checker (Callable[[TreeTaskNode], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
                 The arguments to be passed to the parent class.
@@ -212,8 +139,7 @@ class PlanAndExecFlow(OrchestrateFlow):
             running_checker = lambda target: not target.is_finished()
 
         # Get the error prompt from the agent
-        error_prompt = self.agent.prompts[PlanAndExecStage.ERROR]
-        
+        error_prompt = self.prompts["error_prompt"]
         # Record the current error retry count
         current_error_retry = 0
         
@@ -224,6 +150,7 @@ class PlanAndExecFlow(OrchestrateFlow):
                 # Plan the task
                 target = await self.plan(
                     target=target, 
+                    sub_task_depth=sub_task_depth, 
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
                     completion_config=completion_config, 
@@ -298,9 +225,10 @@ class PlanAndExecFlow(OrchestrateFlow):
     async def plan(
         self, 
         target: TreeTaskNode, 
+        sub_task_depth: int = -1, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        completion_config: dict[str, Any] = {}, 
+        completion_config: CompletionConfig = None, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -310,13 +238,19 @@ class PlanAndExecFlow(OrchestrateFlow):
         Args:
             target (TreeTaskNode):
                 The task to plan.
+            sub_task_depth (int):
+                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
+                inferred from the target.
             max_error_retry (int, optional):
                 The maximum number of error retries.
             max_idle_thinking (int, optional):
                 The maximum number of idle thinking. 
-            completion_config (dict[str, Any], optional):
-                The completion config of the workflow. The following completion config are supported:
-                - "tool_choice": The tool choice to use for the agent. 
+            completion_config (CompletionConfig, optional):
+                The completion config of the workflow. 
+            *args:
+                The additional arguments for running the agent.
+            **kwargs:
+                The additional keyword arguments for running the agent.
 
         Returns:
             TreeTaskNode: 
@@ -324,21 +258,17 @@ class PlanAndExecFlow(OrchestrateFlow):
         """
         # Create a new running checker
         running_checker = lambda target: target.is_created()
-        # Prepare valid stages
-        valid_stages = {
-            "init": PlanAndExecStage.PLAN_INIT, 
-            "reason_act": PlanAndExecStage.PLAN_REASON_ACT, 
-            "reflect": PlanAndExecStage.PLAN_REFLECT, 
-        }
         
         # Call the parent class to reason and act
-        target = await super().reason_act_reflect(
-            target, 
+        target = await self.sub_workflows["plan"].run(
+            target=target, 
+            sub_task_depth=sub_task_depth, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config, 
             running_checker=running_checker, 
-            valid_stages=valid_stages,
+            *args, 
+            **kwargs,
         )
         return target
     
@@ -347,7 +277,7 @@ class PlanAndExecFlow(OrchestrateFlow):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        completion_config: dict[str, Any] = {}, 
+        completion_config: CompletionConfig = None, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -360,10 +290,8 @@ class PlanAndExecFlow(OrchestrateFlow):
                 The maximum number of error retries.
             max_idle_thinking (int, optional):
                 The maximum number of idle thinking. 
-            completion_config (dict[str, Any], optional):
-                The completion config of the workflow. The following completion config are supported:
-                - "tool_choice": The tool choice to use for the agent. 
-                - "exclude_tools": The tools to exclude from the tool choice. 
+            completion_config (CompletionConfig, optional):
+                The completion config of the workflow. 
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -373,7 +301,6 @@ class PlanAndExecFlow(OrchestrateFlow):
             TreeTaskNode:
                 The target after deep first executing.
         """
-        
         # Unfinished sub-tasks
         unfinished_sub_tasks = iter(target.sub_tasks.values())
         # Get the first unfinished sub-task
@@ -459,7 +386,7 @@ class PlanAndExecFlow(OrchestrateFlow):
         # All the sub-tasks are finished, then reason, act and reflect on the task
         if all(sub_task.is_finished() for sub_task in target.sub_tasks.values()):
             # Call the parent class to reason, act and reflect
-            target = await self.execute_one(
+            target = await self.reason_act_reflect(
                 target=target, 
                 max_error_retry=max_error_retry, 
                 max_idle_thinking=max_idle_thinking, 
@@ -470,12 +397,12 @@ class PlanAndExecFlow(OrchestrateFlow):
             
         return target 
     
-    async def execute_one(
+    async def reason_act_reflect(
         self, 
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 2, 
-        completion_config: dict[str, Any] = {}, 
+        completion_config: CompletionConfig = None, 
         *args, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -488,10 +415,8 @@ class PlanAndExecFlow(OrchestrateFlow):
                 The maximum number of error retries.
             max_idle_thinking (int, optional):
                 The maximum number of idle thinking. 
-            completion_config (dict[str, Any], optional):
-                The completion config of the workflow. The following completion config are supported:
-                - "tool_choice": The tool choice to use for the agent. 
-                - "exclude_tools": The tools to exclude from the tool choice. 
+            completion_config (CompletionConfig, optional):
+                The completion config of the workflow. 
             *args: 
                 The additional arguments for running the agent.
             **kwargs: 
@@ -507,9 +432,9 @@ class PlanAndExecFlow(OrchestrateFlow):
             logger.warning(f"任务 {target.question} 不是运行状态。")
             return target
         
+        # === Prepare System Instruction ===
         # Get the prompts from the agent
-        exec_system = self.agent.prompts[PlanAndExecStage.EXEC_INIT]
-        
+        exec_system = self.prompts["execute_system_prompt"]
         # Get the blueprint from the context
         blueprint = self.agent.env.context.get("blueprint")
         # Get the task from the context
@@ -529,12 +454,12 @@ class PlanAndExecFlow(OrchestrateFlow):
         current_error = 0
         
         while target.is_running():
-            # === Reason and Act Stage ===
-            target, error_flag, tool_call_flag = await ReActFlow.reason_act(
-                self, 
-                target, 
-                to_stage=PlanAndExecStage.EXEC_REASON_ACT, 
+            # === Reason and Act ===
+            target, error_flag, tool_call_flag = await self.reason_act(
+                target=target, 
                 completion_config=completion_config, 
+                *args, 
+                **kwargs,
             )
             
             # Check if the error flag is set
@@ -555,23 +480,27 @@ class PlanAndExecFlow(OrchestrateFlow):
                     # Force the react loop to finish
                     break
             
-            # Get the last message
-            message = target.get_history()[-1]
-            # Extract the final output from the message
-            final_output = extract_by_label(message.content, "final_output", "final answer", "output", "answer")
-            if final_output != "":
-                # Set the answer of the task
-                target.results = final_output
+            # Check if the tool call flag is not set
+            if not tool_call_flag:
+                # Get the last message
+                message = target.get_history()[-1]
+                # Extract the final output from the message
+                final_output = extract_by_label(message.content, "final_output", "final answer", "output", "answer")
+                if final_output != "":
+                    # Set the answer of the task
+                    target.results = final_output
+                
+            # Check allow finish
+            if tool_call_flag or error_flag:
+                allow_finish = False
+            else:
+                allow_finish = True
             
-            # Check if the task is cancelled
-            if target.status == TaskStatus.CANCELED:
-                # The task is cancelled, end the workflow
-                break
-            
-            # === Reflect Stage ===
+            # === Reflect ===
             target, finish_flag = await self.reflect(
-                target, 
-                to_stage=PlanAndExecStage.EXEC_REFLECT, 
+                target=target, 
+                allow_finish=allow_finish, 
+                completion_config=completion_config, 
             )
             # Check if the target is finished
             if finish_flag:
