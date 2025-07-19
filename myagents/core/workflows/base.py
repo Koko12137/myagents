@@ -43,7 +43,6 @@ class BaseWorkflow(Workflow, ToolsMixin):
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
         sub_workflows: dict[str, Workflow] = {}, 
-        *args, 
         **kwargs,
     ) -> None:
         """Initialize the BaseWorkflow.
@@ -58,13 +57,11 @@ class BaseWorkflow(Workflow, ToolsMixin):
             sub_workflows (dict[str, Workflow], optional):
                 The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the 
                 sub-workflow instance. 
-            *args:
-                The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
         # Initialize the parent class
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
                 
         # Initialize the workflow components
         self.profile = profile

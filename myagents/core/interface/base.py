@@ -5,10 +5,9 @@ from typing import Callable, Any, Union, Protocol, runtime_checkable
 
 from fastmcp.tools import Tool as FastMcpTool
 from fastmcp import Client as MCPClient
-from mcp import Tool as MCPTool
 
 from myagents.core.interface.core import Stateful, ToolsCaller
-from myagents.core.interface.llm import LLM, Queue, CompletionConfig
+from myagents.core.interface.llm import LLM, CompletionConfig
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
 
@@ -101,7 +100,7 @@ class Agent(Protocol):
             The unique identifier of the agent.
         name (str):
             The name of the agent.
-        type (Enum):
+        agent_type (Enum):
             The type of the agent.
         profile (str):
             The profile of the agent.
@@ -119,11 +118,15 @@ class Agent(Protocol):
             The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
         lock (Lock):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
+        prompts (dict[str, str]):
+            The prompts for running the workflow. 
+        observe_format (dict[str, str]):
+            The format of the observation the target. 
     """
     # Basic information
     uid: str
     name: str
-    type: Enum
+    agent_type: Enum
     profile: str
     # LLM and MCP client
     llm: LLM
@@ -136,6 +139,9 @@ class Agent(Protocol):
     step_counters: dict[str, StepCounter]
     # Synchronization lock
     lock: Lock
+    # Prompts and observe format
+    prompts: dict[str, str]
+    observe_format: dict[str, str]
     
     # @abstractmethod
     # async def memory(self, *args, **kwargs) -> Any:
@@ -151,6 +157,7 @@ class Agent(Protocol):
     async def observe(
         self, 
         target: Stateful, 
+        prompt: str, 
         observe_format: str, 
         **kwargs, 
     ) -> list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
@@ -159,8 +166,10 @@ class Agent(Protocol):
         Args:
             target (Stateful):
                 The stateful entity to observe. 
+            prompt (str): 
+                The prompt before the observation. 
             observe_format (str):
-                The format of the observation.
+                The format of the observation. This must be a valid observe format of the target
             **kwargs:
                 The additional keyword arguments for observing the target. 
 
@@ -222,7 +231,6 @@ class Agent(Protocol):
         max_idle_thinking: int, 
         completion_config: CompletionConfig, 
         running_checker: Callable[[Stateful], bool], 
-        *args, 
         **kwargs
     ) -> AssistantMessage:
         """Run the agent on the task or environment. Before running the agent, you should get the lock of the agent. 
@@ -331,7 +339,6 @@ class Workflow(ToolsCaller):
         max_idle_thinking: int, 
         completion_config: CompletionConfig, 
         running_checker: Callable[[Stateful], bool], 
-        *args, 
         **kwargs, 
     ) -> Stateful:
         """Run the workflow to modify the stateful entity.
@@ -422,7 +429,6 @@ class ReActFlow(Workflow):
         max_idle_thinking: int, 
         completion_config: CompletionConfig, 
         running_checker: Callable[[Stateful], bool], 
-        *args, 
         **kwargs, 
     ) -> tuple[Stateful, bool, bool]:
         """Reason and act on the target, and reflect on the target.
@@ -454,7 +460,6 @@ class ReActFlow(Workflow):
         self, 
         target: Stateful, 
         completion_config: CompletionConfig, 
-        *args, 
         **kwargs, 
     ) -> tuple[Stateful, bool, bool]:
         """Reason and act on the target.
@@ -479,9 +484,7 @@ class ReActFlow(Workflow):
     async def reflect(
         self, 
         target: Stateful, 
-        allow_finish: bool, 
         completion_config: CompletionConfig, 
-        *args, 
         **kwargs, 
     ) -> tuple[Stateful, bool]:
         """Reflect on the target.
@@ -489,8 +492,6 @@ class ReActFlow(Workflow):
         Args:
             target (Stateful):
                 The target to reflect on. 
-            allow_finish (bool):
-                Whether to allow the workflow to finish.
             completion_config (CompletionConfig):
                 The completion config of the workflow. 
             *args:
@@ -598,7 +599,6 @@ class Environment(Stateful, ToolsCaller):
         completion_config: CompletionConfig, 
         running_checker: Callable[[Stateful], bool], 
         designated_agent: str, 
-        *args, 
         **kwargs, 
     ) -> AssistantMessage:
         """Call an agent to work on the environment or a task and return an assistant message. 

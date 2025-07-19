@@ -289,7 +289,7 @@ class DocumentTaskView(TaskView):
         self.task = task
         
     def format(self, layer: int = 3) -> str:
-        answer = self.task.results if self.task.results else "The task is not finished."
+        answer = self.task.results if self.task.results else "[[placeholder]] 任务未完成。"
         # Add the question and answer of the current task
         answer = f"# {self.task.uid}: {self.task.objective}\n\n{self.task.key_results}\n\n{answer}"
         

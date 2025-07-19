@@ -1,19 +1,17 @@
 import traceback
 from uuid import uuid4
 from asyncio import Lock
-from enum import Enum
-from typing import Union, Optional, Callable, Awaitable, Any
+from typing import Union, Optional, Callable
 
 from loguru import logger
 from fastmcp import Client as MCPClient
 from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
-from mcp import Tool as MCPTool
 
+from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
 from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow
 from myagents.core.agents.types import AgentType
-from myagents.core.utils.tools import tool_schema
 from myagents.core.utils.step_counters import MaxStepsError
 
 
@@ -48,15 +46,15 @@ class BaseAgent(Agent):
         lock (Lock):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
             If the agent is running concurrently, the global context may not be working properly.
-        prompts (dict[Enum, str]):
-            The prompts for running specific workflow of the workflow. 
-        observe_format (dict[Enum, str]):
-            The format of the observation. The key is the workflow type and the value is the format content. 
+        prompts (dict[str, str]):
+            The prompts for running the workflow. 
+        observe_format (dict[str, str]):
+            The format of the observation the target. 
     """
     # Basic information
     uid: str
     name: str
-    type: AgentType
+    agent_type: AgentType
     profile: str
     # LLM and MCP client
     llm: LLM
@@ -71,20 +69,19 @@ class BaseAgent(Agent):
     # Concurrency limit
     lock: Lock
     # Prompts and observe format
-    prompts: dict[Enum, str]
-    observe_format: dict[Enum, str]
+    prompts: dict[str, str]
+    observe_format: dict[str, str]
     
     def __init__(
         self, 
         name: str, 
-        type: AgentType, 
+        agent_type: AgentType, 
         profile: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
-        prompts: dict[Enum, str] = {}, 
-        observe_format: dict[Enum, str] = {}, 
-        *args, 
+        prompts: dict[str, str] = None, 
+        observe_format: dict[str, str] = None, 
         **kwargs, 
     ) -> None:
         """Initialize the BaseAgent.
@@ -92,7 +89,7 @@ class BaseAgent(Agent):
         Args:
             name (str):
                 The name of the agent.
-            type (AgentType):
+            agent_type (AgentType):
                 The type of the agent.
             profile (str):
                 The profile of the agent.
@@ -102,28 +99,28 @@ class BaseAgent(Agent):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent. If not provided, No MCP tools can be used.  
-            prompts (dict[Enum, str], optional):
+            prompts (dict[str, str], optional):
                 The prompts for running specific workflow of the workflow. 
-            observe_format (dict[Enum, str], optional):
-                The format of the observation. The key is the workflow type and the value is the format content. 
-            *args:
-                The arguments to be passed to the parent class.
+            observe_format (dict[str, str], optional):
+                The format of the observation. 
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
         # Initialize the parent class
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
         
         # Initialize the basic information
         self.uid = str(uuid4())
         self.name = name
-        self.type = type
+        self.agent_type = agent_type
         self.profile = profile
         # Initialize the LLM and MCP client
         self.llm = llm
         self.mcp_client = mcp_client
         self.tools = {}
-        
+        # Initialize the prompts and observe format
+        self.prompts = prompts
+        self.observe_format = observe_format
         # Initialize the workflow and environment
         self.workflow = None
         self.env = None
@@ -131,60 +128,48 @@ class BaseAgent(Agent):
         self.step_counters = {counter.uid: counter for counter in step_counters}
         # Initialize the synchronization lock
         self.lock = Lock()
-        # Initialize the prompts and observe format
-        self.prompts = prompts
-        self.observe_format = observe_format
-    
+        
     async def observe(
         self, 
-        target: Union[Stateful, Any], 
-        observe_func: Optional[Callable[..., Awaitable[Union[str, list[dict]]]]] = None, 
+        target: Stateful, 
+        prompt: str, 
+        observe_format: str, 
         **kwargs, 
-    ) -> Union[str, list[dict]]:
-        """Observe the target. If the target is not a task or environment, you should provide the observe 
-        function to get the string or list of dicts observation. 
+    ) -> list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
+        """Observe the target. A series of messages will be returned, including the system message, user message, 
+        assistant message and tool call result. 
         
         Args:
-            target (Union[Stateful, Any]): 
-                The stateful entity or any other entity to observe. 
-            format (str):
-                The format of the observation. 
-            observe_func (Callable[..., Awaitable[Union[str, list[dict]]]], optional):
-                The function to observe the target. If not provided, the default observe function will 
-                be used. The function should have the following signature:
-                - target (Union[Stateful, Any]): The stateful entity or any other entity to observe.
-                - **kwargs: The additional keyword arguments for observing the target.
-                The function should return the observation in the following format:
-                - str: The string observation. 
-                - list[dict]: The list of dicts observation. If the observation is multi-modal.
+            target (Stateful):
+                The stateful entity to observe. 
+            prompt (str): 
+                The prompt instruction after the observation. 
+            observe_format (str):
+                The format of the observation. This must be a valid observe format of the target
             **kwargs:
                 The additional keyword arguments for observing the target. 
             
         Returns:
-            Union[str, list[dict]]:
-                The up to date information observed from the stateful entity or any other entity.  
+            list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
+                The up to date information observed from the stateful entity.  
         """
         # Check if the target is observable
         if not isinstance(target, Stateful):
-            if observe_func is None:
-                raise ValueError("The target is not observable and the observe function is not provided.")
-            else:
-                observation = await observe_func(target, format, **kwargs)
-                return observation
+            raise ValueError("The target is not observable.")
 
-        # Get the observe format
-        format = self.observe_format[self.workflow.stage]
         # Call the observe function of the target
-        observation = await target.observe(format, **kwargs)
-        # Get the prompt
-        prompt = self.prompts[self.workflow.stage]
-        return f"{prompt}\n\n## 观察\n以下是观察到的信息:\n{observation}"
+        observation = await target.observe(observe_format, **kwargs)
+        # Create a new user message
+        user_message = UserMessage(content=f"## 观察\n以下是观察到的信息:\n{observation}\n\n# 任务指令\n\n{prompt}")
+        # Update the user_message to the target
+        target.update(user_message)
+        # Return the history of the target
+        return target.get_history()
     
     async def think(
         self, 
         observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
-        tools: dict[str, Union[FastMcpTool, MCPTool]] = {}, 
-        tool_choice: Optional[str] = None, 
+        completion_config: BaseCompletionConfig, 
         **kwargs, 
     ) -> AssistantMessage:
         """Think about the environment.
@@ -192,12 +177,8 @@ class BaseAgent(Agent):
         Args:
             observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
                 The messages observed from the environment. 
-            tools (Optional[dict[str, Union[FastMcpTool, MCPTool]]], defaults to {}):
-                The tools allowed to be used for the agent. 
-            tool_choice (Optional[str], defaults to None):
-                The tool choice to use for the agent. This is used to control the tool calling. 
-                - None: The agent will automatically choose the tool to use. 
-                - "tool_name": The agent will use the tool with the name "tool_name". 
+            completion_config (CompletionConfig):
+                The completion config of the agent. 
             **kwargs: 
                 The additional keyword arguments for thinking about the observed messages. 
 
@@ -209,15 +190,11 @@ class BaseAgent(Agent):
         for step_counter in self.step_counters.values():
             await step_counter.check_limit()
         
-        # Get the available tools
-        tools = [tool_schema(tool, self.llm.provider) for tool in tools.values()]
-        
         # Call for completion from the LLM
         message = await self.llm.completion(
             observe, 
-            available_tools=tools, 
-            tool_choice=tool_choice, 
-            **kwargs
+            completion_config=completion_config, 
+            **kwargs,
         )
         
         errors = []
@@ -279,30 +256,29 @@ class BaseAgent(Agent):
             # Record and return the error
             logger.error(f"Error calling tool {tool_call_name}: {e}")
             return ToolCallResult(
-                tool_call_id=tool_call_id, 
-                content=str(e), 
-                is_error=True, 
+                tool_call_id=tool_call_id,
+                content=str(e),
+                is_error=True,
             )
         except RuntimeError as e:
-            # Raise the error 
+            # Raise the error
             logger.error(f"{e}, traceback: {traceback.format_exc()}")
             raise e
-        
+
         # Return the result
         return ToolCallResult(
-            tool_call_id=tool_call_id, 
-            content=res.content, 
-            is_error=res.is_error, 
+            tool_call_id=tool_call_id,
+            content=res.content,
+            is_error=res.is_error,
         )
 
     async def run(
         self, 
-        target: Stateful, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
-        completion_config: dict[str, Any] = {}, 
-        running_checker: Callable[[Stateful], bool] = None, 
-        *args, 
+        target: Stateful,
+        max_error_retry: int = 3,
+        max_idle_thinking: int = 1,
+        completion_config: BaseCompletionConfig = None,
+        running_checker: Callable[[Stateful], bool] = None,
         **kwargs
     ) -> AssistantMessage:
         """Run the agent on the task or environment. Before running the agent, you should get the lock of the agent. 
@@ -314,14 +290,10 @@ class BaseAgent(Agent):
                 The maximum number of times to retry the agent when the target is errored. 
             max_idle_thinking (int, optional, defaults to 1): 
                 The maximum number of times to idle thinking the agent. 
-            completion_config (dict[str, Any], optional, defaults to {}):
-                The completion config of the agent. The following completion config are supported:
-                - "tool_choice": The tool choice to use for the agent. 
-                - "exclude_tools": The tools to exclude from the tool choice. 
-            running_checker (Callable[[Stateful], bool], optional):
+            completion_config (CompletionConfig, optional, defaults to None):
+                The completion config of the agent. 
+            running_checker (Callable[[Stateful], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
-            *args:
-                The additional arguments for running the agent.
             **kwargs:
                 The additional keyword arguments for running the agent.
                 
@@ -334,7 +306,7 @@ class BaseAgent(Agent):
             # Log the error
             logger.error("The workflow is not registered to the agent.")
             raise ValueError("The workflow is not registered to the agent.")
-        
+
         # Check if the environment is registered
         if self.env is None:
             # Log the error
@@ -358,17 +330,17 @@ class BaseAgent(Agent):
             max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config, 
             running_checker=running_checker, 
-            *args, 
             **kwargs,
         )
         
         # Release the lock of the agent
         self.lock.release()
         
-        # Observe the target    # BUG: 这里 Agent 处理完后没有专属的 observe format，需要单独实现
-        observe = await self.observe(target)    # BUG: 这里没有判断任务执行后的状态，如果任务执行后是error，应该返回error message
+        # Observe the target    
+        # BUG: 这里没有判断任务执行后的状态，如果任务执行后是error，应该返回error message
+        observe = target.observe(self.observe_format["agent_format"])
         # Create a new assistant message
-        message = AssistantMessage(content=f"已完成任务，【观察】：{observe}")
+        message = AssistantMessage(content=f"{self.prompts['agent_format']}\n{observe}")
         # Log the message
         if logger.level == "DEBUG":
             logger.debug(f"Full Assistant Message: \n{message}")

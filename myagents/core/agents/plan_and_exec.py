@@ -8,7 +8,7 @@ from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.types import AgentType
 from myagents.core.interface import LLM, Workflow, Environment, StepCounter, Stateful
 from myagents.core.tasks.task import DocumentTaskView
-from myagents.core.workflows import PlanAndExecFlow, PlanAndExecStage
+from myagents.core.workflows import PlanAndExecFlow
 from myagents.prompts.workflows.plan_and_exec import (
     PROFILE, 
     PLAN_SYSTEM_PROMPT, 
@@ -58,15 +58,9 @@ class PlanAndExecAgent(BaseAgent):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
             If the agent is running concurrently, the global context may not be working properly.
         prompts (dict[str, str]):
-            The prompts for running specific workflow of the workflow. 
-            The following prompts are supported: 
-            - "plan_system": The system prompt of the plan stage.
-            - "plan_think": The think prompt of the plan stage.
-            - "plan_reflect": The reflect prompt of the plan stage.
-            - "exec_system": The system prompt of the exec stage.
-            - "exec_think": The think prompt of the exec stage.
-            - "exec_reflect": The reflect prompt of the exec stage.
-            - "error": The error prompt of the workflow.
+            The prompts for running the workflow. 
+        observe_format (dict[str, str]):
+            The format of the observation the target. 
     """
     # Basic information
     uid: str
@@ -85,9 +79,8 @@ class PlanAndExecAgent(BaseAgent):
     step_counters: dict[str, StepCounter]
     # Concurrency limit
     lock: Lock
-    # Prompts
+    # Prompts and observe format
     prompts: dict[str, str]
-    # Observe format
     observe_format: dict[str, str]
     
     def __init__(
@@ -104,11 +97,12 @@ class PlanAndExecAgent(BaseAgent):
         exec_reflect_prompt: str = REFLECT_PROMPT, 
         plan_layer_limit: str = PLAN_LAYER_LIMIT, 
         error_prompt: str = ERROR_PROMPT, 
+        agent_prompt: str = AGENT_PROMPT,
         plan_think_format: str = "todo", 
         plan_reflect_format: str = "todo", 
         exec_think_format: str = "todo", 
         exec_reflect_format: str = "document", 
-        *args, 
+        agent_format: str = "todo", 
         **kwargs, 
     ) -> None: 
         """
@@ -139,34 +133,21 @@ class PlanAndExecAgent(BaseAgent):
                 The sub task layer limit prompt of the plan stage.
             error_prompt (str, optional):
                 The error prompt of the workflow.
+            agent_prompt (str, optional):
+                The agent prompt of the workflow.
             plan_think_format (str, optional):
                 The observation format of the plan think stage.
             plan_reflect_format (str, optional):
                 The observation format of the plan reflect stage.
             exec_think_format (str, optional):
                 The observation format of the exec think stage.
-            *args:
-                The arguments to be passed to the parent class.
+            exec_reflect_format (str, optional):
+                The observation format of the exec reflect stage.
+            agent_format (str, optional):
+                The observation format of the agent.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # Prepare the prompts
-        self.plan_system_prompt = plan_system_prompt
-        self.plan_think_prompt = plan_think_prompt
-        self.plan_reflect_prompt = plan_reflect_prompt
-        self.exec_system_prompt = exec_system_prompt
-        self.exec_think_prompt = exec_think_prompt
-        self.exec_reflect_prompt = exec_reflect_prompt
-        self.error_prompt = error_prompt
-        # Prepare the observe formats
-        self.plan_think_format = plan_think_format
-        self.plan_reflect_format = plan_reflect_format
-        self.exec_think_format = exec_think_format
-        self.exec_reflect_format = exec_reflect_format
-        
-        # Additional prompts
-        self.plan_layer_limit = plan_layer_limit if plan_layer_limit != "" else PLAN_LAYER_LIMIT
-        
         super().__init__(
             llm=llm, 
             name=name, 
@@ -175,27 +156,30 @@ class PlanAndExecAgent(BaseAgent):
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             prompts={
-                PlanAndExecStage.PLAN_INIT: self.plan_system_prompt, 
-                PlanAndExecStage.PLAN_REASON_ACT: self.plan_think_prompt, 
-                PlanAndExecStage.PLAN_REFLECT: self.plan_reflect_prompt, 
-                PlanAndExecStage.EXEC_INIT: self.exec_system_prompt, 
-                PlanAndExecStage.EXEC_REASON_ACT: self.exec_think_prompt, 
-                PlanAndExecStage.EXEC_REFLECT: self.exec_reflect_prompt, 
-                PlanAndExecStage.ERROR: self.error_prompt, 
+                "plan_system_prompt": plan_system_prompt, 
+                "plan_reason_act_prompt": plan_think_prompt, 
+                "plan_reflect_prompt": plan_reflect_prompt, 
+                "exec_system_prompt": exec_system_prompt, 
+                "exec_reason_act_prompt": exec_think_prompt, 
+                "exec_reflect_prompt": exec_reflect_prompt, 
+                "error_prompt": error_prompt, 
             }, 
             observe_format={
-                PlanAndExecStage.PLAN_REASON_ACT: self.plan_think_format, 
-                PlanAndExecStage.PLAN_REFLECT: self.plan_reflect_format, 
-                PlanAndExecStage.EXEC_REASON_ACT: self.exec_think_format, 
-                PlanAndExecStage.EXEC_REFLECT: self.exec_reflect_format, 
+                "plan_reason_act_format": plan_think_format, 
+                "plan_reflect_format": plan_reflect_format, 
+                "exec_reason_act_format": exec_think_format, 
+                "exec_reflect_format": exec_reflect_format, 
             }, 
-            *args, 
             **kwargs,
         )
         
         # Read the workflow profile
         # Initialize the workflow for the agent
-        self.workflow = PlanAndExecFlow()
+        self.workflow = PlanAndExecFlow(
+            prompts=self.prompts, 
+            observe_format=self.observe_format, 
+            **kwargs,
+        )
         # Register the agent to the workflow
         self.workflow.register_agent(self)
 

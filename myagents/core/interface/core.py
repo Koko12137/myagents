@@ -341,7 +341,7 @@ class ToolsCaller(Protocol):
         pass
 
     @abstractmethod
-    def call_tool(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
+    async def call_tool(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
         """Call a tool.
         
         Args:

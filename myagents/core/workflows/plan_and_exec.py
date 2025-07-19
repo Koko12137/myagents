@@ -50,7 +50,6 @@ class PlanAndExecFlow(BaseReActFlow):
         self, 
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
-        *args, 
         **kwargs,
     ) -> None:
         """Initialize the OrchestrateFlow.
@@ -59,17 +58,20 @@ class PlanAndExecFlow(BaseReActFlow):
             prompts (dict[str, str], optional):
                 The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
                 The following prompts are required:
-                 - "plan_system_prompt": The system prompt for the plan workflow.
-                 - "plan_reason_act_prompt": The reason act prompt for the plan workflow.
-                 - "plan_reflect_prompt": The reflect prompt for the plan workflow.
-                 - "execute_system_prompt": The system prompt for the execute workflow.
-                 - "execute_reason_act_prompt": The reason act prompt for the execute workflow.
-                 - "execute_reflect_prompt": The reflect prompt for the execute workflow.
-                
+                    "plan_system_prompt": The system prompt for the plan workflow.
+                    "plan_reason_act_prompt": The reason act prompt for the plan workflow.
+                    "plan_reflect_prompt": The reflect prompt for the plan workflow.
+                    "exec_system_prompt": The system prompt for the execute workflow.
+                    "exec_reason_act_prompt": The reason act prompt for the execute workflow.
+                    "exec_reflect_prompt": The reflect prompt for the execute workflow.
+                    "error_prompt": The error prompt for the workflow.
             observe_formats (dict[str, str], optional):
                 The formats of the observation. The key is the observation name and the value is the format method name. 
-            *args:
-                The arguments to be passed to the parent class.
+                The following observe formats are required:
+                    "plan_reason_act": The reason act format for the plan workflow.
+                    "plan_reflect": The reflect format for the plan workflow.
+                    "exec_reason_act": The reason act format for the execute workflow.
+                    "exec_reflect": The reflect format for the execute workflow.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
@@ -88,12 +90,23 @@ class PlanAndExecFlow(BaseReActFlow):
             ), 
         }
         
+        # Prepare the prompts and observe formats for the exec workflow
+        prompts = {
+            "system_prompt": prompts["exec_system_prompt"], 
+            "reason_act_prompt": prompts["exec_reason_act_prompt"], 
+            "reflect_prompt": prompts["exec_reflect_prompt"], 
+            "error_prompt": prompts["error_prompt"], 
+        }
+        observe_formats = {
+            "reason_act": observe_formats["exec_reason_act"], 
+            "reflect": observe_formats["exec_reflect"], 
+        }
+        
         super().__init__(
             profile=PROFILE, 
             prompts=prompts, 
             observe_formats=observe_formats, 
             sub_workflows=sub_workflows, 
-            *args, 
             **kwargs,
         )
         
@@ -105,7 +118,6 @@ class PlanAndExecFlow(BaseReActFlow):
         max_idle_thinking: int = 1, 
         completion_config: CompletionConfig = None, 
         running_checker: Callable[[TreeTaskNode], bool] = None, 
-        *args, 
         **kwargs,
     ) -> TreeTaskNode:
         """Plan and execute the target. This workflow will plan the task and execute the task. 
@@ -113,19 +125,17 @@ class PlanAndExecFlow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to plan and execute. 
-            sub_task_depth (int): 
+            sub_task_depth (int, optional, defaults to -1): 
                 The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
-            max_error_retry (int, optiona):
+                inferred from the target. 
+            max_error_retry (int, optional, defaults to 3):
                 The maximum number of error retries.
-            max_idle_thinking (int, optional):
+            max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of idle thinking.
-            completion_config (CompletionConfig, optional):
+            completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow. 
             running_checker (Callable[[TreeTaskNode], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
-            *args:
-                The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
 
@@ -133,11 +143,16 @@ class PlanAndExecFlow(BaseReActFlow):
             TreeTaskNode:
                 The target after planning and executing.
         """
+        # Check if the completion config is provided
+        if completion_config is None:
+            # Set the completion config to the default completion config
+            completion_config = CompletionConfig()
+        
         # Check if the running checker is provided
         if running_checker is None:
-            # Set the running checker to the default checker
-            running_checker = lambda target: not target.is_finished()
-
+            # Set the running checker to the default running checker
+            running_checker = lambda target: target.is_created()
+        
         # Get the error prompt from the agent
         error_prompt = self.prompts["error_prompt"]
         # Record the current error retry count
@@ -154,6 +169,7 @@ class PlanAndExecFlow(BaseReActFlow):
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
                     completion_config=completion_config, 
+                    **kwargs,
                 )
             
             elif target.is_running():
@@ -163,6 +179,8 @@ class PlanAndExecFlow(BaseReActFlow):
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
                     completion_config=completion_config, 
+                    running_checker=running_checker, 
+                    **kwargs,
                 )
                 # Check if the target is created, if True, then process the error
                 if target.is_created():
@@ -229,7 +247,6 @@ class PlanAndExecFlow(BaseReActFlow):
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
         completion_config: CompletionConfig = None, 
-        *args, 
         **kwargs,
     ) -> TreeTaskNode:
         """Plan the task. This is the pre step of the planning in order to inference the real 
@@ -238,17 +255,15 @@ class PlanAndExecFlow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The task to plan.
-            sub_task_depth (int):
+            sub_task_depth (int, optional, defaults to -1):
                 The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
                 inferred from the target.
-            max_error_retry (int, optional):
+            max_error_retry (int, optional, defaults to 3):
                 The maximum number of error retries.
-            max_idle_thinking (int, optional):
+            max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of idle thinking. 
-            completion_config (CompletionConfig, optional):
+            completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow. 
-            *args:
-                The additional arguments for running the agent.
             **kwargs:
                 The additional keyword arguments for running the agent.
 
@@ -267,7 +282,6 @@ class PlanAndExecFlow(BaseReActFlow):
             max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config, 
             running_checker=running_checker, 
-            *args, 
             **kwargs,
         )
         return target
@@ -278,7 +292,6 @@ class PlanAndExecFlow(BaseReActFlow):
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
         completion_config: CompletionConfig = None, 
-        *args, 
         **kwargs,
     ) -> TreeTaskNode:
         """Deep first execute the task. This is the post step of the planning in order to execute the task. 
@@ -286,14 +299,12 @@ class PlanAndExecFlow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The task to deep first execute.
-            max_error_retry (int, optional):
+            max_error_retry (int, optional, defaults to 3):
                 The maximum number of error retries.
-            max_idle_thinking (int, optional):
+            max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of idle thinking. 
-            completion_config (CompletionConfig, optional):
+            completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow. 
-            *args:
-                The additional arguments for running the agent.
             **kwargs:
                 The additional keyword arguments for running the agent.
                 
@@ -391,7 +402,6 @@ class PlanAndExecFlow(BaseReActFlow):
                 max_error_retry=max_error_retry, 
                 max_idle_thinking=max_idle_thinking, 
                 completion_config=completion_config, 
-                *args, 
                 **kwargs,
             )
             
@@ -401,9 +411,8 @@ class PlanAndExecFlow(BaseReActFlow):
         self, 
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
-        max_idle_thinking: int = 2, 
+        max_idle_thinking: int = 1, 
         completion_config: CompletionConfig = None, 
-        *args, 
         **kwargs,
     ) -> TreeTaskNode:
         """Reason, act and reflect on the target. This is the post step of the planning in order to execute the task. 
@@ -411,14 +420,12 @@ class PlanAndExecFlow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The task to reason, act and reflect.
-            max_error_retry (int, optional):
+            max_error_retry (int, optional, defaults to 3):
                 The maximum number of error retries.
-            max_idle_thinking (int, optional):
+            max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of idle thinking. 
-            completion_config (CompletionConfig, optional):
+            completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow. 
-            *args: 
-                The additional arguments for running the agent.
             **kwargs: 
                 The additional keyword arguments for running the agent.
                 
@@ -432,22 +439,29 @@ class PlanAndExecFlow(BaseReActFlow):
             logger.warning(f"任务 {target.question} 不是运行状态。")
             return target
         
-        # === Prepare System Instruction ===
-        # Get the prompts from the agent
-        exec_system = self.prompts["execute_system_prompt"]
-        # Get the blueprint from the context
-        blueprint = self.agent.env.context.get("blueprint")
-        # Get the task from the context
-        task = self.agent.env.context.get("task")
-        # Convert to task answer view
-        task_result = DocumentTaskView(task).format()
-        
-        # Append the system prompt to the history
-        message = SystemMessage(content=exec_system.format(
-            blueprint=blueprint, 
-            task_result=task_result,
-        ))
-        target.update(message)
+        # Check if the target has history
+        if len(target.get_history()) == 0:
+            # === Prepare System Instruction ===
+            # Get the prompts from the agent
+            exec_system = self.prompts["system_prompt"]
+            # Append the system prompt to the history
+            message = SystemMessage(content=exec_system)
+            # Update the system message to the history
+            target.update(message)
+            
+            # Get the blueprint from the context
+            blueprint = self.agent.env.context.get("blueprint")
+            # Create a UserMessage for the blueprint
+            blueprint_message = UserMessage(content=f"## 任务蓝图\n\n{ToDoTaskView(blueprint).format()}")
+            # Update the blueprint message to the history
+            target.update(blueprint_message)
+            
+            # Get the task from the context
+            task = self.agent.env.context.get("task")
+            # Create a UserMessage for the task results
+            task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=task).format()}")
+            # Update the task message to the history
+            target.update(task_message)
         
         # This is used for no tool calling thinking limit.
         current_thinking = 0
@@ -458,7 +472,6 @@ class PlanAndExecFlow(BaseReActFlow):
             target, error_flag, tool_call_flag = await self.reason_act(
                 target=target, 
                 completion_config=completion_config, 
-                *args, 
                 **kwargs,
             )
             
@@ -489,17 +502,10 @@ class PlanAndExecFlow(BaseReActFlow):
                 if final_output != "":
                     # Set the answer of the task
                     target.results = final_output
-                
-            # Check allow finish
-            if tool_call_flag or error_flag:
-                allow_finish = False
-            else:
-                allow_finish = True
             
             # === Reflect ===
             target, finish_flag = await self.reflect(
                 target=target, 
-                allow_finish=allow_finish, 
                 completion_config=completion_config, 
             )
             # Check if the target is finished
