@@ -69,11 +69,11 @@ class BlueprintWorkflow(BaseReActFlow):
     async def reason_act_reflect(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int, 
-        max_error_retry: int, 
-        max_idle_thinking: int, 
-        completion_config: CompletionConfig, 
-        running_checker: Callable[[TreeTaskNode], bool], 
+        sub_task_depth: int = -1, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        completion_config: CompletionConfig = None, 
+        running_checker: Callable[[TreeTaskNode], bool] = None, 
         **kwargs,
     ) -> TreeTaskNode:
         """Reason and act on the target, and reflect on the target.
@@ -81,22 +81,28 @@ class BlueprintWorkflow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to reason and act on.
-            sub_task_depth (int):
+            sub_task_depth (int, optional, defaults to -1):
                 The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
                 the same as the depth of the target.
-            max_error_retry (int):
+            max_error_retry (int, optional, defaults to 3):
                 The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int):
+            max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of times to idle thinking the agent. 
-            completion_config (CompletionConfig):
+            completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow. 
-            running_checker (Callable[[TreeTaskNode], bool]):
+            running_checker (Callable[[TreeTaskNode], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the agent.
             **kwargs:
                 The additional keyword arguments for running the agent. 
         """
+        # Check if the running checker is provided
+        if running_checker is None:
+            # Set the running checker to the default running checker
+            running_checker = lambda target: target.is_created()
+        
+        # Check if the target has history
         if len(target.get_history()) == 0:
             # Get the system prompt from the agent
             system_prompt = self.prompts["system_prompt"]
@@ -108,6 +114,7 @@ class BlueprintWorkflow(BaseReActFlow):
         current_thinking = 0
         current_error = 0
         
+        # Run the workflow
         while running_checker(target):
         
             # === Reason Stage ===
@@ -192,7 +199,7 @@ class BlueprintWorkflow(BaseReActFlow):
     async def reason_act(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int, 
+        sub_task_depth: int = -1, 
         completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> tuple[TreeTaskNode, bool, bool]:
@@ -201,7 +208,7 @@ class BlueprintWorkflow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to reason and act on.
-            sub_task_depth (int):
+            sub_task_depth (int, optional, defaults to -1):
                 The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
                 the same as the depth of the target.
             completion_config (CompletionConfig, optional, defaults to None):
@@ -216,14 +223,10 @@ class BlueprintWorkflow(BaseReActFlow):
         # Check if the completion config is provided
         if completion_config is None:
             # Set the completion config to the default completion config
-            completion_config = BaseCompletionConfig(temperature=0.0)
+            completion_config = BaseCompletionConfig()
         else:
-            # Update the temperature to 0.0
-            completion_config.update(
-                temperature=0.0, 
-                tools=[], 
-                format_json=True, 
-            )
+            # Ignore the tools
+            completion_config.update(tools=[])
         
         # Initialize the error and tool call flag
         error_flag = False
@@ -234,7 +237,7 @@ class BlueprintWorkflow(BaseReActFlow):
         observe = await self.agent.observe(
             target, 
             prompt=self.prompts["reason_act_prompt"], 
-            observe_format=self.observe_formats["reason_act"]
+            observe_format=self.observe_formats["reason_act_format"]
         )
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
@@ -283,11 +286,14 @@ class OrchestrateFlow(PlanWorkflow):
     observe_formats: dict[str, str]
     # Sub-worflows
     sub_workflows: dict[str, ReActFlow]
+    # Need user check
+    need_user_check: bool
     
     def __init__(
         self, 
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
+        need_user_check: bool = False, 
         **kwargs,
     ) -> None:
         """Initialize the OrchestrateFlow.
@@ -311,6 +317,8 @@ class OrchestrateFlow(PlanWorkflow):
                     "plan_reflect": The format method name of the reflect observation of the plan workflow.
                     "exec_reason_act": The format method name of the reason and act observation of the exec workflow.
                     "exec_reflect": The format method name of the reflect observation of the exec workflow.
+            need_user_check (bool, optional, defaults to False):
+                Whether to need the user to check the orchestration blueprint.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
@@ -323,8 +331,8 @@ class OrchestrateFlow(PlanWorkflow):
                     "reflect_prompt": prompts["plan_reflect_prompt"], 
                 }, 
                 observe_formats={
-                    "reason_act": observe_formats['plan_reason_act'], 
-                    "reflect": observe_formats['plan_reflect'], 
+                    "reason_act_format": observe_formats['plan_reason_act_format'], 
+                    "reflect_format": observe_formats['plan_reflect_format'], 
                 }, 
             ), 
         }
@@ -336,9 +344,10 @@ class OrchestrateFlow(PlanWorkflow):
             "reflect_prompt": prompts["exec_reflect_prompt"], 
         }
         observe_formats = {
-            "reason_act": observe_formats["exec_reason_act"], 
-            "reflect": observe_formats["exec_reflect"], 
+            "reason_act_format": observe_formats["exec_reason_act_format"], 
+            "reflect_format": observe_formats["exec_reflect_format"], 
         }
+        self.need_user_check = need_user_check
         
         # Initialize the parent class
         super().__init__(
@@ -352,29 +361,29 @@ class OrchestrateFlow(PlanWorkflow):
     async def reason(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int, 
-        max_error_retry: int, 
-        max_idle_thinking: int, 
-        completion_config: CompletionConfig, 
-        running_checker: Callable[[TreeTaskNode], bool], 
+        sub_task_depth: int = -1, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 1, 
+        completion_config: CompletionConfig = None, 
+        running_checker: Callable[[TreeTaskNode], bool] = None, 
         **kwargs, 
-    ) -> TreeTaskNode:
+    ) -> tuple[TreeTaskNode, bool]:
         """Reason about the task. This is the pre step of the planning in order to inference the real 
         and detailed requirements of the task. 
         
         Args:
             target (TreeTaskNode):
                 The task to reason about.
-            sub_task_depth (int):
+            sub_task_depth (int, optional, defaults to -1):
                 The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
                 the same as the depth of the target.
-            max_error_retry (int):
+            max_error_retry (int, optional, defaults to 3):
                 The maximum number of error retries.
-            max_idle_thinking (int):
+            max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of idle thinking.
-            completion_config (CompletionConfig):
+            completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow.
-            running_checker (Callable[[TreeTaskNode], bool]):
+            running_checker (Callable[[TreeTaskNode], bool], optional, defaults to None):
                 The checker to check if the workflow should be running.
             **kwargs:
                 The additional keyword arguments for running the agent.
@@ -382,6 +391,8 @@ class OrchestrateFlow(PlanWorkflow):
         Returns:
             TreeTaskNode: 
                 The target after reasoning.
+            bool:
+                The flag to check if the orchestration blueprint is valid.
         """
         # Call the blueprint workflow
         target = await self.sub_workflows["plan"].reason_act_reflect(
@@ -394,18 +405,23 @@ class OrchestrateFlow(PlanWorkflow):
             **kwargs,
         )
         
-        # Update the blueprint to the environment context
-        blueprint = self.sub_workflows["plan"].context.get("blueprint")
-        self.agent.env.context = self.agent.env.context.create_next(blueprint=blueprint, task=target)
-        
-        # Return the target
-        return target
+        try:
+            # Update the blueprint to the environment context
+            blueprint = self.sub_workflows["plan"].context.get("blueprint")
+            self.agent.env.context = self.agent.env.context.create_next(blueprint=blueprint, task=target)
+            # Return the target and the flag
+            return target, True
+        except Exception as e:
+            # Log the error
+            logger.error(f"Error updating the blueprint to the environment context: {e}")
+            # Return the target and the flag
+            return target, False
     
     async def reason_act(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int, 
-        completion_config: CompletionConfig, 
+        sub_task_depth: int = -1, 
+        completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> tuple[TreeTaskNode, bool, bool]:
         """Reason and act on the target.
@@ -413,10 +429,10 @@ class OrchestrateFlow(PlanWorkflow):
         Args:
             target (TreeTaskNode):
                 The target to reason and act on.
-            sub_task_depth (int):
+            sub_task_depth (int, optional, defaults to -1):
                 The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
                 the same as the depth of the target.
-            completion_config (CompletionConfig):
+            completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow. 
             **kwargs:
                 The additional keyword arguments for running the agent.
@@ -425,6 +441,11 @@ class OrchestrateFlow(PlanWorkflow):
             tuple[TreeTaskNode, bool, bool]:
                 The target, the error flag and the tool call flag.
         """
+        # Check if the completion config is provided
+        if completion_config is None:
+            # Set the completion config to the default completion config
+            completion_config = BaseCompletionConfig()
+        
         # Initialize the error and tool call flag
         error_flag = False
         tool_call_flag = False
@@ -433,7 +454,7 @@ class OrchestrateFlow(PlanWorkflow):
         observe = await self.agent.observe(
             target, 
             prompt=self.prompts["reason_act_prompt"], 
-            observe_format=self.observe_formats["reason_act"], 
+            observe_format=self.observe_formats["reason_act_format"], 
         )
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
@@ -453,7 +474,7 @@ class OrchestrateFlow(PlanWorkflow):
 
         # Create new tasks based on the orchestration json
         message, error_flag = self.create_task(
-            target=target, 
+            parent=target, 
             orchestrate_json=message.content, 
             sub_task_depth=sub_task_depth, 
         )    # BUG: 这里message.content可能为None
@@ -505,9 +526,9 @@ class OrchestrateFlow(PlanWorkflow):
             running_checker = lambda target: target.is_created()
         
         # Check if the target is running
-        if running_checker(target):
+        while running_checker(target):
             # Reason about the task and get the orchestration blueprint
-            await self.reason(
+            target, blueprint_valid = await self.reason(
                 target=target, 
                 sub_task_depth=sub_task_depth, 
                 max_error_retry=max_error_retry, 
@@ -516,13 +537,29 @@ class OrchestrateFlow(PlanWorkflow):
                 running_checker=running_checker, 
                 **kwargs, 
             )
-        else:
-            # Log the error
-            logger.error("The target is not running, the workflow is not executed.")
-            # Set the target to error
-            target.to_error()
-            # Return the target
-            return target
+            
+            # Check if the orchestration blueprint is valid
+            if blueprint_valid:
+                # Log the valid blueprint
+                logger.info("Orchestration blueprint is valid.")
+                
+                # Check if the need user check is set
+                if self.need_user_check:
+                    raise NotImplementedError("User check is not implemented yet.")
+                    # Call the proxy agent of the environment for response
+                    message = await self.agent.env.call_agent()
+                    # Update the message to the target
+                    target.update(message)
+                    # Log the message
+                    logger.info(f"User Check Message: \n{message.content}")
+                    # Check if the user has checked the orchestration blueprint
+                    if message.content == "yes":
+                        # Break the loop
+                        break
+                
+                else:
+                    # Break the loop
+                    break
         
         # Run the ReActFlow to create the tasks
         if running_checker(target):

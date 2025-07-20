@@ -75,9 +75,9 @@ class BaseReActFlow(BaseWorkflow):
             raise ValueError("The reflect prompt is required.")
         
         # Check the observe formats
-        if "reason_act" not in observe_formats:
+        if "reason_act_format" not in observe_formats:
             raise ValueError("The reason act format is required.")
-        if "reflect" not in observe_formats:
+        if "reflect_format" not in observe_formats:
             raise ValueError("The reflect format is required.")
         
         # Initialize the workflow
@@ -300,7 +300,7 @@ class BaseReActFlow(BaseWorkflow):
         # Check if the completion config is provided
         if completion_config is None:
             # Set the completion config to the default completion config
-            completion_config = BaseCompletionConfig(temperature=1.0)
+            completion_config = BaseCompletionConfig()
         
         # Initialize the error and tool call flag
         error_flag = False
@@ -314,7 +314,7 @@ class BaseReActFlow(BaseWorkflow):
         observe = await self.agent.observe(
             target, 
             prompt=self.prompts["reason_act_prompt"], 
-            observe_format=self.observe_formats["reason_act"]
+            observe_format=self.observe_formats["reason_act_format"]
         )
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
@@ -385,7 +385,7 @@ class BaseReActFlow(BaseWorkflow):
         observe = await self.agent.observe(
             target, 
             prompt=self.prompts["reflect_prompt"], 
-            observe_format=self.observe_formats["reflect"]
+            observe_format=self.observe_formats["reflect_format"]
         )
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")

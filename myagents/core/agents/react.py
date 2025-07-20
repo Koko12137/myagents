@@ -8,7 +8,7 @@ from myagents.core.interface import LLM, Workflow, Environment, StepCounter
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.types import AgentType
 from myagents.core.workflows import BaseReActFlow
-from myagents.prompts.workflows.react import PROFILE, SYSTEM_PROMPT, THINK_PROMPT, REFLECT_PROMPT, AGENT_PROMPT
+from myagents.prompts.workflows.react import PROFILE, SYSTEM_PROMPT, THINK_PROMPT, REFLECT_PROMPT
 
 
 
@@ -28,7 +28,7 @@ class ReActAgent(BaseAgent):
             The unique identifier of the agent.
         name (str):
             The name of the agent.
-        type (AgentType):
+        agent_type (AgentType):
             The type of the agent.
         profile (str):
             The profile of the agent.
@@ -47,13 +47,13 @@ class ReActAgent(BaseAgent):
             If the agent is running concurrently, the global context may not be working properly.
         prompts (dict[str, str]):
             The prompts for running the workflow. 
-        observe_format (dict[str, str]):
+        observe_formats (dict[str, str]):
             The format of the observation the target. 
     """
     # Basic information
     uid: str
     name: str
-    type: AgentType
+    agent_type: AgentType
     profile: str
     # LLM and MCP client
     llm: LLM
@@ -69,7 +69,7 @@ class ReActAgent(BaseAgent):
     lock: Lock
     # Prompts and observe format
     prompts: dict[str, str]
-    observe_format: dict[str, str]
+    observe_formats: dict[str, str]
     
     def __init__(
         self, 
@@ -80,7 +80,6 @@ class ReActAgent(BaseAgent):
         system_prompt: str = SYSTEM_PROMPT, 
         reason_act_prompt: str = THINK_PROMPT, 
         reflect_prompt: str = REFLECT_PROMPT, 
-        agent_prompt: str = AGENT_PROMPT,
         reason_act_format: str = "document", 
         reflect_format: str = "todo", 
         agent_format: str = "todo", 
@@ -104,8 +103,6 @@ class ReActAgent(BaseAgent):
                 The think prompt of the workflow.
             reflect_prompt (str):
                 The reflect prompt of the workflow.
-            agent_prompt (str):
-                The agent prompt of the workflow.
             reason_act_format (str):
                 The observation format of the think stage.
             reflect_format (str):
@@ -129,9 +126,8 @@ class ReActAgent(BaseAgent):
                 "system_prompt": system_prompt, 
                 "reason_act_prompt": reason_act_prompt, 
                 "reflect_prompt": reflect_prompt, 
-                "agent_prompt": agent_prompt, 
             }, 
-            observe_format={
+            observe_formats={
                 "reason_act_format": reason_act_format, 
                 "reflect_format": reflect_format, 
                 "agent_format": agent_format, 
@@ -142,7 +138,7 @@ class ReActAgent(BaseAgent):
         # Initialize the workflow for the agent
         self.workflow = BaseReActFlow(
             prompts=self.prompts, 
-            observe_format=self.observe_format, 
+            observe_formats=self.observe_formats, 
             **kwargs,
         )
         # Register the agent to the workflow

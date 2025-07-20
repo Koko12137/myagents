@@ -70,7 +70,7 @@ class BaseAgent(Agent):
     lock: Lock
     # Prompts and observe format
     prompts: dict[str, str]
-    observe_format: dict[str, str]
+    observe_formats: dict[str, str]
     
     def __init__(
         self, 
@@ -81,7 +81,7 @@ class BaseAgent(Agent):
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
         prompts: dict[str, str] = None, 
-        observe_format: dict[str, str] = None, 
+        observe_formats: dict[str, str] = None, 
         **kwargs, 
     ) -> None:
         """Initialize the BaseAgent.
@@ -101,7 +101,7 @@ class BaseAgent(Agent):
                 The MCP client to use for the agent. If not provided, No MCP tools can be used.  
             prompts (dict[str, str], optional):
                 The prompts for running specific workflow of the workflow. 
-            observe_format (dict[str, str], optional):
+            observe_formats (dict[str, str], optional):
                 The format of the observation. 
             **kwargs:
                 The keyword arguments to be passed to the parent class.
@@ -118,9 +118,6 @@ class BaseAgent(Agent):
         self.llm = llm
         self.mcp_client = mcp_client
         self.tools = {}
-        # Initialize the prompts and observe format
-        self.prompts = prompts
-        self.observe_format = observe_format
         # Initialize the workflow and environment
         self.workflow = None
         self.env = None
@@ -128,6 +125,9 @@ class BaseAgent(Agent):
         self.step_counters = {counter.uid: counter for counter in step_counters}
         # Initialize the synchronization lock
         self.lock = Lock()
+        # Initialize the prompts and observe format
+        self.prompts = prompts
+        self.observe_formats = observe_formats
         
     async def observe(
         self, 
@@ -338,14 +338,14 @@ class BaseAgent(Agent):
         
         # Observe the target    
         # BUG: 这里没有判断任务执行后的状态，如果任务执行后是error，应该返回error message
-        observe = target.observe(self.observe_format["agent_format"])
+        observe = await target.observe(self.observe_formats["agent_format"])
         # Create a new assistant message
-        message = AssistantMessage(content=f"{self.prompts['agent_format']}\n{observe}")
+        message = AssistantMessage(content=f"## 任务执行结果\n\n{observe}")
         # Log the message
         if logger.level == "DEBUG":
-            logger.debug(f"Full Assistant Message: \n{message}")
+            logger.debug(f"{str(self)}: \n{message}")
         else:
-            logger.info(f"Assistant Message: \n{message.content}")
+            logger.info(f"{str(self)}: \n{message.content}")
         return message
 
     def register_counter(self, counter: StepCounter) -> None:

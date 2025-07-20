@@ -1,15 +1,14 @@
 import os
 import getpass
 import json
-from asyncio import Queue
-from typing import Optional, Union
+from typing import Union
 
 from loguru import logger
 from openai import AsyncOpenAI
-from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Provider
 from myagents.core.messages import ToolCallRequest, ToolCallResult, AssistantMessage, StopReason, CompletionUsage, MessageRole, UserMessage, SystemMessage
+from myagents.core.interface import LLM, Provider
+from myagents.core.interface.llm import CompletionConfig
 from myagents.core.messages.openai_adapter import to_openai_dict
 
 
@@ -23,7 +22,6 @@ class OpenAiLLM(LLM):
         self, 
         model: str, 
         base_url: str, 
-        temperature: float = 1.0, 
         **kwargs
     ) -> None:
         """Initialize the OpenAiLLM.
@@ -42,11 +40,14 @@ class OpenAiLLM(LLM):
             **kwargs: 
                 The additional keyword arguments.
         """
+        # Initialize the parent class
+        super().__init__(**kwargs)
+        
+        # Initialize the provider
         self.provider = Provider.OPENAI
         
         self.model = model
         self.base_url = base_url
-        self.temperature = temperature
         
         # Initialize the client
         api_key_field = kwargs.get("api_key_field", "OPENAI_KEY")
@@ -64,11 +65,7 @@ class OpenAiLLM(LLM):
     async def completion(
         self, 
         messages: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]], 
-        available_tools: Optional[list[dict[str, str]]] = None, 
-        tool_choice: Union[str, FastMcpTool] = "auto", 
-        format_json: bool = False, 
-        stream: bool = False, 
-        queue: Optional[Queue] = None, 
+        completion_config: CompletionConfig, 
         **kwargs, 
     ) -> AssistantMessage:
         """Completion the messages.
@@ -76,17 +73,8 @@ class OpenAiLLM(LLM):
         Args:
             messages (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]): 
                 The messages to complete.
-            available_tools (Optional[list[dict[str, str]]], optional): 
-                The available tools. Defaults to None.
-            tool_choice (str, defaults to "auto"):
-                The tool choice to use for the agent. This is used to control the tool calling. 
-                - "auto": The agent will automatically choose the tool to use. 
-            format_json (bool, defaults to False):
-                Whether to format the json in the assistant message.
-            stream (bool, defaults to False):
-                Whether to stream the completion.
-            queue (Optional[Queue], optional):
-                The queue to use for the completion.
+            completion_config (CompletionConfig):
+                The completion configuration.
             **kwargs:
                 The additional keyword arguments.
                 
@@ -98,18 +86,14 @@ class OpenAiLLM(LLM):
             AssistantMessage: 
                 The completed message.
         """
-        kwargs = self.__prepare_kwargs(
-            available_tools=available_tools, 
-            tool_choice=tool_choice, 
-            format_json=format_json, 
-            **kwargs,
-        )
+        kwargs = completion_config.to_dict(provider=self.provider)
         
         # Create the generation history
         history = to_openai_dict(messages)
             
         # Call for the completion
         response = await self.client.chat.completions.create(
+            model=self.model, 
             messages=history, 
             **kwargs, 
         )
@@ -162,68 +146,3 @@ class OpenAiLLM(LLM):
             stop_reason=stop_reason, 
             usage=usage, 
         )
-
-    def __prepare_kwargs(self, **kwargs) -> dict:
-        """Prepare the kwargs for the completion.
-        
-        Args:
-            **kwargs:
-                The additional keyword arguments.
-                
-        Returns:
-            dict:
-                The prepared kwargs.
-        """
-        arguments = {
-            "model": self.model, 
-            "temperature": kwargs.get("temperature", self.temperature), 
-            "parallel_tool_calls": kwargs.get("parallel_tool_calls", True), 
-        }
-            
-        # Check the output token limit
-        max_tokens = kwargs.get("max_tokens", None)
-        if max_tokens is not None:
-            arguments["max_tokens"] = max_tokens
-            # Log the max tokens
-            logger.info(f"Max tokens is set to {max_tokens}")
-            
-        # Check the format json
-        if kwargs.get("format_json", False):
-            arguments["response_format"] = {
-                "type": "json_object",
-            }
-            # Log the response format
-            logger.warning(f"Response format is set to {arguments['response_format']}")
-            
-            # Return the arguments, JSON format does not support tools and tool choice
-            return arguments
-        
-        # Check tools are provided
-        available_tools: list[dict[str, str]] = kwargs.get("available_tools", None)
-        if available_tools is not None and len(available_tools) == 0:
-            available_tools = None
-        else:
-            # Check the tool choice if the available tools are provided
-            tool_choice = kwargs.get("tool_choice", None)
-            if tool_choice is not None:
-                if isinstance(tool_choice, str):
-                    # Remove unexpectable tools
-                    available_tools = [tool for tool in available_tools if tool["function"]["name"] == tool_choice]
-                    if len(available_tools) == 0:
-                        logger.critical(f"Tool choice {tool_choice} is not in the available tools.")
-                        raise ValueError(f"Tool choice {tool_choice} is not in the available tools.")
-
-                    # Get the tool from the available tools
-                    tool_choice = available_tools[0]
-                    # Set the tool choice
-                    arguments["tool_choice"] = tool_choice
-                    # Log the tool choice
-                    logger.warning(f"Tool choice: {arguments['tool_choice']}")
-                else:
-                    logger.critical(f"Tool choice expected: str, the name of the tool, got: {type(tool_choice)}")
-                    # Raise an error for the unsupported tool choice type
-                    raise ValueError(f"Tool choice expected: str, the name of the tool, got: {type(tool_choice)}")
-            
-            arguments["tools"] = available_tools
-        
-        return arguments

@@ -177,6 +177,8 @@ class BaseStepCounter(MaxStepCounter):
         """
         async with self.lock:
             self.current += 1
+            # Log the current step
+            logger.warning(f"The current step is {self.current}, the limit is {self.limit}.")
             
         # Check if the current step is greater than the max auto steps
         if await self.check_limit():

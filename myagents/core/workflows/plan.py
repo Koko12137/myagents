@@ -13,6 +13,14 @@ from myagents.core.utils.strings import normalize_string
 from myagents.prompts.workflows.plan import PROFILE
 
 
+PLAN_LAYER_LIMIT = """
+### 规划层级限制
+对于这个任务，你最多可以拆解到 {detail_level} 层（层指的是层次遍历任务树的层数，如果用户要求的层数越高，则你需要越详细规划）。
+【注意】：如果你的规划超出了层数限制，超出这个层级的拆解将会被视为错误，并会被强制截断。
+【提示】：“问题1”表示第一层，“问题1.1”表示第二层，以此类推。
+"""
+
+
 class PlanWorkflow(BaseReActFlow):
     """PlanWorkflow is a workflow for planning the task. This overload the `reason_act` method of the BaseReActFlow 
     for generating json and creating the tree task nodes. The following schema is used for the orchestration:
@@ -69,8 +77,8 @@ class PlanWorkflow(BaseReActFlow):
             observe_formats (dict[str, str], optional):
                 The formats of the observation. The key is the observation name and the value is the format method name. 
                 The following observe formats are required:
-                    "reason_act": The reason act format for the plan workflow.
-                    "reflect": The reflect format for the plan workflow.
+                    "reason_act_format": The reason act format for the plan workflow.
+                    "reflect_format": The reflect format for the plan workflow.
             sub_workflows (dict[str, Workflow], optional):
                 The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the 
                 sub-workflow instance. 
@@ -85,9 +93,9 @@ class PlanWorkflow(BaseReActFlow):
         if "reflect_prompt" not in prompts:
             raise ValueError("The reflect prompt is required.")
         # Check the observe formats
-        if "reason_act" not in observe_formats:
+        if "reason_act_format" not in observe_formats:
             raise ValueError("The reason act format is required.")
-        if "reflect" not in observe_formats:
+        if "reflect_format" not in observe_formats:
             raise ValueError("The reflect format is required.")
         
         super().__init__(
@@ -126,11 +134,6 @@ class PlanWorkflow(BaseReActFlow):
             orchestration: dict[str, dict], 
             sub_task_depth: int, 
         ) -> None:
-            if sub_task_depth <= 0:
-                # Set the task status to running
-                parent.to_running()
-                return 
-            
             # Traverse the orchestration
             for uid, value in orchestration.items():
                 # Convert the value to string
@@ -145,16 +148,24 @@ class PlanWorkflow(BaseReActFlow):
                     key_results=key_outputs, 
                     sub_task_depth=sub_task_depth - 1,
                 )
-                # Create the sub-tasks
-                dfs_create_task(
-                    parent=new_task, 
-                    orchestration=value['子任务'], 
-                    sub_task_depth=sub_task_depth - 1, 
-                )
+                
                 # Link the new task to the parent task
                 new_task.parent = parent
                 # Add the new task to the parent task
                 parent.sub_tasks[uid] = new_task
+                
+                # Try to get the sub-task from the parent task
+                sub_tasks = value.get('子任务', {})
+                if len(sub_tasks) > 0 and sub_task_depth > 0:
+                    # Create the sub-tasks
+                    dfs_create_task(
+                        parent=new_task, 
+                        orchestration=sub_tasks, 
+                        sub_task_depth=sub_task_depth - 1, 
+                    )
+                elif sub_task_depth == 0:
+                    # Set the task status to running
+                    new_task.to_running()
         
         try:
             # Repair the json
@@ -211,26 +222,29 @@ class PlanWorkflow(BaseReActFlow):
         # Check if the completion config is provided
         if completion_config is None:
             # Set the completion config to the default completion config
-            completion_config = BaseCompletionConfig(temperature=0.0)
+            completion_config = BaseCompletionConfig(format_json=True)
         else:
-            # Update the temperature to 0.0
-            completion_config.update(
-                temperature=0.0, 
-                tools=[], 
-                format_json=True, 
-                allow_thinking=False, 
-            )
+            # Update the format_json to True
+            completion_config.update(format_json=True)
+            
+        # Check if the sub-task depth is -1
+        if sub_task_depth == -1:
+            # Get the sub-task depth from the parent
+            sub_task_depth = target.sub_task_depth
         
         # Initialize the error and tool call flag
         error_flag = False
         tool_call_flag = False
         
         # === Thinking ===
+        reason_act_prompt = self.prompts["reason_act_prompt"]
+        # Append layer limit to the reason act prompt
+        reason_act_prompt = f"{reason_act_prompt}\n\n{PLAN_LAYER_LIMIT.format(detail_level=sub_task_depth)}"
         # Observe the target
         observe = await self.agent.observe(
             target, 
-            prompt=self.prompts["reason_act_prompt"], 
-            observe_format=self.observe_formats["reason_act"]
+            prompt=reason_act_prompt, 
+            observe_format=self.observe_formats["reason_act_format"]
         )
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
@@ -255,9 +269,48 @@ class PlanWorkflow(BaseReActFlow):
         logger.info(f"Create Task Message: \n{message.content}")
         # Update the target with the user message
         target.update(message)
-        
         # Return the target, error flag and tool call flag
         return target, error_flag, tool_call_flag
+    
+    async def reflect(
+        self, 
+        target: TreeTaskNode, 
+        sub_task_depth: int = -1, 
+        completion_config: CompletionConfig = None, 
+        **kwargs,
+    ) -> tuple[TreeTaskNode, bool]:
+        """Reflect on the target.
+        
+        Args:
+            target (TreeTaskNode):
+                The target to reflect on.
+            sub_task_depth (int, optional, defaults to -1):
+                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
+                inferred from the target.
+            completion_config (CompletionConfig, optional, defaults to None):
+                The completion config of the workflow. 
+            **kwargs: 
+                The additional keyword arguments for running the agent.
+                
+        Returns:
+            tuple[TreeTaskNode, bool]:
+                The target and the finish flag.
+        """
+        if sub_task_depth == -1:
+            # Get the sub-task depth from the target
+            sub_task_depth = target.sub_task_depth
+        
+        # Create a new message for layer limit announcement
+        layer_limit_message = UserMessage(content=f"## 拆解层次限制\n\n【注意】：你最多只能拆解 {sub_task_depth} 层子任务。")
+        # Update the layer limit message to the target
+        target.update(layer_limit_message)
+        
+        # Call the parent reflect method
+        return await super().reflect(
+            target=target, 
+            completion_config=completion_config, 
+            **kwargs,
+        )
 
     async def run(
         self, 
@@ -311,6 +364,7 @@ class PlanWorkflow(BaseReActFlow):
     async def reason_act_reflect(
         self, 
         target: TreeTaskNode, 
+        sub_task_depth: int = -1, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
         completion_config: CompletionConfig = None, 
@@ -322,6 +376,9 @@ class PlanWorkflow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to reason and act on. 
+            sub_task_depth (int, optional, defaults to -1):
+                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
+                inferred from the target.
             max_error_retry (int, optional, defaults to 3):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
@@ -346,10 +403,8 @@ class PlanWorkflow(BaseReActFlow):
             target.update(message)
             # Create a new messsage announcing the blueprint
             blueprint = self.agent.env.context.get("blueprint")
-            # Create a ToDoTaskView for the blueprint
-            view = ToDoTaskView(task=blueprint).format()
             # Create a UserMessage for the blueprint
-            blueprint_message = UserMessage(content=f"## 任务蓝图\n\n{view}")
+            blueprint_message = UserMessage(content=f"## 任务总体规划蓝图\n\n{blueprint}")
             # Update the blueprint message to the history
             target.update(blueprint_message)
             # Create a new message for the current task results
@@ -362,6 +417,7 @@ class PlanWorkflow(BaseReActFlow):
         # Run the workflow
         return await super().reason_act_reflect(
             target=target, 
+            sub_task_depth=sub_task_depth, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config, 

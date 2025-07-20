@@ -7,11 +7,12 @@ from typing import Union, Any, Callable
 
 from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
+from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
 from myagents.core.interface import Agent, Environment, Context, Stateful
 from myagents.core.agents import AgentType
 from myagents.core.state_mixin import StateMixin
 from myagents.core.tools_mixin import ToolsMixin
+from myagents.core.llms.config import BaseCompletionConfig
 
 
 class EnvironmentStatus(Enum):
@@ -85,7 +86,6 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         profile: str, 
         prompts: dict[str, str], 
         required_agents: list[AgentType], 
-        *args, 
         **kwargs, 
     ) -> None:
         """Initialize the BaseEnvironment.
@@ -99,13 +99,11 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The prompts of the environment. The key is the prompt name and the value is the prompt content. 
             required_agents (list[AgentType]):
                 The required agents to work on the environment. The agents in the list must be registered to the environment. 
-            *args:
-                The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
         # Initialize the parent class
-        super().__init__(status_class=EnvironmentStatus, *args, **kwargs)
+        super().__init__(status_class=EnvironmentStatus, **kwargs)
         
         # Initialize the basic information
         self.uid = str(uuid4())
@@ -137,15 +135,15 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         # Register the agent to the environment
         self.agents[agent.name] = agent
         # Set the agent type map
-        if agent.type not in self.agent_type_map:
-            self.agent_type_map[agent.type] = []
+        if agent.agent_type not in self.agent_type_map:
+            self.agent_type_map[agent.agent_type] = []
             # Initialize the semaphore
-            self.agent_type_semaphore[agent.type] = Semaphore(1)
+            self.agent_type_semaphore[agent.agent_type] = Semaphore(1)
         else:
             # Increase the semaphore
-            self.agent_type_semaphore[agent.type].release()
+            self.agent_type_semaphore[agent.agent_type].release()
         
-        self.agent_type_map[agent.type].append(agent.name)
+        self.agent_type_map[agent.agent_type].append(agent.name)
     
     def set_leader(self, leader_agent: str) -> None:
         """Set the leader agent to the environment.
@@ -171,10 +169,9 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         target: Stateful, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
-        completion_config: dict[str, Any] = {}, 
+        completion_config: BaseCompletionConfig = None, 
         running_checker: Callable[[Stateful], bool] = None, 
         designated_agent: str = None, 
-        *args, 
         **kwargs
     ) -> AssistantMessage:
         """Call an agent to work on the environment and return the message.
@@ -192,16 +189,12 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional):
                 The maximum number of times to idle thinking the agent.
-            completion_config (dict[str, Any], optional):
-                The completion config of the agent. The following completion config are supported:
-                - "tool_choice": The tool choice to use for the agent. 
-                - "exclude_tools": The tools to exclude from the tool choice. 
+            completion_config (BaseCompletionConfig, optional):
+                The completion config of the agent. 
             running_checker (Callable[[Stateful], bool], optional):
                 The checker to check if the workflow should be running.
             designated_agent (str, optional):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
-            *args:
-                The additional arguments to pass to the agent.
             **kwargs:
                 The additional keyword arguments to pass to the agent.
         
@@ -223,7 +216,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             if designated_agent not in self.agents:
                 raise ValueError(f"Agent {designated_agent} is not registered. Please register the agent to the environment.")
             # Check if the designated agent is of the same type
-            if self.agents[designated_agent].type != agent_type: 
+            if self.agents[designated_agent].agent_type != agent_type: 
                 raise ValueError(f"Agent {designated_agent} is not of type {agent_type}. Please register the agent to the environment.")
             # Acquire the semaphore
             await self.agent_type_semaphore[agent_type].acquire()
@@ -245,7 +238,6 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             max_idle_thinking, 
             completion_config, 
             running_checker=running_checker, 
-            *args, 
             **kwargs,
         )
         # Release the semaphore

@@ -11,8 +11,8 @@ from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage,
 from myagents.core.interface import Agent, TreeTaskNode, Context
 from myagents.core.agents import AgentType
 from myagents.core.tasks import BaseTreeTaskNode, DocumentTaskView, ToDoTaskView
+from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
-from myagents.core.utils.tools import ToolView
 from myagents.tools.docs import DocumentLog, BaseDocument, FormatType
 from myagents.prompts.envs.query import (
     NAME, 
@@ -110,7 +110,8 @@ class Query(BaseEnvironment):
         doc_prompt: str = "", 
         select_prompt: str = "", 
         error_prompt: str = "", 
-        *args, 
+        need_user_check: bool = False, 
+        intent_recognition: bool = False, 
         **kwargs,
     ) -> None:
         """Initialize the Query environment.
@@ -128,8 +129,10 @@ class Query(BaseEnvironment):
                 The select prompt of the environment.
             error_prompt (str, optional, defaults to ""):
                 The error prompt of the environment.
-            *args:
-                The arguments to be passed to the parent class.
+            need_user_check (bool, optional, defaults to False):
+                Whether to need the user to check the orchestration blueprint.
+            intent_recognition (bool, optional, defaults to False):
+                Whether to need the user to recognize the intent of the question.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
@@ -145,7 +148,6 @@ class Query(BaseEnvironment):
                 "error": error_prompt if error_prompt != "" else QUERY_ERROR_PROMPT,
             }, 
             required_agents=REQUIRED_AGENTS, 
-            *args, 
             **kwargs,
         )
         
@@ -153,6 +155,12 @@ class Query(BaseEnvironment):
         self.tasks = OrderedDict()
         # Initialize the answers
         self.answers = OrderedDict()
+        # Initialize the need user check
+        self.need_user_check = need_user_check
+        if self.need_user_check:
+            self.required_agents.append(AgentType.PROXY)
+        # Initialize the intent recognition
+        self.intent_recognition = intent_recognition
         # Post initialize
         self.post_init()
         
@@ -202,7 +210,7 @@ class Query(BaseEnvironment):
             return result
         
         @self.register_tool("select_answer")
-        async def select_answer(answer: str) -> str:
+        async def select_answer(answer: str) -> ToolCallResult:
             """
             选择当前任务的答案。如果是选择题，则需要调用这个工具来选择答案，你传入的选项必须是题目中给出的选项。
             
@@ -212,8 +220,9 @@ class Query(BaseEnvironment):
                     - 如果是选择题，则需要传入题目中给出的选项，例如："A"。注意不要有任何其他字符。
                     - 如果是填空题，则需要传入填空的内容。
                     【注意】：其他类型题目，请不要调用这个工具。
+            
             Returns:
-                str:
+                ToolCallResult:
                     选项（不允许包含除选项外的任何字符）或者填空的内容。
             """
             # Get the task
@@ -229,17 +238,6 @@ class Query(BaseEnvironment):
                 content=f"答案已选择。",
             )
             return result
-        
-        # Check the registered tools count
-        if len(self.tools) == 0:
-            logger.error(f"Query 注册的工具为空: {format_exc()}")
-            raise RuntimeError("No tools registered for the query environment.")
-        
-        # Check the tools
-        tool_str = ""
-        for tool in self.tools.values():
-            tool_str += f"{ToolView(tool).format()}\n"
-        logger.debug(f"Tools: \n{tool_str}")
                 
     async def run(
         self, 
@@ -492,9 +490,9 @@ class Query(BaseEnvironment):
                 The orchestrated task.
         """
         # Prepare the completion config
-        completion_config = {
-            "exclude_tools": ["select_answer", "diff_modify"],
-        }
+        completion_config = BaseCompletionConfig(
+            exclude_tools=["select_answer", "diff_modify"],
+        )
         
         # Record the question
         message = UserMessage(
@@ -548,9 +546,9 @@ class Query(BaseEnvironment):
                 The planned and executed task.
         """
         # Prepare the completion config
-        completion_config = {
-            "exclude_tools": ["select_answer", "diff_modify"],
-        }
+        completion_config = BaseCompletionConfig(
+            exclude_tools=["select_answer", "diff_modify"],
+        )
         
         # Record the question
         message = UserMessage(

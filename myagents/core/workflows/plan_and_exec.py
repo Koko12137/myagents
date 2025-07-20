@@ -84,8 +84,8 @@ class PlanAndExecFlow(BaseReActFlow):
                     "reflect_prompt": prompts["plan_reflect_prompt"], 
                 }, 
                 observe_formats={
-                    "reason_act": observe_formats['plan_reason_act'], 
-                    "reflect": observe_formats['plan_reflect'], 
+                    "reason_act_format": observe_formats['plan_reason_act_format'], 
+                    "reflect_format": observe_formats['plan_reflect_format'], 
                 }, 
             ), 
         }
@@ -98,8 +98,8 @@ class PlanAndExecFlow(BaseReActFlow):
             "error_prompt": prompts["error_prompt"], 
         }
         observe_formats = {
-            "reason_act": observe_formats["exec_reason_act"], 
-            "reflect": observe_formats["exec_reflect"], 
+            "reason_act_format": observe_formats["exec_reason_act_format"], 
+            "reflect_format": observe_formats["exec_reflect_format"], 
         }
         
         super().__init__(
@@ -143,11 +143,6 @@ class PlanAndExecFlow(BaseReActFlow):
             TreeTaskNode:
                 The target after planning and executing.
         """
-        # Check if the completion config is provided
-        if completion_config is None:
-            # Set the completion config to the default completion config
-            completion_config = CompletionConfig()
-        
         # Check if the running checker is provided
         if running_checker is None:
             # Set the running checker to the default running checker
