@@ -8,52 +8,41 @@ from traceback import format_exc
 from loguru import logger
 from datasets import load_from_disk
 
-from myagents.core.envs.task import BaseTask, TaskContextView
+from myagents.core.envs.orchestrate import Orchestrate
+from myagents.core.tasks.task import BaseTreeTaskNode, ToDoTaskView
 from myagents.core.llms import to_openai_dict
 from myagents.core.factory import AutoAgent, AutoAgentConfig
 from myagents.core.interface import Workflow
-from myagents.core.agents import MaxStepsError, TokenStepCounter
+from myagents.core.utils.step_counters import MaxStepsError, TokenStepCounter
 
 
 PROMPT = """
-# 阶段规范：任务分解规划阶段
-**阶段核心任务**： 
-- 创建完整的任务层级结构蓝图，拆分规划不同层级的任务
-- 定义每个子任务的信息需求，包括任务描述、是否叶子节点、子任务列表等
-- 标记叶子节点任务，当所有叶子节点都被执行后父节点才会被执行 
+# ORCHESTRATE —— EXEC —— 任务创建阶段
 
-## 行动约束
-- 本阶段必须完成**整个任务树**的顶层设计
-- 需预见所有潜在子任务层级
-- 你可以看看自己都有什么工具可以用，这些工具可以帮你完成任务。
-- `Is Leaf=True` 仅当任务**不再可分**且**可直接执行**
-- 非叶子任务必须包含`Sub-Tasks`属性
-- 所有描述必须基于上下文需求，禁止虚构超出观察到的上下文范围的任务
+## 任务描述
+你当前处于 “Orchestrate” 工作流中，你已经完成了任务的总体结构规划，现在需要根据规划的蓝图，创建任务。
+【注意】：严令禁止直接回答任务，你只能思考和规划一步步应该怎么做。
+【注意】：严令禁止修改总体规划，你只能根据总体规划，创建任务。
+【注意】：最多有一层任务目标，即每个关键目标不能有子任务。这不意味着你只能创建一个任务目标，你可以
+    创建多个任务目标（它们必须处于同一层）。
 
-## 输出格式
-<think>
-分析任务分解逻辑和层级设计依据
-</think>
-<orchestration>
-这里写你的任务分解规划
-</orchestration>
+## 格式要求
+这个阶段你不能思考，你只能按照蓝图规划的任务目标和关键产出，给出创建任务用的JSON。
 
-## 任务信息
-{task_info}
+## 任务总体规划蓝图
+
+{blueprint}
 """
 
 
 async def process_single_task(
-    config: AutoAgentConfig,
-    prompt: str, 
-    token_counter: TokenStepCounter = None, 
+    config: AutoAgentConfig, 
+    description: str,
 ) -> list[dict[str, Union[str, dict]]]:
     """处理单个任务
 
     Args:
         config (AutoAgentConfig): 配置信息
-        prompt (str): 提示词
-        token_counter (TokenStepCounter, optional): 全局令牌计数器. 默认为None
     
     Returns:
         list[dict[str, Union[str, dict]]]: 
@@ -61,42 +50,34 @@ async def process_single_task(
     """
     # 创建工厂实例
     factory = AutoAgent()
-    # 构建工作流
-    workflow: Workflow = factory.auto_build(config)
-    # 创建新任务
-    task = BaseTask(question="请认真思考后回答以下问题：", description=prompt)
-    # 注册令牌计数器
-    if token_counter is not None:
-        await workflow.register_counter(token_counter)
+    # 构建 Orchestrate Environment
+    orchestrate: Orchestrate = factory.auto_build(config)
     
     try:
-        # 运行工作流
-        task = await workflow.run(task)
-    except MaxStepsError as e:
+        # 运行 Orchestrate Environment
+        blueprint, todo_view, json_view = await orchestrate.run(
+            question="请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A,B,C,D中的一个", 
+            description=description,
+            sub_task_depth=1,
+        )
+    except Exception as e:
         logger.error(e)
         pass
-    except Exception as e:
-        # 最大步数达到，自动退出
-        raise e
     
-    # 获取历史记录
-    history = task.history
-    # 截取历史记录
-    history = history[:2]
-    # 替换第一条记录的内容
-    history[0].content = PROMPT.format(task_info=TaskContextView(task).format(layer=1))
-    # 转换为OpenAI格式
-    history = to_openai_dict(history)
-    return history
+    return {
+        "question": description,
+        "prompt": PROMPT.format(blueprint=blueprint),
+        "todo_view": todo_view,
+        "json_view": json_view,
+    }
 
 
 async def run_sample(
     config: AutoAgentConfig,
     dataset_path: str,
     output_dir: str, 
-    num_workers: int = 5, 
+    num_workers: int = 1, 
     max_samples: int = 300, 
-    token_limit: int = 100000, 
 ) -> List[dict[str, Union[str, dict]]]:
     """运行样本处理
 
@@ -104,9 +85,8 @@ async def run_sample(
         config (AutoAgentConfig): 配置信息
         dataset_path (str): 数据集路径
         output_dir (str): 输出目录
-        num_workers (int, optional): 工作线程数. 默认为2
+        num_workers (int, optional): 工作线程数. 默认为1
         max_samples (int, optional): 最大样本数. 默认为500
-        token_limit (int, optional): 最大token数. 默认为100000
 
     Returns:
         List[dict[str, Union[str, dict]]]: 所有任务的处理结果
@@ -133,28 +113,18 @@ async def run_sample(
     semaphore = asyncio.Semaphore(num_workers)
     # 创建jsonl文件
     jsonl_path = os.path.join(output_dir, "results.jsonl")
-    if token_limit > 0:
-        # 创建令牌计数器
-        token_counter = TokenStepCounter(limit=token_limit)
-    else:
-        token_counter = None
     
     async def process_with_semaphore(item):
         async with semaphore:
             try:
-                result = await process_single_task(config, item['question'], token_counter)
+                result = await process_single_task(config, item['question'])
                 if result is not None:
                     # 将结果写入jsonl文件
                     with open(jsonl_path, "a", encoding="utf-8") as f:
-                        json.dump({
-                            "question": item['question'],
-                            "result": result
-                        }, f, ensure_ascii=False)
+                        json.dump(result, f, ensure_ascii=False)
                         f.write("\n")
                     
                     logger.info(f"已处理并保存: {item['question'][:50]}...")
-                    if token_counter is not None:
-                        logger.info(f"当前已消耗令牌数: {token_counter.current}")
                 return result
             except Exception as e:
                 logger.error(f'处理提示词时发生错误: {item["question"]}')
@@ -191,7 +161,7 @@ async def main():
         os.makedirs(output_dir)
     
     # 运行样本处理
-    results = await run_sample(config, dataset_path, output_dir, max_samples=-1, token_limit=-1)
+    results = await run_sample(config, dataset_path, output_dir, max_samples=-1)
     
     # 打印处理结果统计
     print(f"\n处理完成!")

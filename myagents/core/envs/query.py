@@ -245,6 +245,8 @@ class Query(BaseEnvironment):
         description: str, 
         sub_task_depth: int = 3, 
         output_type: OutputType = OutputType.SUMMARY,
+        completion_config: BaseCompletionConfig = None, 
+        **kwargs,
     ) -> str:
         """Run the query and answer the question.
         
@@ -261,6 +263,10 @@ class Query(BaseEnvironment):
                 - OutputType.SUMMARY: The summary of the answer.
                 - OutputType.DOCUMENT: The document of the answer.
                 - OutputType.SELECTION: The selection of the answer.
+            completion_config (BaseCompletionConfig, optional):
+                The completion config of the environment.
+            **kwargs:
+                The keyword arguments to be passed to the parent class.
         Returns:
             str:
                 The answer to the question. 
@@ -306,7 +312,7 @@ class Query(BaseEnvironment):
         logger.info(f"任务创建: \n{task.objective}")
         
         # Process the task
-        task = await self.process_task(task)
+        task = await self.process_task(task, completion_config=completion_config, **kwargs)
         
         # Check the task status
         if not task.is_finished():
@@ -335,15 +341,22 @@ class Query(BaseEnvironment):
             # Log the content
             logger.info(f"文档按[行号-内容]输出: \n{line_view}")
             
+            # Prepare the completion config
+            if completion_config is None:
+                completion_config = BaseCompletionConfig(
+                    tool_choice="diff_modify",
+                )
+            else:
+                # Update the completion config
+                completion_config.update(tool_choice="diff_modify")
+            
             """ [[ ## Post process the answer ## ]] """
             # Call for react agent to modify the document or select the answer
             message: AssistantMessage = await self.call_agent(
                 AgentType.REACT, 
                 target=self, 
                 document=document, 
-                completion_config={
-                    "exclude_tools": ["select_answer"],
-                },
+                completion_config=completion_config,
             )
             # Update the environment history
             self.update(message)
@@ -353,13 +366,19 @@ class Query(BaseEnvironment):
             return message.content
         
         elif output_type == OutputType.SELECTION:
+            # Prepare the completion config
+            if completion_config is None:
+                completion_config = BaseCompletionConfig(
+                    tool_choice="select_answer",
+                )
+            else:
+                # Update the completion config
+                completion_config.update(tool_choice="select_answer")
             # Call for react agent to select the answer
             message: AssistantMessage = await self.call_agent(
                 AgentType.REACT, 
                 target=self, 
-                completion_config={
-                    "tool_choice": "select_answer",
-                },
+                completion_config=completion_config,
             )
             # Set the status to finished
             self.to_finished()
@@ -376,6 +395,8 @@ class Query(BaseEnvironment):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
+        completion_config: BaseCompletionConfig = None,
+        **kwargs,
     ) -> TreeTaskNode:
         """Process the task.
         
@@ -386,6 +407,10 @@ class Query(BaseEnvironment):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional):
                 The maximum number of times to idle thinking the agent. 
+            completion_config (BaseCompletionConfig, optional):
+                The completion config of the environment.
+            **kwargs:
+                The keyword arguments to be passed to the parent class.
         
         Returns:
             TreeTaskNode:
@@ -402,6 +427,8 @@ class Query(BaseEnvironment):
                     target=target, 
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
+                    completion_config=completion_config,
+                    **kwargs,
                 )
             
             elif self.is_running():
@@ -410,6 +437,8 @@ class Query(BaseEnvironment):
                     target=target, 
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
+                    completion_config=completion_config,
+                    **kwargs,
                 )
             
             elif self.is_error():
@@ -417,12 +446,19 @@ class Query(BaseEnvironment):
                 sub_tasks = [sub_task for sub_task in target.sub_tasks.values() if not sub_task.is_finished()]
                 # Delete all the sub-tasks that are not finished
                 for sub_task in sub_tasks:
+                    # Log the deletion
+                    logger.info(f"删除子任务: {sub_task.uid}: {sub_task.objective}")
+                    # Delete the sub-task
                     del target.sub_tasks[sub_task.uid]
                 
                 # Rollback the target to created status
                 target.to_created()
+                # Log the rollback
+                logger.info(f"回滚到创建状态: {target.uid}: {target.objective}")
                 # Rollback the self to created status
                 self.to_created()
+                # Log the rollback
+                logger.info(f"回滚到创建状态: {self.uid}")
                 # Record the error information
                 current_result = DocumentTaskView(target).format()
                 # Create a new user message to record the error and the current result
@@ -474,6 +510,8 @@ class Query(BaseEnvironment):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
+        completion_config: BaseCompletionConfig = None,
+        **kwargs,
     ) -> TreeTaskNode:
         """Orchestrate the task. 
         
@@ -484,6 +522,10 @@ class Query(BaseEnvironment):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of times to idle thinking the agent. 
+            completion_config (BaseCompletionConfig, optional):
+                The completion config of the environment.
+            **kwargs:
+                The keyword arguments to be passed to the parent class.
         
         Returns:    
             TreeTaskNode:
@@ -509,6 +551,7 @@ class Query(BaseEnvironment):
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config,
+            **kwargs,
         )
         # Update the environment history
         self.update(message)
@@ -530,6 +573,8 @@ class Query(BaseEnvironment):
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
         max_idle_thinking: int = 1, 
+        completion_config: BaseCompletionConfig = None,
+        **kwargs,
     ) -> TreeTaskNode:
         """Plan and execute the task.
         
@@ -540,15 +585,25 @@ class Query(BaseEnvironment):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int, optional, defaults to 1):
                 The maximum number of times to idle thinking the agent. 
+            completion_config (BaseCompletionConfig, optional):
+                The completion config of the environment.
+            **kwargs:
+                The keyword arguments to be passed to the parent class.
         
         Returns:
             TreeTaskNode:
                 The planned and executed task.
         """
         # Prepare the completion config
-        completion_config = BaseCompletionConfig(
-            exclude_tools=["select_answer", "diff_modify"],
-        )
+        if completion_config is None:
+            completion_config = BaseCompletionConfig(
+                exclude_tools=["select_answer", "diff_modify"],
+            )
+        else:
+            # Update the completion config
+            completion_config.update(
+                exclude_tools=["select_answer", "diff_modify"],
+            )
         
         # Record the question
         message = UserMessage(
@@ -585,6 +640,7 @@ class Query(BaseEnvironment):
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
                     completion_config=completion_config,
+                    **kwargs,
                 )
                 # Update the environment history
                 self.update(message)
@@ -650,6 +706,7 @@ class Query(BaseEnvironment):
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config, 
+            **kwargs,
         )
         # Update the environment history
         self.update(message)

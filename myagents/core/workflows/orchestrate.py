@@ -161,7 +161,7 @@ class BlueprintWorkflow(BaseReActFlow):
                 **kwargs,
             )
             # Check if the target is finished
-            if finish_flag:
+            if finish_flag and blueprint != "":
                 # Force the loop to break
                 break
             
@@ -188,11 +188,11 @@ class BlueprintWorkflow(BaseReActFlow):
                     # Force the loop to break
                     break
             
-            # === Update Context ===
-            # Log the blueprint
-            logger.info(f"Orchestration Blueprint: \n{blueprint}")
-            # Update the blueprint to the global environment context
-            self.context = self.context.create_next(blueprint=blueprint, task=target)
+        # === Update Context ===
+        # Log the blueprint
+        logger.info(f"Orchestration Blueprint: \n{blueprint}")
+        # Update the blueprint to the global environment context
+        self.context = self.context.create_next(blueprint=blueprint, task=target)
             
         return target
     
@@ -406,8 +406,16 @@ class OrchestrateFlow(PlanWorkflow):
         )
         
         try:
-            # Update the blueprint to the environment context
+            # Get the blueprint from the context
             blueprint = self.sub_workflows["plan"].context.get("blueprint")
+            # Check if the blueprint is valid
+            if blueprint == "":
+                # Log the error
+                logger.error("The blueprint is not valid.")
+                # Return the target and the flag
+                return target, False
+            
+            # Update the blueprint to the environment context
             self.agent.env.context = self.agent.env.context.create_next(blueprint=blueprint, task=target)
             # Return the target and the flag
             return target, True
@@ -527,6 +535,7 @@ class OrchestrateFlow(PlanWorkflow):
         
         # Check if the target is running
         while running_checker(target):
+            
             # Reason about the task and get the orchestration blueprint
             target, blueprint_valid = await self.reason(
                 target=target, 
@@ -577,7 +586,7 @@ class OrchestrateFlow(PlanWorkflow):
             # Log the error
             logger.error("The target is not running after reasoning, the workflow is not executed.")
             # Set the target to error
-            target.to_error()   # BUG: 这里不知道为什么有时候会被设为error，检查前面出错时重试后是否会走到这里
+            target.to_error()   # NOTE: Blueprint 提取失败且 reflect 没有检查到，则会导致 target 被设为 error
             # Return the target
             return target
         

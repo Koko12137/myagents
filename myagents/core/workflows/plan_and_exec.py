@@ -146,7 +146,7 @@ class PlanAndExecFlow(BaseReActFlow):
         # Check if the running checker is provided
         if running_checker is None:
             # Set the running checker to the default running checker
-            running_checker = lambda target: target.is_created()
+            running_checker = lambda target: not target.is_finished()
         
         # Get the error prompt from the agent
         error_prompt = self.prompts["error_prompt"]
@@ -193,8 +193,13 @@ class PlanAndExecFlow(BaseReActFlow):
                 for sub_task in cancelled_sub_tasks:
                     del target.sub_tasks[sub_task.uid]
                 
-                # Convert to created status and call for re-planning
-                target.to_created()
+                if target.sub_task_depth > 0:
+                    # Convert to created status and call for re-planning
+                    target.to_created()
+                else:
+                    # Convert to running status
+                    target.to_running()
+                    
                 # Get the current result
                 current_result = DocumentTaskView(target).format()
                 # Create a new user message to record the error and the current result
@@ -447,7 +452,7 @@ class PlanAndExecFlow(BaseReActFlow):
             # Get the blueprint from the context
             blueprint = self.agent.env.context.get("blueprint")
             # Create a UserMessage for the blueprint
-            blueprint_message = UserMessage(content=f"## 任务蓝图\n\n{ToDoTaskView(blueprint).format()}")
+            blueprint_message = UserMessage(content=f"## 任务蓝图\n\n{blueprint}")
             # Update the blueprint message to the history
             target.update(blueprint_message)
             
@@ -497,6 +502,12 @@ class PlanAndExecFlow(BaseReActFlow):
                 if final_output != "":
                     # Set the answer of the task
                     target.results = final_output
+                else:
+                    # Announce the empty final output
+                    logger.warning(f"Empty final output: \n{message.content}")
+                    # Create a new user message to record the empty final output
+                    message = UserMessage(content=f"【警告】：没有在<final_output>标签中找到任何内容，你必须将最终输出放在<final_output>标签中。")
+                    target.update(message)
             
             # === Reflect ===
             target, finish_flag = await self.reflect(
@@ -509,11 +520,11 @@ class PlanAndExecFlow(BaseReActFlow):
                 target.to_finished()
             
             # Check if the tool call flag is not set
-            elif not tool_call_flag:
+            elif not tool_call_flag and not target.results:
                 # Increment the idle thinking counter
                 current_thinking += 1
                 # Notify the idle thinking limit to Agent
-                message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请遵守反思结果，尽快输出最终输出。")
                 target.update(message)
                 # Log the idle thinking message
                 logger.info(f"Idle Thinking Message: \n{message}")
@@ -525,7 +536,7 @@ class PlanAndExecFlow(BaseReActFlow):
                     target.results += f"\n连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。"
         
         # Set the answer of the task
-        if not target.results: 
+        if not target.results and target.is_finished(): 
             target.results = "任务执行结束，但未提供答案，执行可能存在未知错误。"
             
         # Log the answer

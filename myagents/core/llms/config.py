@@ -128,14 +128,17 @@ class BaseCompletionConfig(BaseModel):
             }
         
         # Add tools
-        tools = [tool_schema(tool, Provider.OPENAI) for tool in self.tools if tool not in self.exclude_tools]
+        tools = [tool_schema(tool, Provider.OPENAI) for tool in self.tools if tool.name not in self.exclude_tools]
         if len(tools) > 0:
             kwargs["tools"] = tools
         
             # Add tool_choice
             if self.tool_choice is not None:
-                # Get tool_choice schema
-                tool_choice_schema = tool_schema(self.tools[self.tool_choice], Provider.OPENAI)
-                kwargs["tool_choice"] = tool_choice_schema
+                tool_choice = [tool for tool in self.tools if tool.name == self.tool_choice]
+                
+                if len(tool_choice) > 0:
+                    # Get tool_choice schema
+                    tool_choice_schema = tool_schema(tool_choice[0], Provider.OPENAI)
+                    kwargs["tool_choice"] = tool_choice_schema
         
         return kwargs

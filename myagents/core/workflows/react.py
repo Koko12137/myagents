@@ -297,17 +297,26 @@ class BaseReActFlow(BaseWorkflow):
             tuple[Stateful, bool, bool]:
                 The target, the error flag and the tool call flag.
         """
+        # Prepare external tools
+        external_tools = []
+        # Add the tools from the agent
+        for tool in self.agent.tools.values():
+            external_tools.append(tool)
+        # Add the tools from the environment
+        for tool in self.agent.env.tools.values():
+            external_tools.append(tool)
+
         # Check if the completion config is provided
         if completion_config is None:
             # Set the completion config to the default completion config
-            completion_config = BaseCompletionConfig()
+            completion_config = BaseCompletionConfig(tools=external_tools)
+        else:
+            # Update the completion config
+            completion_config.update(tools=external_tools)
         
         # Initialize the error and tool call flag
         error_flag = False
         tool_call_flag = False
-        
-        # Prepare external tools
-        external_tools = {**self.agent.tools, **self.agent.env.tools}
         
         # === Thinking ===
         # Observe the target
@@ -318,8 +327,6 @@ class BaseReActFlow(BaseWorkflow):
         )
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
-        # Update the completion config
-        completion_config.update(tools=external_tools)
         # Think about the target
         message = await self.agent.think(observe=observe, completion_config=completion_config)
         # Update the message to the target
@@ -378,7 +385,12 @@ class BaseReActFlow(BaseWorkflow):
         # Check if the completion config is provided
         if completion_config is None:
             # Set the completion config to the default completion config
-            completion_config = BaseCompletionConfig()
+            completion_config = BaseCompletionConfig(tools=list(self.tools.values()))
+        else:
+            # Update the completion config
+            completion_config.update(
+                tools=list(self.tools.values()),
+            )
         
         # === Thinking ===
         # Observe the target after acting

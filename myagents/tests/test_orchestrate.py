@@ -3,12 +3,11 @@ import os
 
 from datasets import load_from_disk
 
-from myagents.core.envs.query import OutputType
-from myagents.core.envs.query import Query
+from myagents.core.envs.orchestrate import Orchestrate
 from myagents.core.factory import AutoAgent, AutoAgentConfig
 
 
-async def test_async_query():
+async def test_async_orchestrate():
     # question = "请你讲一讲陀思妥耶夫斯基的罪与罚"
     # description = "我需要知道陀思妥耶夫斯基的罪与罚结构化的内容"
     # 读取 datasets/GAOKAO-Math-Bench 数据集
@@ -25,22 +24,22 @@ async def test_async_query():
             os.environ[key] = value
     
     # Create a list of agents according to the config file
-    with open("configs/agents.json", "r") as f:
+    with open("configs/sampling.json", "r") as f:
         config = AutoAgentConfig.model_validate(json.load(f))
     
     # Create Factory
     factory = AutoAgent()
     # Build ReActFlow
-    query: Query = factory.auto_build(config=config)
+    orchestrate: Orchestrate = factory.auto_build(config=config)
     
     # Run the query
-    answer = await query.run(
+    blueprint, todo_view, json_view = await orchestrate.run(
         question="请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A,B,C,D中的一个", 
         description=data[0]["question"],
         sub_task_depth=1,
-        output_type=OutputType.SELECTION,
     )
     print("-" * 60)
-    # Check the answer and the correct answer
-    print("answer: ", answer)
-    print("correct answer: ", data[0]["answer"])
+    # Check the history, blueprint and todo view
+    print("blueprint: ", blueprint)
+    print("todo view: ", todo_view)
+    print("json view: ", json_view)

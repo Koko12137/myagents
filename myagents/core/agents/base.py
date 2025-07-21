@@ -210,6 +210,8 @@ class BaseAgent(Agent):
         if len(errors) > 0:
             raise errors[0] from errors[0]
         
+        # Update the memory of the target
+        
         # Return the response
         return message
     

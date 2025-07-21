@@ -90,13 +90,24 @@ class OpenAiLLM(LLM):
         
         # Create the generation history
         history = to_openai_dict(messages)
-            
+        
+        # Check streaming
+        if completion_config.stream:
+            # Get thequeue
+            queue = completion_config.stream_queue
+        
         # Call for the completion
         response = await self.client.chat.completions.create(
             model=self.model, 
             messages=history, 
             **kwargs, 
         )
+        # Check streaming
+        # if completion_config.stream:
+        #     async for chunk in response:
+        #         if chunk.choices[0].delta.content is not None:
+        #             await queue.put(chunk.choices[0].delta.content)
+            
         content = response.choices[0].message.content
         logger.debug(f"\n{content}")
         # Get the usage

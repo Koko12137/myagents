@@ -8,6 +8,7 @@ from myagents.core.configs.agents import CounterConfig, AgentConfig
 from myagents.core.configs.llms import LLMConfig
 from myagents.core.configs.mcps import MCPConfig
 from myagents.core.configs.envs import EnvironmentConfig
+from myagents.core.envs.orchestrate import Orchestrate
 from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment
 from myagents.core.llms import OpenAiLLM
 from myagents.core.agents import AgentType, ReActAgent, OrchestrateAgent, PlanAndExecAgent
@@ -185,6 +186,16 @@ class AutoAgent:
         match env_type:
             case EnvironmentType.QUERY:
                 env = Query()
+                # Register the agents to the environment
+                for agent in agents:
+                    # Register the agent to the environment
+                    env.register_agent(agent)
+                    # Register the environment to the agent
+                    agent.register_env(env)
+                # Return the environment
+                return env
+            case EnvironmentType.ORCHESTRATE:
+                env = Orchestrate()
                 # Register the agents to the environment
                 for agent in agents:
                     # Register the agent to the environment
