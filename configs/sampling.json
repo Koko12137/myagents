@@ -1,58 +1,32 @@
 {
-    "step_counters": [
-        {
-            "name": "max",
-            "limit": 1
-        }
-    ],
-    "workflow": {
-        "name": "react",
-        "agent": {
-            "name": "base", 
-            "llm": {
-                "provider": "openai",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "model": "qwen-plus-2025-01-25",
-                "temperature": 0.8, 
-                "api_key_field": "OPENAI_KEY", 
-                "extra_body": {
-                    "enable_thinking": false
-                }
+    "debug": false, 
+    "save_dir": "stdout", 
+    "environment": {
+        "type": "Orchestrate", 
+        "step_counters": [
+            {
+                "name": "base",
+                "limit": 10
+            }, 
+            {
+                "name": "token",
+                "limit": 100000
             }
-        }, 
-        "workflows": [
+        ],
+        "agents": [
             {
-                "name": "plan", 
-                "agent": {
-                    "name": "base",
-                    "llm": {
-                        "provider": "openai",
-                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                        "model": "qwen-plus-2025-01-25",
-                        "temperature": 1.2, 
-                        "api_key_field": "OPENAI_KEY", 
-                        "extra_body": {
-                            "enable_thinking": false
-                        }
-                    }
-                }
-            },
-            {
-                "name": "action",
-                "agent": {  
-                    "name": "base",
-                    "llm": {
-                        "provider": "openai",
-                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                        "model": "qwen-plus-2025-01-25",
-                        "temperature": 0.8, 
-                        "api_key_field": "OPENAI_KEY", 
-                        "extra_body": {
-                            "enable_thinking": false
-                        }
+                "type": "OrchestrateAgent",
+                "llm": {
+                    "provider": "openai",
+                    "base_url": "http://192.168.152.85:65189/v1",
+                    "model": "Qwen/Qwen3-14B-AWQ",
+                    "temperature": 0.8, 
+                    "api_key_field": "LOCAL_KEY", 
+                    "extra_body": {
+                        "enable_thinking": false
                     }
                 }
             }
-        ] 
+        ]
     }
 }

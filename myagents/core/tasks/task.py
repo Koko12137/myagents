@@ -51,7 +51,6 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         key_results: str, 
         sub_task_depth: int, 
         parent: TreeTaskNode = None, 
-        *args, 
         **kwargs
     ) -> None:
         """
@@ -69,7 +68,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
             parent (TreeTaskNode, optional):
                 The parent task of the current task. If the task does not have a parent task, the parent is None.
         """
-        super().__init__(status_class=TaskStatus, *args, **kwargs)
+        super().__init__(status_class=TaskStatus, **kwargs)
         self.uid = uid
         assert isinstance(objective, str), "The objective must be a string."
         self.objective = objective
@@ -141,17 +140,9 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         return self.status == TaskStatus.CREATED
     
     def to_running(self) -> None:
-        """Set the task status to running. This will also set the parent task to running if the parent task is created and 
-        all the sub-tasks are running.
+        """Set the task status to running. 
         """
         self.status = TaskStatus.RUNNING
-        
-        # Convert the parent task to running
-        if self.parent:
-            # Check if the parent task is created and all the sub-tasks are running
-            if self.parent.is_created() and all(sub_task.is_running() for sub_task in self.parent.sub_tasks.values()):
-                # Convert the parent task to running
-                self.parent.to_running()
     
     def is_running(self) -> bool:
         """Check if the task status is running.
@@ -159,9 +150,19 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         return self.status == TaskStatus.RUNNING
     
     def to_finished(self) -> None:
-        """Set the task status to finished. 
+        """Set the task status to finished. If all the sub_tasks of parent task are finished, the parent task will 
+        be set to running.
         """
         self.status = TaskStatus.FINISHED
+        
+        # Check if the parent task is created and all the sub-tasks are finished
+        if (
+            self.parent and 
+            self.parent.is_created() and 
+            all(sub_task.is_finished() for sub_task in self.parent.sub_tasks.values())
+        ):
+            # Convert the parent task to running
+            self.parent.to_running()
     
     def is_finished(self) -> bool:
         """Check if the task status is finished.
@@ -289,7 +290,7 @@ class DocumentTaskView(TaskView):
         self.task = task
         
     def format(self, layer: int = 3) -> str:
-        answer = self.task.results if self.task.results else "The task is not finished."
+        answer = self.task.results if self.task.results else "[[placeholder]] 任务未完成。"
         # Add the question and answer of the current task
         answer = f"# {self.task.uid}: {self.task.objective}\n\n{self.task.key_results}\n\n{answer}"
         

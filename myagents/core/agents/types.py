@@ -5,6 +5,8 @@ class AgentType(Enum):
     """The type of the agent.
     
     Attributes:
+        PROXY (str):
+            The proxy agent. This agent is a proxy for user.
         REACT (str):
             The reason and act agent. This agent works on a basic reason and act workflow. 
         ORCHESTRATE (str):
@@ -12,6 +14,7 @@ class AgentType(Enum):
         PLAN_AND_EXECUTE (str):
             The plan and executor agent. This agent works on a plan and executor workflow. 
     """
+    PROXY = "ProxyAgent"
     REACT = "ReActAgent"
     ORCHESTRATE = "OrchestrateAgent"
     PLAN_AND_EXECUTE = "PlanAndExecuteAgent"

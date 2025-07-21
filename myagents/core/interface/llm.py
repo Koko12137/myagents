@@ -45,6 +45,40 @@ class Provider(Enum):
     - OPENAI (str): The OpenAI provider.
     """
     OPENAI = "openai"
+    
+
+@runtime_checkable
+class CompletionConfig(Protocol):
+    """CompletionConfig is a protocol for the LLM config.
+    
+    Attributes:
+        provider (Provider):
+            The provider of the LLM.
+    """
+
+    @abstractmethod
+    def to_dict(self, provider: Provider) -> dict:
+        """Convert the completion config to a dictionary.
+        
+        Args:
+            provider (Provider):
+                The provider of the LLM.
+                
+        Returns:
+            dict:
+                The completion config as a dictionary.
+        """
+        pass
+    
+    @abstractmethod
+    def update(self, **kwargs) -> None:
+        """Update the completion config.
+        
+        Args:
+            **kwargs:
+                The additional keyword arguments to update the completion config.
+        """
+        pass
 
 
 @runtime_checkable
@@ -67,42 +101,15 @@ class LLM(Protocol):
     async def completion(
         self, 
         messages: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
-        available_tools: Optional[list[dict[str, str]]] = None, 
-        tool_choice: Optional[str] = None, 
-        max_tokens: Optional[int] = None, 
-        temperature: Optional[float] = None, 
-        top_p: Optional[float] = None, 
-        stop: Optional[str] = None, 
-        stream: Optional[bool] = None, 
-        stream_options: Optional[dict] = None, 
-        response_format: Optional[dict] = None, 
-        **kwargs: dict, 
+        completion_config: CompletionConfig, 
     ) -> AssistantMessage:
         """Completion the messages.
         
         Args:
             messages (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]) :
                 The messages to complete. 
-            available_tools (list[dict[str, str]], optional) :
-                The available tools.
-            tool_choice (str, optional) :
-                The tool choice.
-            max_tokens (int, optional) :
-                The max tokens.
-            temperature (float, optional) :
-                The temperature.
-            top_p (float, optional) :
-                The top p.
-            stop (str, optional) :
-                The stop.
-            stream (bool, optional) :
-                The stream.
-            stream_options (dict, optional) :
-                The stream options.
-            response_format (dict, optional) :
-                The response format.
-            **kwargs (dict) :
-                The additional keyword arguments.
+            completion_config (CompletionConfig) :
+                The completion config. 
 
         Returns:
             AssistantMessage:
