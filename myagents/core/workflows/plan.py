@@ -130,42 +130,55 @@ class PlanWorkflow(BaseReActFlow):
                 The error flag. 
         """
         def dfs_create_task(
+            uid: str,
             parent: TreeTaskNode, 
+            prev: TreeTaskNode, 
             orchestration: dict[str, dict], 
             sub_task_depth: int, 
-        ) -> None:
-            # Traverse the orchestration
-            for uid, value in orchestration.items():
-                # Convert the value to string
-                key_outputs = ""
-                for output in value['关键产出']:
-                    key_outputs += f"{output}; "
-                
-                # Create a new task
-                new_task = BaseTreeTaskNode(
-                    uid=uid, 
-                    objective=normalize_string(value['目标描述']), 
-                    key_results=key_outputs, 
-                    sub_task_depth=sub_task_depth - 1,
-                )
-                
-                # Link the new task to the parent task
-                new_task.parent = parent
-                # Add the new task to the parent task
-                parent.sub_tasks[uid] = new_task
-                
-                # Try to get the sub-task from the parent task
-                sub_tasks = value.get('子任务', {})
-                if len(sub_tasks) > 0 and sub_task_depth > 0:
+        ) -> TreeTaskNode:
+            # Convert the orchestration to string
+            key_outputs = ""
+            for output in orchestration['关键产出']:
+                key_outputs += f"{output}; "
+            
+            # Create a new task
+            new_task = BaseTreeTaskNode(
+                uid=uid, 
+                objective=normalize_string(orchestration['目标描述']), 
+                key_results=key_outputs, 
+                sub_task_depth=sub_task_depth - 1, 
+                parent=parent, 
+            )
+            # Add the new task to the parent task
+            parent.sub_tasks[uid] = new_task
+            
+            # Get the sub-tasks
+            sub_tasks: dict[str, dict] = orchestration.get('子任务', {})
+            # Check the sub-task depth
+            if len(sub_tasks) > 0 and sub_task_depth > 0:
+                # Traverse and create all sub-tasks
+                for uid, sub_task in sub_tasks.items():
                     # Create the sub-tasks
-                    dfs_create_task(
+                    prev = dfs_create_task(
+                        uid=uid, 
                         parent=new_task, 
-                        orchestration=sub_tasks, 
+                        prev=prev, 
+                        orchestration=sub_task, 
                         sub_task_depth=sub_task_depth - 1, 
                     )
-                elif sub_task_depth == 0:
-                    # Set the task status to running
-                    new_task.to_running()
+                    # Check status
+                    if prev.is_running():
+                        if prev.dependency is not None and not prev.dependency.is_running():
+                            prev.to_created()
+
+            # Link the dependency
+            new_task.dependency = prev
+
+            if sub_task_depth == 0 and new_task.dependency is None:
+                # Set the task status to running
+                new_task.to_running()
+                
+            return new_task
         
         try:
             # Repair the json
@@ -178,12 +191,21 @@ class PlanWorkflow(BaseReActFlow):
                 # Get the sub-task depth from the parent
                 sub_task_depth = parent.sub_task_depth - 1
             
-            # Create the task
-            dfs_create_task(
-                parent=parent, 
-                orchestration=orchestration, 
-                sub_task_depth=sub_task_depth, 
-            )
+            # Traverse all the sub-tasks
+            for uid, sub_task in orchestration.items():
+                # Create the sub-tasks
+                prev = dfs_create_task(
+                    uid=uid, 
+                    parent=parent, 
+                    prev=prev, 
+                    orchestration=sub_task, 
+                    sub_task_depth=sub_task_depth - 1, 
+                )
+                # Check status
+                if prev.is_running():
+                    if prev.dependency is not None and not prev.dependency.is_running():
+                        prev.to_created()
+            
             # Format the task to ToDoTaskView
             view = ToDoTaskView(task=parent).format()
             # Return the user message

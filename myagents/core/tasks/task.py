@@ -28,6 +28,8 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         
         parent (TreeTaskNode, optional):
             The parent task of the current task. If the task does not have a parent task, the parent is None.
+        dependency (TreeTaskNode, optional):
+            The dependency task of the current task. If the task does not have a dependency task, the dependency is None.
         sub_tasks (OrderedDict[str, TreeTaskNode]):
             The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
         sub_task_depth (int):
@@ -40,7 +42,9 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
     objective: str
     key_results: str
     results: str 
+    
     parent: TreeTaskNode
+    dependency: TreeTaskNode
     sub_tasks: OrderedDict[str, TreeTaskNode]
     sub_task_depth: int
     
@@ -51,6 +55,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         key_results: str, 
         sub_task_depth: int, 
         parent: TreeTaskNode = None, 
+        dependency: TreeTaskNode = None, 
         **kwargs
     ) -> None:
         """
@@ -67,6 +72,8 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
                 The max number of layers of sub-objective layers that can be split from the objective.
             parent (TreeTaskNode, optional):
                 The parent task of the current task. If the task does not have a parent task, the parent is None.
+            dependency (TreeTaskNode, optional):
+                The dependency task of the current task. If the task does not have a dependency task, the dependency is None.
         """
         super().__init__(status_class=TaskStatus, **kwargs)
         self.uid = uid
@@ -79,6 +86,8 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         
         assert parent is None or isinstance(parent, TreeTaskNode), "The parent must be a TreeTaskNode."
         self.parent = parent
+        assert dependency is None or isinstance(dependency, TreeTaskNode), "The dependency must be a TreeTaskNode."
+        self.dependency = dependency
         assert isinstance(sub_task_depth, int), "The sub task depth must be an integer."
         self.sub_task_depth = sub_task_depth
         # Initialize the stateful attributes
@@ -99,10 +108,10 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         Args:
             format (str):
                 The format of the observation. The format can be:
-                 - "todo": The task will be formatted to a todo markdown string.
-                 - "document": The task will be formatted to a document string.
-                 - "json": The task will be formatted to a json string.
-                 - "answer": The task will be formatted to a answer string.
+                    "todo": The task will be formatted to a todo markdown string.
+                    "document": The task will be formatted to a document string.
+                    "json": The task will be formatted to a json string.
+                    "answer": The task will be formatted to a answer string.
             **kwargs:
                 The additional keyword arguments for the observation.
                 

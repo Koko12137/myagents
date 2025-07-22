@@ -428,7 +428,9 @@ class TreeTaskNode(Task):
             The results of the task. If the task is not finished, the results is None
             
         parent (TreeTaskNode):
-            The parent task of the current task. If the task does not have a parent task, the parent is None.
+            The parent task of the current task. If the task does not have a parent task, the parent is None. 
+        dependency (TreeTaskNode):
+            The dependency task of the current task. If the task does not have a dependency task, the dependency is None.
         sub_tasks (OrderedDict[str, TreeTaskNode]):
             The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
         sub_task_depth (int):
@@ -436,6 +438,7 @@ class TreeTaskNode(Task):
     """
     # Parent and sub-tasks
     parent: 'TreeTaskNode'
+    dependency: 'TreeTaskNode'
     # NOTE: The key should be the objective of the sub-task, the value should be the sub-task instance. 
     sub_tasks: OrderedDict[str, 'TreeTaskNode']
     sub_task_depth: int
