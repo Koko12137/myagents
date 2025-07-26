@@ -1,12 +1,12 @@
 from abc import abstractmethod
 from asyncio import Semaphore, Lock
 from enum import Enum
-from typing import Callable, Any, Union, Protocol, runtime_checkable
+from typing import Any, Union, Protocol, runtime_checkable
 
 from fastmcp.tools import Tool as FastMcpTool
 from fastmcp import Client as MCPClient
 
-from myagents.core.interface.core import Stateful, ToolsCaller
+from myagents.core.interface.core import Stateful, ToolsCaller, Scheduler, Memory
 from myagents.core.interface.llm import LLM, CompletionConfig
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
@@ -230,7 +230,6 @@ class Agent(Protocol):
         max_error_retry: int, 
         max_idle_thinking: int, 
         completion_config: CompletionConfig, 
-        running_checker: Callable[[Stateful], bool], 
         **kwargs
     ) -> AssistantMessage:
         """Run the agent on the task or environment. Before running the agent, you should get the lock of the agent. 
@@ -244,8 +243,6 @@ class Agent(Protocol):
                 The maximum number of times to idle thinking the agent. 
             completion_config (CompletionConfig):
                 The completion config of the agent. 
-            running_checker (Callable[[Stateful], bool]):
-                The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the agent.
             **kwargs:
@@ -288,16 +285,11 @@ class Agent(Protocol):
         pass
 
 
-class Workflow(ToolsCaller):
+class Workflow(ToolsCaller, Scheduler):
     """Workflow is stateless, it does not store any information about the state, it is only used to orchestrate the task or environment. 
     The workflow is not responsible for the state of the task or environment. 
     
     Attributes:
-        context (Context):
-            The context of the workflow.
-        tools (dict[str, FastMcpTool]):
-            The tools provided by the workflow. These tools can be used to control the workflow. 
-        
         profile (str):
             The profile of the workflow.
         agent (Agent):
@@ -338,7 +330,6 @@ class Workflow(ToolsCaller):
         max_error_retry: int, 
         max_idle_thinking: int, 
         completion_config: CompletionConfig, 
-        running_checker: Callable[[Stateful], bool], 
         **kwargs, 
     ) -> Stateful:
         """Run the workflow to modify the stateful entity.
@@ -352,8 +343,6 @@ class Workflow(ToolsCaller):
                 The maximum number of times to idle thinking the workflow.
             completion_config (CompletionConfig):
                 The completion config of the workflow. 
-            running_checker (Callable[[Stateful], bool]):
-                The checker to check if the workflow should be running. 
             *args:
                 The additional arguments for running the workflow.
             **kwargs:
@@ -371,7 +360,6 @@ class Workflow(ToolsCaller):
             max_error_retry: int, 
             max_idle_thinking: int, 
             completion_config: dict[str, Any], 
-            running_checker: Callable[[Stateful], bool], 
             *args, 
             **kwargs,
         ) -> Stateful:
@@ -379,7 +367,7 @@ class Workflow(ToolsCaller):
             message = SystemMessage(content=self.system_prompt)
             
             # Check if the target is running
-            if running_checker(target):
+            if target.is_running():
                 # Run the workflow
                 # Observe the task
                 observe = await self.observe(target)
@@ -401,25 +389,7 @@ class Workflow(ToolsCaller):
     
     
 class ReActFlow(Workflow):
-    """ReActFlow is a workflow that can reason and act on the target.
-    
-    Attributes:
-        context (Context):
-            The context of the workflow.
-        tools (dict[str, FastMcpTool]):
-            The tools provided by the workflow. These tools can be used to control the workflow. 
-        
-        profile (str):
-            The profile of the workflow.
-        agent (Agent):
-            The agent that is used to reason and act.
-        prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content.
-        observe_formats (dict[str, str]):
-            The formats of the observation. The key is the observation name and the value is the format method name.
-        sub_workflows (dict[str, 'Workflow']):
-            The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the sub-workflow instance. 
-    """
+    """ReActFlow is a workflow that can reason and act on the target."""
     
     @abstractmethod
     async def reason_act_reflect(
@@ -428,7 +398,6 @@ class ReActFlow(Workflow):
         max_error_retry: int, 
         max_idle_thinking: int, 
         completion_config: CompletionConfig, 
-        running_checker: Callable[[Stateful], bool], 
         **kwargs, 
     ) -> tuple[Stateful, bool, bool]:
         """Reason and act on the target, and reflect on the target.
@@ -442,8 +411,6 @@ class ReActFlow(Workflow):
                 The maximum number of times to idle thinking the workflow.
             completion_config (CompletionConfig):
                 The completion config of the workflow.
-            running_checker (Callable[[Stateful], bool]):
-                The checker to check if the workflow should be running.
             *args:
                 The additional arguments for running the workflow.
             **kwargs:
@@ -524,21 +491,11 @@ class EnvironmentStatus(Enum):
     CANCELLED = 5
 
 
-class Environment(Stateful, ToolsCaller):
+class Environment(Stateful, ToolsCaller, Scheduler):
     """Environment is a stateful object that containing workflows. The workflows can be used to think about how to 
     modify the environment. The tools can be used to modify the environment. 
     
     Attributes:
-        status (EnvironmentStatus):
-            The status of the environment.
-        history (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
-            The history messages of the environment. 
-            
-        tools (dict[str, FastMcpTool]):
-            The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
-        context (Context):
-            The context of the environment.
-        
         uid (str):
             The unique identifier of the environment. 
         name (str):
@@ -597,7 +554,6 @@ class Environment(Stateful, ToolsCaller):
         max_error_retry: int, 
         max_idle_thinking: int, 
         completion_config: CompletionConfig, 
-        running_checker: Callable[[Stateful], bool], 
         designated_agent: str, 
         **kwargs, 
     ) -> AssistantMessage:
@@ -618,8 +574,6 @@ class Environment(Stateful, ToolsCaller):
                 The maximum number of times to idle thinking the agent. 
             completion_config (CompletionConfig):
                 The completion config of the agent. 
-            running_checker (Callable[[Stateful], bool], optional):
-                The checker to check if the workflow should be running.
             designated_agent (str):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             *args:

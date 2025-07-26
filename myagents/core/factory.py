@@ -12,7 +12,7 @@ from myagents.core.envs.orchestrate import Orchestrate
 from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment
 from myagents.core.llms import OpenAiLLM
 from myagents.core.agents import AgentType, ReActAgent, OrchestrateAgent, PlanAndExecAgent
-from myagents.core.envs import Query, EnvironmentType
+from myagents.core.envs import Query, ComplexQuery, EnvironmentType
 from myagents.core.utils.step_counters import BaseStepCounter, MaxStepCounter, TokenStepCounter
 from myagents.core.utils.logger import init_logger
 from myagents.core.utils.name_generator import generate_name
@@ -185,27 +185,24 @@ class AutoAgent:
         # Build the environment
         match env_type:
             case EnvironmentType.QUERY:
-                env = Query()
-                # Register the agents to the environment
-                for agent in agents:
-                    # Register the agent to the environment
-                    env.register_agent(agent)
-                    # Register the environment to the agent
-                    agent.register_env(env)
-                # Return the environment
-                return env
+                env = Query
+            case EnvironmentType.COMPLEX_QUERY:
+                env = ComplexQuery
             case EnvironmentType.ORCHESTRATE:
-                env = Orchestrate()
-                # Register the agents to the environment
-                for agent in agents:
-                    # Register the agent to the environment
-                    env.register_agent(agent)
-                    # Register the environment to the agent
-                    agent.register_env(env)
-                # Return the environment
-                return env
+                env = Orchestrate
             case _:
                 raise ValueError(f"Invalid environment type: {env_type}")
+        
+        # Build the environment
+        env = env()
+        # Register the agents to the environment
+        for agent in agents:
+            # Register the agent to the environment
+            env.register_agent(agent)
+            # Register the environment to the agent
+            agent.register_env(env)
+        # Return the environment
+        return env
             
     def auto_build(self, config: AutoAgentConfig) -> Union[Environment, Workflow]:
         """Build an auto agent.

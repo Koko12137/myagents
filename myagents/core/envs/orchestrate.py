@@ -108,6 +108,16 @@ class Orchestrate(BaseEnvironment):
         # Post initialize
         self.post_init()
         
+    def __str__(self) -> str:
+        """Get the string representation of the environment.
+        """
+        return f"Orchestrate(name={self.name}, profile={self.profile}, status={self.status})"
+    
+    def __repr__(self) -> str:
+        """Get the string representation of the environment.
+        """
+        return self.__str__()
+        
     def post_init(self) -> None:
         """Post initialize the Orchestrate environment.
         """

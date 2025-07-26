@@ -7,11 +7,19 @@ from typing import Dict, Any, Set
 from tqdm import tqdm
 
 from loguru import logger
-from datasets import load_from_disk
+from datasets import load_dataset
 from openai import AsyncOpenAI
 
 
-PROMPT = """请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A/B/C/D中的一个。## 格式要求\n<answer>A/B/C/D</answer>\n\n{description}"""
+PROMPT = """请仔细分析这道数学题，尽快给出正确的答案。最终答案应只包含数字，不要有任何其他内容。
+
+## 格式要求
+<answer>数字</answer>
+
+【警告】：禁止过度思考
+
+{description}
+"""
 
 
 # 加载API密钥
@@ -30,42 +38,18 @@ client = AsyncOpenAI(
 
 def extract_answer_from_response(response: str) -> str:
     """
-    只从<answer>标签中提取内容，并清洗出A/B/C/D选项。
+    只从<answer>标签中提取内容，并清洗出数字（支持整数和小数）。
     """
     match = re.search(r'<answer>(.*?)</answer>', response, re.IGNORECASE | re.DOTALL)
     if match:
         answer_content = match.group(1).strip()
-        # 只保留第一个A-D选项
-        option_match = re.search(r'([A-D])', answer_content, re.IGNORECASE)
-        if option_match:
-            return option_match.group(1).upper()
+        # 提取第一个数字（支持整数和小数，正负号）
+        number_match = re.search(r'[-+]?\d*\.?\d+', answer_content)
+        if number_match:
+            return number_match.group(0)
         else:
             return ""
     # 没有<answer>标签，直接返回空字符串
-    return ""
-
-
-def normalize_answer(answer: str) -> str:
-    """
-    标准化答案格式
-    
-    Args:
-        answer (str): 原始答案
-        
-    Returns:
-        str: 标准化后的答案
-    """
-    if isinstance(answer, list):
-        # 如果答案是列表，取第一个元素
-        answer = answer[0] if answer else ""
-    
-    # 转换为字符串并去除空白
-    answer = str(answer).strip().upper()
-    
-    # 只保留A-D字符
-    if re.match(r'^[A-D]$', answer):
-        return answer
-    
     return ""
 
 
@@ -122,7 +106,9 @@ async def write_single_result(result: Dict[str, Any], output_file: str) -> None:
     record = {
         "question": result["question"],
         "ground_truth": result["ground_truth"],
-        "predicted_answer": result["predicted_answer"]
+        "predicted_answer": result["predicted_answer"], 
+        "is_correct": result["is_correct"],
+        "stop_reason": result["stop_reason"], 
     }
     
     # 异步写入文件
@@ -155,7 +141,7 @@ async def process_single_question(
     semaphore: asyncio.Semaphore
 ) -> Dict[str, Any]:
     """
-    处理单个问题的并发函数
+    处理单个问题的并发函数，支持流式输出
     
     Args:
         description (str): 问题描述
@@ -170,36 +156,49 @@ async def process_single_question(
     try:
         # 构建提示词
         prompt = copy.deepcopy(PROMPT).format(description=description)
-        # 调用OpenAI API
-        response = await client.chat.completions.create(
+        # 开启流式输出
+        response_stream = await client.chat.completions.create(
             model="Qwen/Qwen3-14B-AWQ", 
-            max_completion_tokens=8192, 
+            max_completion_tokens=1024*8, 
             temperature=0.8, 
             presence_penalty=1.0, 
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            stream=True, 
+            extra_body={
+                "enable_thinking": False, # 禁用思考控制
+            }
         )
+        # 流式拼接内容
+        full_content = ""
+        async for chunk in response_stream:
+            delta = chunk.choices[0].delta.content if chunk.choices[0].delta else ""
+            if delta:
+                print(delta, end="", flush=True)  # 实时输出到终端
+                full_content += delta
+        print()  # 换行
+
         # 提取答案
-        predicted_answer = extract_answer_from_response(response.choices[0].message.content)
-        normalized_gt = normalize_answer(ground_truth)
-        
+        predicted_answer = extract_answer_from_response(full_content)
+        stop_reason = getattr(chunk.choices[0], "finish_reason", "stream_end")
+
         return {
             "question": description,
-            "ground_truth": normalized_gt,
+            "ground_truth": ground_truth,
             "predicted_answer": predicted_answer,
-            "is_correct": predicted_answer == normalized_gt
+            "is_correct": predicted_answer == ground_truth, 
+            "stop_reason": stop_reason
         }
         
     except Exception as e:
         logger.error(f"处理问题时出错: {description[:50]}... 错误: {str(e)}")
-        
         return {
             "question": description,
-            "ground_truth": normalize_answer(ground_truth),
+            "ground_truth": ground_truth,
             "predicted_answer": "",
-            "is_correct": False
+            "is_correct": False,
+            "stop_reason": "error"
         }
     finally:
-        # 释放信号量
         semaphore.release()
 
 
@@ -240,10 +239,12 @@ def calculate_accuracy_from_jsonl(jsonl_file: str) -> Dict[str, float]:
 
 
 async def run_benchmark(
-    dataset_path: str = "datasets/GAOKAO-Math-Bench",
-    output_file: str = "benchmark/raw_llm_results.jsonl",
+    dataset_path: str,
+    output_file: str,
     max_samples: int = -1,
-    concurrency: int = 4
+    concurrency: int = 4,
+    input_field: str = "question",
+    output_field: str = "answer",
 ) -> Dict[str, Any]:
     """
     运行基准测试
@@ -253,6 +254,8 @@ async def run_benchmark(
         output_file (str): 结果输出文件
         max_samples (int): 最大测试样本数
         concurrency (int): 并发数量
+        input_field (str): 输入字段
+        output_field (str): 输出字段
         
     Returns:
         Dict[str, Any]: 测试结果
@@ -262,14 +265,16 @@ async def run_benchmark(
     
     # 加载数据集
     logger.info(f"加载数据集: {dataset_path}")
-    dataset = load_from_disk(dataset_path)
+    dataset = load_dataset(dataset_path)
+    if "train" in dataset:
+        dataset = dataset["train"]
     logger.info(f"数据集大小: {len(dataset)}")
     
     # 加载已处理的问题
     processed_questions = load_existing_results(output_file)
     
     # 过滤掉已处理的问题
-    filtered_dataset = dataset.filter(lambda x: x["question"] not in processed_questions)
+    filtered_dataset = dataset.filter(lambda x: x[input_field] not in processed_questions)
     logger.info(f"过滤后数据集大小: {len(filtered_dataset)}")
     
     # 限制样本数量
@@ -293,8 +298,8 @@ async def run_benchmark(
         }
     
     # 准备测试数据
-    questions = filtered_dataset["question"]
-    answers = filtered_dataset["answer"]
+    questions = filtered_dataset[input_field]
+    answers = filtered_dataset[output_field]
     
     # 创建信号量控制并发
     semaphore = asyncio.Semaphore(concurrency)
@@ -310,11 +315,11 @@ async def run_benchmark(
     total_correct = initial_accuracy["correct"]
     total_processed = initial_accuracy["total"]
     
-    with tqdm(total=len(questions), desc="处理进度", unit="题") as pbar:
+    with tqdm(total=len(questions), desc="处理进度", unit="题", mininterval=0.1, dynamic_ncols=True) as pbar:
         # 创建所有任务
         tasks = []
         for question, answer in zip(questions, answers):
-            task = process_single_question(question, answer, semaphore)
+            task = process_single_question(question, str(answer), semaphore)
             tasks.append(task)
         
         # 使用asyncio.as_completed来处理完成的任务
@@ -368,14 +373,22 @@ async def run_benchmark(
     return summary
 
 
-async def main():
+async def main(
+    dataset_path: str,
+    output_file: str,
+    input_field: str,
+    output_field: str, 
+    concurrency: int = 1,
+):
     """主函数"""
     # 运行基准测试
     results = await run_benchmark(
-        dataset_path="datasets/GAOKAO-Math-Bench",
-        output_file="benchmark/raw_llm_results.jsonl",
+        dataset_path=dataset_path,
+        output_file=output_file,
         max_samples=-1,  # 可以调整测试样本数
-        concurrency=4  # 并发数量
+        concurrency=concurrency,  # 并发数量
+        input_field=input_field,
+        output_field=output_field
     )
     
     # 打印详细结果
@@ -393,5 +406,11 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(
+        dataset_path="Maxwell-Jia/AIME_2024",
+        output_file="benchmark/raw_llm_aime_nothink.jsonl",
+        input_field="Problem",
+        output_field="Answer",
+        concurrency=1
+    ))
 

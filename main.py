@@ -38,7 +38,12 @@ def sampling(dataset_path: str, output_dir: str, output_name: str, input_field: 
     ))
 
 @cli.command()
-def test_raw_llm():
+@click.option("--dataset-path", type=str, required=True, help="数据集路径")
+@click.option("--output-file", type=str, required=True, help="输出文件路径")
+@click.option("--input-field", type=str, default="question", show_default=True, help="输入字段名")
+@click.option("--output-field", type=str, default="answer", show_default=True, help="输出字段名")
+@click.option("--concurrency", type=int, default=1, show_default=True, help="并发数")
+def test_raw_llm(dataset_path: str, output_file: str, input_field: str, output_field: str, concurrency: int):
     """
     测试raw_llm
     """

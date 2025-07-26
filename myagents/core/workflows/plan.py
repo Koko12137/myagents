@@ -1,5 +1,4 @@
 import json
-from collections.abc import Callable
 
 from json_repair import repair_json
 from loguru import logger
@@ -109,19 +108,21 @@ class PlanWorkflow(BaseReActFlow):
     def create_task(
         self, 
         parent: TreeTaskNode, 
+        prev: TreeTaskNode, 
         orchestrate_json: str, 
-        sub_task_depth: int = -1, 
+        sub_task_depth: int, 
     ) -> tuple[UserMessage, bool]:
         """Create a new task based on the orchestration blueprint.
         
         Args:
             parent (TreeTaskNode):
                 The parent task to create the new task.
+            prev (TreeTaskNode):
+                The previous task of the new task.
             orchestrate_json (str):
                 The orchestration blueprint to create the new task.
             sub_task_depth (int):
-                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
+                The depth of the sub-task. 
                 
         Returns:
             UserMessage:
@@ -146,8 +147,9 @@ class PlanWorkflow(BaseReActFlow):
                 uid=uid, 
                 objective=normalize_string(orchestration['目标描述']), 
                 key_results=key_outputs, 
-                sub_task_depth=sub_task_depth - 1, 
+                sub_task_depth=sub_task_depth, 
                 parent=parent, 
+                prev=prev, 
             )
             # Add the new task to the parent task
             parent.sub_tasks[uid] = new_task
@@ -168,13 +170,13 @@ class PlanWorkflow(BaseReActFlow):
                     )
                     # Check status
                     if prev.is_running():
-                        if prev.dependency is not None and not prev.dependency.is_running():
+                        if prev.prev is not None and not prev.prev.is_running():
                             prev.to_created()
 
             # Link the dependency
-            new_task.dependency = prev
+            new_task.prev = prev
 
-            if sub_task_depth == 0 and new_task.dependency is None:
+            if sub_task_depth == 0 and new_task.prev is None:
                 # Set the task status to running
                 new_task.to_running()
                 
@@ -185,11 +187,6 @@ class PlanWorkflow(BaseReActFlow):
             orchestrate_json = repair_json(orchestrate_json)
             # Parse the orchestration
             orchestration: dict[str, dict[str, str]] = json.loads(orchestrate_json)
-            
-            # Check if the sub-task depth is -1
-            if sub_task_depth == -1:
-                # Get the sub-task depth from the parent
-                sub_task_depth = parent.sub_task_depth - 1
             
             # Traverse all the sub-tasks
             for uid, sub_task in orchestration.items():
@@ -203,9 +200,11 @@ class PlanWorkflow(BaseReActFlow):
                 )
                 # Check status
                 if prev.is_running():
-                    if prev.dependency is not None and not prev.dependency.is_running():
+                    if prev.prev is not None and not prev.prev.is_running():
                         prev.to_created()
-            
+                        
+            # Update the next task of the parent
+            parent.next = prev
             # Format the task to ToDoTaskView
             view = ToDoTaskView(task=parent).format()
             # Return the user message
@@ -220,7 +219,7 @@ class PlanWorkflow(BaseReActFlow):
     async def reason_act(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int = -1, 
+        sub_task_depth: int, 
         completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> tuple[TreeTaskNode, bool, bool]:
@@ -229,10 +228,9 @@ class PlanWorkflow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to reason and act on. 
-            sub_task_depth (int, optional, defaults to -1):
-                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
-            completion_config (CompletionConfig, optional, defaults to None):
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            completion_config (CompletionConfig):
                 The completion config of the workflow. 
             **kwargs:
                 The additional keyword arguments for running the agent.
@@ -248,11 +246,6 @@ class PlanWorkflow(BaseReActFlow):
         else:
             # Update the format_json to True
             completion_config.update(format_json=True)
-            
-        # Check if the sub-task depth is -1
-        if sub_task_depth == -1:
-            # Get the sub-task depth from the parent
-            sub_task_depth = target.sub_task_depth
         
         # Initialize the error and tool call flag
         error_flag = False
@@ -284,6 +277,7 @@ class PlanWorkflow(BaseReActFlow):
         # Create new tasks based on the orchestration json
         message, error_flag = self.create_task(
             parent=target, 
+            prev=target.prev, 
             orchestrate_json=message.content, 
             sub_task_depth=sub_task_depth, 
         )
@@ -297,7 +291,7 @@ class PlanWorkflow(BaseReActFlow):
     async def reflect(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int = -1, 
+        sub_task_depth: int, 
         completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> tuple[TreeTaskNode, bool]:
@@ -306,10 +300,9 @@ class PlanWorkflow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to reflect on.
-            sub_task_depth (int, optional, defaults to -1):
-                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
-            completion_config (CompletionConfig, optional, defaults to None):
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            completion_config (CompletionConfig):
                 The completion config of the workflow. 
             **kwargs: 
                 The additional keyword arguments for running the agent.
@@ -318,10 +311,6 @@ class PlanWorkflow(BaseReActFlow):
             tuple[TreeTaskNode, bool]:
                 The target and the finish flag.
         """
-        if sub_task_depth == -1:
-            # Get the sub-task depth from the target
-            sub_task_depth = target.sub_task_depth
-        
         # Create a new message for layer limit announcement
         layer_limit_message = UserMessage(content=f"## 拆解层次限制\n\n【注意】：你最多只能拆解 {sub_task_depth} 层子任务。")
         # Update the layer limit message to the target
@@ -334,63 +323,13 @@ class PlanWorkflow(BaseReActFlow):
             **kwargs,
         )
 
-    async def run(
-        self, 
-        target: TreeTaskNode, 
-        sub_task_depth: int = -1, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
-        completion_config: CompletionConfig = None, 
-        running_checker: Callable[[TreeTaskNode], bool] = None, 
-        **kwargs,
-    ) -> TreeTaskNode:
-        """Run the workflow.
-        
-        Args:
-            target (TreeTaskNode):
-                The target to run the workflow on.
-            sub_task_depth (int, optional, defaults to -1):
-                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
-            max_error_retry (int, optional, defaults to 3):
-                The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional, defaults to 1):
-                The maximum number of times to idle thinking the agent.
-            completion_config (CompletionConfig, optional, defaults to None):
-                The completion config of the workflow. 
-            running_checker (Callable[[TreeTaskNode], bool], optional, defaults to None):
-                The checker to check if the workflow should be running.
-            **kwargs:
-                The additional keyword arguments for running the workflow.
-                
-        Returns:
-            TreeTaskNode:
-                The target after running the workflow.
-        """
-        # Check if the running checker is provided
-        if running_checker is None:
-            # Set the running checker to the default running checker
-            running_checker = lambda target: target.is_created()
-            
-        # Run the workflow
-        return await super().run(
-            target=target, 
-            sub_task_depth=sub_task_depth, 
-            max_error_retry=max_error_retry, 
-            max_idle_thinking=max_idle_thinking, 
-            completion_config=completion_config, 
-            running_checker=running_checker, 
-            **kwargs,
-        )
-
     async def reason_act_reflect(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int = -1, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
+        sub_task_depth: int, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
         completion_config: CompletionConfig = None, 
-        running_checker: Callable[[TreeTaskNode], bool] = None, 
         **kwargs,
     ) -> TreeTaskNode:
         """Reason and act on the target.
@@ -398,17 +337,14 @@ class PlanWorkflow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to reason and act on. 
-            sub_task_depth (int, optional, defaults to -1):
-                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
-            max_error_retry (int, optional, defaults to 3):
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional, defaults to 1):
+            max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent.
-            completion_config (CompletionConfig, optional, defaults to None):
+            completion_config (CompletionConfig):
                 The completion config of the workflow. 
-            running_checker (Callable[[TreeTaskNode], bool], optional, defaults to None):
-                The checker to check if the workflow should be running.
             **kwargs:
                 The additional keyword arguments for running the workflow.
                 
@@ -443,6 +379,103 @@ class PlanWorkflow(BaseReActFlow):
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config, 
-            running_checker=running_checker, 
+            **kwargs,
+        )
+        
+    async def schedule(
+        self, 
+        target: TreeTaskNode, 
+        sub_task_depth: int, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        completion_config: CompletionConfig = None, 
+        **kwargs,
+    ) -> TreeTaskNode:
+        """Override the schedule method of the react workflow.
+        
+        Args:
+            target (TreeTaskNode):
+                The target to schedule.
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            max_error_retry (int):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int):
+                The maximum number of times to idle thinking the agent.
+            completion_config (CompletionConfig):
+                The completion config of the workflow. 
+            **kwargs:
+                The additional keyword arguments for scheduling the workflow.
+                
+        Returns:
+            TreeTaskNode:
+                The target after scheduling.
+                
+        Raises:
+            RuntimeError:
+                If the target is not in the valid statuses.
+        """
+        if target.is_created():
+            # Reason and act on the target
+            target = await self.reason_act_reflect(
+                target=target, 
+                sub_task_depth=sub_task_depth, 
+                max_error_retry=max_error_retry, 
+                max_idle_thinking=max_idle_thinking, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+        else:
+            # Log the error
+            logger.error(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
+            # Raise an error
+            raise RuntimeError(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
+        
+        # Return the target
+        return target
+
+    async def run(
+        self, 
+        target: TreeTaskNode, 
+        sub_task_depth: int, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        completion_config: CompletionConfig = None, 
+        **kwargs,
+    ) -> TreeTaskNode:
+        """Run the workflow.
+        
+        Args:
+            target (TreeTaskNode):
+                The target to run the workflow on.
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            max_error_retry (int):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int):
+                The maximum number of times to idle thinking the agent.
+            completion_config (CompletionConfig):
+                The completion config of the workflow. 
+            **kwargs:
+                The additional keyword arguments for running the workflow.
+                
+        Returns:
+            TreeTaskNode:
+                The target after running the workflow.
+        """
+        # Check if the sub-task depth is greater than or equal to 1
+        if not target.sub_task_depth >= 1:
+            # Log the error
+            logger.error(f"目标的子任务深度小于 1，无法继续规划。")
+            # This target can not be planned
+            return target
+        
+        # Run the workflow
+        return await super().run(
+            target=target, 
+            sub_task_depth=sub_task_depth, 
+            max_error_retry=max_error_retry, 
+            max_idle_thinking=max_idle_thinking, 
+            completion_config=completion_config, 
             **kwargs,
         )

@@ -167,8 +167,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         self, 
         agent_type: AgentType, 
         target: Stateful, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
         completion_config: BaseCompletionConfig = None, 
         running_checker: Callable[[Stateful], bool] = None, 
         designated_agent: str = None, 
@@ -185,15 +185,15 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The type of the agent to call.
             target (Stateful):
                 The target to work on.
-            max_error_retry (int, optional):
+            max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional):
+            max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent.
-            completion_config (BaseCompletionConfig, optional):
+            completion_config (BaseCompletionConfig):
                 The completion config of the agent. 
-            running_checker (Callable[[Stateful], bool], optional):
+            running_checker (Callable[[Stateful], bool]):
                 The checker to check if the workflow should be running.
-            designated_agent (str, optional):
+            designated_agent (str):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
             **kwargs:
                 The additional keyword arguments to pass to the agent.
@@ -256,16 +256,6 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The additional keyword arguments to pass to the run method of the Environment.
         """
         pass
-    
-    def __str__(self) -> str:
-        """Get the string representation of the environment.
-        """
-        return f"BaseEnvironment(name={self.name}, profile={self.profile}, status={self.status})"
-    
-    def __repr__(self) -> str:
-        """Get the string representation of the environment.
-        """
-        return self.__str__()
     
     def to_created(self) -> None:
         """Set the environment to created status.

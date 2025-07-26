@@ -8,6 +8,7 @@ from myagents.core.messages.message import AssistantMessage, UserMessage, System
 from myagents.core.state_mixin import StateMixin
 
 
+
 class BaseTreeTaskNode(TreeTaskNode, StateMixin):
     """Base Tree Task Node for fundamental usage.
     
@@ -23,13 +24,15 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
             The objective of the task.
         key_results (str):
             The key results of the task and the verification method for the results.
-        results (str, optional):
+        results (str):
             The results of the task. If the task is not finished, the results is None.
+        next (TreeTaskNode):
+            The next task of the current task. If the task does not have a next task, the next is None.
+        prev (TreeTaskNode):
+            The previous task of the current task. If the task does not have a previous task, the prev is None.
         
-        parent (TreeTaskNode, optional):
+        parent (TreeTaskNode):
             The parent task of the current task. If the task does not have a parent task, the parent is None.
-        dependency (TreeTaskNode, optional):
-            The dependency task of the current task. If the task does not have a dependency task, the dependency is None.
         sub_tasks (OrderedDict[str, TreeTaskNode]):
             The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
         sub_task_depth (int):
@@ -42,9 +45,10 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
     objective: str
     key_results: str
     results: str 
+    next: TreeTaskNode
+    prev: TreeTaskNode
     
     parent: TreeTaskNode
-    dependency: TreeTaskNode
     sub_tasks: OrderedDict[str, TreeTaskNode]
     sub_task_depth: int
     
@@ -55,7 +59,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         key_results: str, 
         sub_task_depth: int, 
         parent: TreeTaskNode = None, 
-        dependency: TreeTaskNode = None, 
+        prev: TreeTaskNode = None, 
         **kwargs
     ) -> None:
         """
@@ -70,10 +74,8 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
                 The key results of the task and the verification method for the results.
             sub_task_depth (int):
                 The max number of layers of sub-objective layers that can be split from the objective.
-            parent (TreeTaskNode, optional):
+            parent (TreeTaskNode):
                 The parent task of the current task. If the task does not have a parent task, the parent is None.
-            dependency (TreeTaskNode, optional):
-                The dependency task of the current task. If the task does not have a dependency task, the dependency is None.
         """
         super().__init__(status_class=TaskStatus, **kwargs)
         self.uid = uid
@@ -83,11 +85,12 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         self.key_results = key_results
         # Initialize the results
         self.results = ""
+        # Initialize the next and prev
+        self.next = None
+        self.prev = prev
         
         assert parent is None or isinstance(parent, TreeTaskNode), "The parent must be a TreeTaskNode."
         self.parent = parent
-        assert dependency is None or isinstance(dependency, TreeTaskNode), "The dependency must be a TreeTaskNode."
-        self.dependency = dependency
         assert isinstance(sub_task_depth, int), "The sub task depth must be an integer."
         self.sub_task_depth = sub_task_depth
         # Initialize the stateful attributes
@@ -140,7 +143,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
                 sub_task.to_cancelled()
         
         # Check if sub task depth is 0
-        if self.sub_task_depth == 0:
+        if self.sub_task_depth == 0 and self.prev is None:
             self.to_running()
     
     def is_created(self) -> bool:
@@ -164,14 +167,10 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         """
         self.status = TaskStatus.FINISHED
         
-        # Check if the parent task is created and all the sub-tasks are finished
-        if (
-            self.parent and 
-            self.parent.is_created() and 
-            all(sub_task.is_finished() for sub_task in self.parent.sub_tasks.values())
-        ):
-            # Convert the parent task to running
-            self.parent.to_running()
+        # Check if the next task is created
+        if self.next and self.next.is_created():
+            # Convert the next task to running
+            self.next.to_running()
     
     def is_finished(self) -> bool:
         """Check if the task status is finished.
@@ -299,7 +298,20 @@ class DocumentTaskView(TaskView):
         self.task = task
         
     def format(self, layer: int = 3) -> str:
-        answer = self.task.results if self.task.results else "[[placeholder]] 任务未完成。"
+        match self.task.status:
+            case TaskStatus.CREATED:
+                answer = f"[[placeholder]] 任务未完成。"
+            case TaskStatus.RUNNING:
+                answer = f"[[placeholder]] 任务正在执行。"
+            case TaskStatus.FINISHED:
+                answer = self.task.results
+            case TaskStatus.ERROR:
+                answer = f"[[placeholder]] 任务执行失败。"
+            case TaskStatus.CANCELED:
+                answer = f"[[placeholder]] 任务已被取消，将被删除。"
+            case _:
+                raise ValueError(f"The status {self.task.status} is not supported.")
+        
         # Add the question and answer of the current task
         answer = f"# {self.task.uid}: {self.task.objective}\n\n{self.task.key_results}\n\n{answer}"
         

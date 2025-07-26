@@ -2,7 +2,7 @@
     "debug": false, 
     "save_dir": "stdout", 
     "environment": {
-        "type": "Query", 
+        "type": "ComplexQuery", 
         "step_counters": [
             {
                 "name": "base",
@@ -18,7 +18,7 @@
                 "type": "ReActAgent",
                 "llm": {
                     "provider": "openai",
-                    "base_url": "http://localhost:8889/v1",
+                    "base_url": "http://192.168.152.85:65189/v1",
                     "model": "Qwen/Qwen3-14B-AWQ",
                     "temperature": 0.8, 
                     "api_key_field": "LOCAL_KEY", 
@@ -28,23 +28,10 @@
                 }
             },
             {
-                "type": "OrchestrateAgent",
-                "llm": {
-                    "provider": "openai",
-                    "base_url": "http://localhost:8889/v1",
-                    "model": "Qwen/Qwen3-14B-AWQ",
-                    "temperature": 0.8, 
-                    "api_key_field": "LOCAL_KEY", 
-                    "extra_body": {
-                        "enable_thinking": false
-                    }
-                }
-            }, 
-            {
                 "type": "PlanAndExecuteAgent",
                 "llm": {
                     "provider": "openai",
-                    "base_url": "http://localhost:8889/v1",
+                    "base_url": "http://192.168.152.85:65189/v1",
                     "model": "Qwen/Qwen3-14B-AWQ",
                     "temperature": 0.8, 
                     "api_key_field": "LOCAL_KEY", 

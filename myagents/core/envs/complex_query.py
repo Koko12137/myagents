@@ -1,7 +1,6 @@
 from asyncio import Semaphore
 from collections import OrderedDict
 from enum import Enum
-from traceback import format_exc
 from typing import Union
 
 from loguru import logger
@@ -26,7 +25,7 @@ from myagents.prompts.envs.query import (
 )
 
 
-REQUIRED_AGENTS = [AgentType.ORCHESTRATE, AgentType.REACT, AgentType.PLAN_AND_EXECUTE]
+REQUIRED_AGENTS = [AgentType.PLAN_AND_EXECUTE, AgentType.REACT]
 
 
 class OutputType(Enum):
@@ -43,8 +42,10 @@ class OutputType(Enum):
     SELECTION = "selection"
 
 
-class Query(BaseEnvironment):
-    """Query is the environment for the multi-turn query and answer the question. The answer type can be:
+class ComplexQuery(BaseEnvironment):
+    """ComplexQuery is the environment for the multi-turn query and answer the question automatically. This environment 
+    will split the question into atomic tasks by the orchestrate agents and then execute the tasks by the react agents. 
+    The answer type can be:
      - Summary: The summary of the answer.
      - Document: The document of the answer.
      - Selection: The selection of the answer.
@@ -117,17 +118,17 @@ class Query(BaseEnvironment):
         """Initialize the Query environment.
         
         Args:
-            profile (str, optional, defaults to ""):
+            profile (str):
                 The profile of the environment.
-            system_prompt (str, optional, defaults to ""):
+            system_prompt (str):
                 The system prompt of the environment.
-            orchestration_prompt (str, optional, defaults to ""):
+            orchestration_prompt (str):
                 The orchestration prompt of the environment.
-            doc_prompt (str, optional, defaults to ""):
+            doc_prompt (str):
                 The document prompt of the environment.
-            select_prompt (str, optional, defaults to ""):
+            select_prompt (str):
                 The select prompt of the environment.
-            error_prompt (str, optional, defaults to ""):
+            error_prompt (str):
                 The error prompt of the environment.
             need_user_check (bool, optional, defaults to False):
                 Whether to need the user to check the orchestration blueprint.
@@ -167,7 +168,7 @@ class Query(BaseEnvironment):
     def __str__(self) -> str:
         """Get the string representation of the environment.
         """
-        return f"Query(profile={self.profile}, status={self.status})"
+        return f"ComplexQuery(profile={self.profile}, status={self.status})"
     
     def __repr__(self) -> str:
         """Get the string representation of the environment.
@@ -322,7 +323,11 @@ class Query(BaseEnvironment):
         logger.info(f"任务创建: \n{task.objective}")
         
         # Process the task
-        task = await self.process_task(task, completion_config=completion_config, **kwargs)
+        task = await self.schedule(
+            target=task, 
+            completion_config=completion_config, 
+            **kwargs,
+        )
         
         # Check the task status
         if not task.is_finished():
@@ -399,210 +404,32 @@ class Query(BaseEnvironment):
         
         else:
             raise ValueError(f"Unknown output type: {output_type}")
-        
-    async def process_task(
-        self, 
-        target: TreeTaskNode, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
-        completion_config: BaseCompletionConfig = None,
-        **kwargs,
-    ) -> TreeTaskNode:
-        """Process the task.
-        
-        Args:
-            target (TreeTaskNode):
-                The target task to be processed.
-            max_error_retry (int, optional):
-                The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional):
-                The maximum number of times to idle thinking the agent. 
-            completion_config (BaseCompletionConfig, optional):
-                The completion config of the environment.
-            **kwargs:
-                The keyword arguments to be passed to the parent class.
-        
-        Returns:
-            TreeTaskNode:
-                The processed task.
-        """
-        # Initialize the error retry count
-        current_error = 0
-        
-        while not target.is_finished():
-            # Check the status of the target
-            if self.is_created():
-                # Call for global orchestration
-                target = await self.orchestrate(
-                    target=target, 
-                    max_error_retry=max_error_retry, 
-                    max_idle_thinking=max_idle_thinking, 
-                    completion_config=completion_config,
-                    **kwargs,
-                )
-            
-            elif self.is_running():
-                # Plan and execute the task
-                target = await self.plan_and_exec(
-                    target=target, 
-                    max_error_retry=max_error_retry, 
-                    max_idle_thinking=max_idle_thinking, 
-                    completion_config=completion_config,
-                    **kwargs,
-                )
-            
-            elif self.is_error():
-                # Get all the sub-tasks that are not finished
-                sub_tasks = [sub_task for sub_task in target.sub_tasks.values() if not sub_task.is_finished()]
-                # Delete all the sub-tasks that are not finished
-                for sub_task in sub_tasks:
-                    # Log the deletion
-                    logger.info(f"删除子任务: {sub_task.uid}: {sub_task.objective}")
-                    # Delete the sub-task
-                    del target.sub_tasks[sub_task.uid]
-                
-                # Rollback the target to created status
-                target.to_created()
-                # Log the rollback
-                logger.info(f"回滚到创建状态: {target.uid}: {target.objective}")
-                # Rollback the self to created status
-                self.to_created()
-                # Log the rollback
-                logger.info(f"回滚到创建状态: {self.uid}")
-                # Record the error information
-                current_result = DocumentTaskView(target).format()
-                # Create a new user message to record the error and the current result
-                message = UserMessage(content=self.prompts["error"].format(
-                    error_retry=current_error, 
-                    max_error_retry=max_error_retry, 
-                    error_reason=target.results,
-                    current_result=current_result,
-                ))  # BUG: 这里要先记录错误状态，再提示重试
-                # Update the environment history
-                self.update(message)
-                # Clean up the error information
-                target.results = ""
-            
-            elif self.is_cancelled():
-                # Increment the error retry count
-                current_error += 1
-                # Log the error
-                logger.error(f"任务 {target.objective} 处理失败，重试次数: {current_error} / {max_error_retry}。")
-                
-                # Check the error retry count
-                if current_error >= max_error_retry:
-                    # Log the error
-                    logger.error(f"任务 {target.objective} 处理失败，达到最大重试次数。")
-                    # Raise the error
-                    raise RuntimeError(f"Task {target.objective} is in error state. Max error retry count reached.")
-                
-                # Rollback the target to error status
-                target.to_error()
-                # Rollback the self to error status
-                self.to_error()
-                
-            else:
-                # Log the error
-                logger.critical(f"任务 {target.objective} 当前处于非法状态 {target.get_status()}。")
-                # Raise the error
-                raise RuntimeError(f"Task {target.objective} is in error state. Invalid status.")
-            
-            # Check if the target is finished
-            if target.is_finished():
-                # Break the loop
-                break
-        
-        # Return the answer
-        return target
-        
-    async def orchestrate(
-        self, 
-        target: TreeTaskNode, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
-        completion_config: BaseCompletionConfig = None,
-        **kwargs,
-    ) -> TreeTaskNode:
-        """Orchestrate the task. 
-        
-        Args:
-            target (TreeTaskNode):
-                The target task to be orchestrated.
-            max_error_retry (int, optional, defaults to 3):
-                The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional, defaults to 1):
-                The maximum number of times to idle thinking the agent. 
-            completion_config (BaseCompletionConfig, optional):
-                The completion config of the environment.
-            **kwargs:
-                The keyword arguments to be passed to the parent class.
-        
-        Returns:    
-            TreeTaskNode:
-                The orchestrated task.
-        """
-        # Prepare the completion config
-        completion_config = BaseCompletionConfig(
-            exclude_tools=["select_answer", "diff_modify"],
-        )
-        
-        # Record the question
-        message = UserMessage(
-            content=self.prompts["orchestration"].format(task=ToDoTaskView(target).format()),
-        )
-        # Update the environment history
-        self.update(message)
-        # Log the message
-        logger.info(f"Observe: \n{message.content}")
-        # Call for global orchestration
-        message: AssistantMessage = await self.call_agent(
-            AgentType.ORCHESTRATE, 
-            target=target, 
-            max_error_retry=max_error_retry, 
-            max_idle_thinking=max_idle_thinking, 
-            completion_config=completion_config,
-            **kwargs,
-        )
-        # Update the environment history
-        self.update(message)
-        # Log the message
-        logger.info(f"Agent Response: \n{message.content}")
-        
-        if not target.is_error(): 
-            # Set self to running
-            self.to_running()
-        else:
-            # Set self to error
-            self.to_error()
-        
-        # Return the target
-        return target
 
-    async def plan_and_exec(
+    async def schedule(
         self, 
         target: TreeTaskNode, 
         max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
-        completion_config: BaseCompletionConfig = None,
-        **kwargs,
+        max_idle_thinking: int = 2, 
+        completion_config: BaseCompletionConfig = None, 
+        **kwargs, 
     ) -> TreeTaskNode:
-        """Plan and execute the task.
+        """Schedule the task.
         
         Args:
             target (TreeTaskNode):
-                The target task to be planned and executed.
-            max_error_retry (int, optional, defaults to 3):
+                The target task to be scheduled.
+            max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional, defaults to 1):
+            max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent. 
-            completion_config (BaseCompletionConfig, optional):
+            completion_config (BaseCompletionConfig):
                 The completion config of the environment.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         
         Returns:
             TreeTaskNode:
-                The planned and executed task.
+                The scheduled task.
         """
         # Prepare the completion config
         if completion_config is None:
@@ -615,113 +442,30 @@ class Query(BaseEnvironment):
                 exclude_tools=["select_answer", "diff_modify"],
             )
         
-        # Record the question
-        message = UserMessage(
-            content=self.prompts["plan_and_execute"].format(task=ToDoTaskView(target).format()),
-        )
+        # Call the ReAct Agent to reason about the real intent of the question
+        # message: AssistantMessage = await self.call_agent(
+        #     AgentType.REACT, 
+        #     target=self, 
+        #     completion_config=completion_config,
+        # )
         # Update the environment history
-        self.update(message)
-        # Log the message
-        logger.info(f"Observe: \n{message.content}")
+        # self.update(message)
+        # # Log the answer
+        # logger.info(f"Agent Response: \n{message.content}")
         
-        sub_tasks = target.sub_tasks
-        # Create a iterator for the sub-tasks
-        sub_tasks_iter = iter(sub_tasks.values())
-        # Get the first sub-task
-        sub_task = next(sub_tasks_iter)
-        
-        while not self.is_finished():
-
-            # Process the created status
-            if sub_task.is_created() or sub_task.is_running():
-                # Create a new user message to record the question
-                message = UserMessage(
-                    content=self.prompts["plan_and_execute"].format(task=ToDoTaskView(sub_task).format()),
-                )
-                # Update the environment history
-                self.update(message)
-                # Log the message
-                logger.info(f"Observe: \n{message.content}")
-                
-                # Call for plan and execute
-                message: AssistantMessage = await self.call_agent(
-                    AgentType.PLAN_AND_EXECUTE, 
-                    target=sub_task, 
-                    max_error_retry=max_error_retry, 
-                    max_idle_thinking=max_idle_thinking, 
-                    completion_config=completion_config,
-                    **kwargs,
-                )
-                # Update the environment history
-                self.update(message)
-                # Log the message
-                logger.info(f"Agent Response: \n{message.content}")
-                
-            elif sub_task.is_cancelled():
-                # Get all the sub-tasks that are not finished
-                sub_tasks = [t for t in target.sub_tasks.values() if not t.is_finished()]
-                # Delete all the sub-tasks that are not finished
-                for t in sub_tasks:
-                    del target.sub_tasks[t.uid]
-                # Rollback the target to created status
-                target.to_created()
-                # Rollback the self to created status
-                self.to_created()
-                # Log the error
-                logger.error(f"任务 {target.objective} 的所有未完成子任务已取消。")
-                # Break the loop
-                return target
-            
-            elif sub_task.is_finished():
-                # Get the next sub-task
-                try:
-                    sub_task = next(sub_tasks_iter)
-                except StopIteration:
-                    # Log the content
-                    logger.info(f"所有子任务已处理完成。")
-                    # Break the loop
-                    break
-            
-            else:
-                raise RuntimeError(f"Task {target.objective} is in error state. Invalid status.")
-        
-        # Check all the sub-tasks are finished
-        if not all(sub_task.is_finished() for sub_task in sub_tasks.values()):
-            # Get all the sub-tasks that are not finished
-            sub_tasks = [t for t in target.sub_tasks.values() if not t.is_finished()]
-            # Delete all the sub-tasks that are not finished
-            for t in sub_tasks:
-                del target.sub_tasks[t.uid]
-            # Rollback the target to created status
-            target.to_created()
-            # Rollback the self to created status
-            self.to_created()
-            # Log the error
-            logger.error(f"任务 {target.objective} 的所有未完成子任务已取消。")
-            # Return the target
-            return target
-        
-        # Create a new user message to record the question
-        message = UserMessage(
-            content=self.prompts["plan_and_execute"].format(task=ToDoTaskView(target).format()),
-        )
-        # Update the environment history
-        self.update(message)
-        # Log the message
-        logger.info(f"Observe: \n{message.content}")
-        # Call for plan and execute
+        # Call the Plan and Exec Agent to plan and execute the task
         message: AssistantMessage = await self.call_agent(
             AgentType.PLAN_AND_EXECUTE, 
             target=target, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
-            completion_config=completion_config, 
-            **kwargs,
+            completion_config=completion_config,
         )
-        # Update the environment history
+        # Update the environment history 
         self.update(message)
-        # Log the message
+        # Log the answer
         logger.info(f"Agent Response: \n{message.content}")
+        
         return target
 
     async def observe(self, format: str = "document") -> str:

@@ -1,7 +1,7 @@
 from enum import Enum
 
 from .base import BaseWorkflow
-from .react import BaseReActFlow
+from .react import BaseReActFlow, TreeTaskReActFlow
 from .plan_and_exec import PlanAndExecFlow
 from .orchestrate import OrchestrateFlow
 
@@ -27,5 +27,6 @@ __all__ = [
     "BaseReActFlow", 
     "PlanAndExecFlow", 
     "OrchestrateFlow", 
+    "TreeTaskReActFlow", 
     "WorkflowType",
 ]

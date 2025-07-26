@@ -29,6 +29,8 @@ class AgentConfig(BaseModel):
             The configuration for the LLM.
         mcp_client (MCPConfig, optional):
             The configuration for the MCP client. 
+        extra_config (dict[str, Any]):
+            The extra configuration for the agent.
     """
     type: str = Field(description="The type of the agent.")
     llm: LLMConfig = Field(description="The configuration for the LLM.")

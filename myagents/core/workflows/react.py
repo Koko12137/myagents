@@ -6,6 +6,7 @@ from fastmcp.tools import Tool as FastMcpTool
 from myagents.core.interface import Agent, Workflow, Stateful, Context, TreeTaskNode, CompletionConfig
 from myagents.core.messages import SystemMessage, UserMessage, StopReason, ToolCallResult, ToolCallRequest
 from myagents.core.workflows.base import BaseWorkflow
+from myagents.core.tasks import DocumentTaskView
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.utils.extractor import extract_by_label
 from myagents.prompts.workflows.react import PROFILE
@@ -122,14 +123,59 @@ class BaseReActFlow(BaseWorkflow):
                 content=f"任务已设置为 {target.get_status().value} 状态。",
             )
             return result
+        
+    async def schedule(
+        self, 
+        target: Stateful, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        completion_config: CompletionConfig = None, 
+        **kwargs,
+    ) -> Stateful:
+        """Schedule the workflow. This method is used to schedule the workflow.
+        
+        Args:
+            target (Stateful):
+                The target to schedule.
+            max_error_retry (int):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int):
+                The maximum number of times to idle thinking the agent.
+            completion_config (CompletionConfig, optional, defaults to None):
+                The completion config of the workflow. 
+            **kwargs:
+                The additional keyword arguments for scheduling the workflow. 
+                
+        Returns:
+            Stateful:
+                The target after scheduling.
+                
+        Raises:
+            RuntimeError:
+                If the target is not in the valid statuses.
+        """
+        # Run the workflow
+        if target.is_running():
+            # Reason and act on the target
+            target = await self.reason_act_reflect(
+                target=target, 
+                max_error_retry=max_error_retry, 
+                max_idle_thinking=max_idle_thinking, 
+                completion_config=completion_config,
+                **kwargs,
+            )
+        else:
+            # Log the error
+            logger.error(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
+            # Raise an error
+            raise RuntimeError(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
 
     async def run(
         self, 
         target: Stateful, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
         completion_config: CompletionConfig = None, 
-        running_checker: Callable[[Stateful], bool] = None, 
         **kwargs,
     ) -> Stateful:
         """Run the agent on the target. Before running the agent, you should get the lock of the agent. 
@@ -137,14 +183,12 @@ class BaseReActFlow(BaseWorkflow):
         Args:
             target (Stateful):
                 The target to run the agent on.
-            max_error_retry (int, optional, defaults to 3):
+            max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional, defaults to 1):
+            max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent.
             completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow. 
-            running_checker (Callable[[Stateful], bool], optional, defaults to None):
-                The checker to check if the workflow should be running.
             **kwargs:
                 The additional keyword arguments for running the agent.
                 
@@ -152,38 +196,20 @@ class BaseReActFlow(BaseWorkflow):
             Stateful:
                 The target after working with the workflow.
         """
-        # Check if the running checker is provided
-        if running_checker is None:
-            # Set the running checker to the default checker
-            running_checker = lambda target: target.is_running()
-        
-        # Run the workflow
-        if running_checker(target):
-            # Reason and act on the target
-            target = await self.reason_act_reflect(
-                target=target, 
-                max_error_retry=max_error_retry, 
-                max_idle_thinking=max_idle_thinking, 
-                completion_config=completion_config,
-                running_checker=running_checker, 
-                **kwargs,
-            )
-        else:
-            # Log the error
-            logger.error("The target is not running, the workflow is not executed.")
-            # Set the target to error
-            target.to_error()
-            
-        # Return the target
-        return target
+        return await self.schedule(
+            target=target, 
+            max_error_retry=max_error_retry, 
+            max_idle_thinking=max_idle_thinking, 
+            completion_config=completion_config,
+            **kwargs,
+        )
 
     async def reason_act_reflect(
         self, 
         target: Stateful, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
         completion_config: CompletionConfig = None, 
-        running_checker: Callable[[Stateful], bool] = None, 
         **kwargs,
     ) -> Stateful:
         """Reason and act on the target.
@@ -191,14 +217,12 @@ class BaseReActFlow(BaseWorkflow):
         Args:
             target (Stateful):
                 The target to reason and act on.
-            max_error_retry (int, optional, defaults to 3):
+            max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional, defaults to 1):
+            max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent. 
             completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow. 
-            running_checker (Callable[[Stateful], bool], optional, defaults to None):
-                The checker to check if the workflow should be running. 
             **kwargs:
                 The additional keyword arguments for running the agent. 
         
@@ -219,7 +243,7 @@ class BaseReActFlow(BaseWorkflow):
         current_error = 0
         
         # Run the workflow
-        while running_checker(target):
+        while target.is_running():
         
             # === Reason Stage ===
             # Reason and act on the target
@@ -441,3 +465,137 @@ class BaseReActFlow(BaseWorkflow):
             finish_flag = False
 
         return target, finish_flag
+
+
+class TreeTaskReActFlow(BaseReActFlow):
+    """TreeTaskReActFlow is a workflow for the tree task ReAct workflow.
+    """    
+    
+    async def reason_act_reflect(
+        self, 
+        target: TreeTaskNode, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        completion_config: CompletionConfig = None, 
+        **kwargs,
+    ) -> TreeTaskNode:
+        """Reason, act and reflect on the target. This is the post step of the planning in order to execute the task. 
+        
+        Args:
+            target (TreeTaskNode):
+                The task to reason, act and reflect.
+            max_error_retry (int):
+                The maximum number of error retries.
+            max_idle_thinking (int):
+                The maximum number of idle thinking. 
+            completion_config (CompletionConfig):
+                The completion config of the workflow. 
+            **kwargs: 
+                The additional keyword arguments for running the agent.
+                
+        Returns:
+            TreeTaskNode:
+                The target after reasoning, acting and reflecting.
+        """
+        # Check if the target is running
+        if not target.is_running():
+            # The target is not running, return the target
+            logger.warning(f"任务 {target.question} 不是运行状态。")
+            return target
+        
+        # Check if the target has history
+        if len(target.get_history()) == 0:
+            # === Prepare System Instruction ===
+            # Get the prompts from the agent
+            exec_system = self.prompts["system_prompt"]
+            # Append the system prompt to the history
+            message = SystemMessage(content=exec_system)
+            # Update the system message to the history
+            target.update(message)
+            
+            # Get the task from the context
+            task = self.agent.env.context.get("task")
+            # Create a UserMessage for the task results
+            task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=task).format()}")
+            # Update the task message to the history
+            target.update(task_message)
+        
+        # This is used for no tool calling thinking limit.
+        current_thinking = 0
+        current_error = 0
+        
+        while target.is_running():
+            # === Reason and Act ===
+            target, error_flag, tool_call_flag = await self.reason_act(
+                target=target, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+            
+            # Check if the error flag is set
+            if error_flag:
+                # Increment the error counter
+                current_error += 1
+                # Notify the error limit to Agent
+                message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                target.update(message)
+                # Log the error message
+                logger.info(f"Error Message: \n{message}")
+                # Check if the error counter is greater than the max error retry
+                if current_error >= max_error_retry:
+                    # Set the task status to error
+                    target.to_error()
+                    # Record the error as answer
+                    target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
+                    # Force the react loop to finish
+                    break
+            
+            # Check if the tool call flag is not set
+            if not tool_call_flag:
+                # Get the last message
+                message = target.get_history()[-1]
+                # Extract the final output from the message
+                final_output = extract_by_label(message.content, "final_output", "final answer", "output", "answer")
+                if final_output != "":
+                    # Set the answer of the task
+                    target.results = final_output
+                else:
+                    # Announce the empty final output
+                    logger.warning(f"Empty final output: \n{message.content}")
+                    # Create a new user message to record the empty final output
+                    message = UserMessage(content=f"【警告】：没有在<final_output>标签中找到任何内容，你必须将最终输出放在<final_output>标签中。")
+                    target.update(message)
+            
+            # === Reflect ===
+            target, finish_flag = await self.reflect(
+                target=target, 
+                completion_config=completion_config, 
+            )
+            # Check if the target is finished
+            if finish_flag:
+                # Set the task status to finished
+                target.to_finished()
+            
+            # Check if the tool call flag is not set
+            elif not tool_call_flag and not target.results:
+                # Increment the idle thinking counter
+                current_thinking += 1
+                # Notify the idle thinking limit to Agent
+                message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请遵守反思结果，尽快输出最终输出。")
+                target.update(message)
+                # Log the idle thinking message
+                logger.info(f"Idle Thinking Message: \n{message}")
+                # Check if the idle thinking counter is greater than the max idle thinking
+                if current_thinking >= max_idle_thinking:
+                    # Set the task status to error
+                    target.to_error()
+                    # Record the error as answer
+                    target.results += f"\n连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。"
+        
+        # Set the answer of the task
+        if not target.results and target.is_finished(): 
+            target.results = "任务执行结束，但未提供答案，执行可能存在未知错误。"
+            
+        # Log the answer
+        logger.info(f"任务执行结束: \n{DocumentTaskView(target).format()}")
+        return target

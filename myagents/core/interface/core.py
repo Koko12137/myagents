@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from enum import Enum
-from typing import Protocol, runtime_checkable, Union, Optional, Any, Callable, Awaitable, OrderedDict
+from typing import Protocol, runtime_checkable, Union, Any, Callable, Awaitable, OrderedDict
 
 from mcp import Tool as MCPTool
 from fastmcp.tools import Tool as FastMcpTool
@@ -23,8 +23,8 @@ class Context(Protocol):
         key_values (dict[str, Any]):
             The key values of the context.
     """
-    prev: Optional['Context']
-    next: Optional['Context']
+    prev: 'Context'
+    next: 'Context'
     key_values: dict[str, Any]
     
     @abstractmethod
@@ -401,36 +401,26 @@ class Task(Stateful):
             The key results of the task and the verification method for the results.
         results (str):
             The results of the task. If the task is not finished, the results is None.
+        next (Task):
+            The next task of the current task. If the task does not have a next task, the next is None.
+        prev (Task):
+            The previous task of the current task. If the task does not have a previous task, the prev is None.
     """
     uid: str
     objective: str
     key_results: str
     results: str
+    # Link information
+    next: 'Task'
+    prev: 'Task'
 
 
 class TreeTaskNode(Task):
     """TreeTaskNode is the protocol for all the tasks. It is a tree structure of the tasks.
     
     Attributes:
-        status (TaskStatus):
-            The status of the current task.
-        history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
-            The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
-            The value is a list of the history messages. 
-        
-        uid (str): 
-            The unique identifier of the task. Do not specify this field. It will be automatically generated.
-        objective (str):
-            The objective of the task.
-        key_results (str):
-            The key results of the task and the verification method for the results.
-        results (str):
-            The results of the task. If the task is not finished, the results is None
-            
         parent (TreeTaskNode):
             The parent task of the current task. If the task does not have a parent task, the parent is None. 
-        dependency (TreeTaskNode):
-            The dependency task of the current task. If the task does not have a dependency task, the dependency is None.
         sub_tasks (OrderedDict[str, TreeTaskNode]):
             The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
         sub_task_depth (int):
@@ -438,7 +428,6 @@ class TreeTaskNode(Task):
     """
     # Parent and sub-tasks
     parent: 'TreeTaskNode'
-    dependency: 'TreeTaskNode'
     # NOTE: The key should be the objective of the sub-task, the value should be the sub-task instance. 
     sub_tasks: OrderedDict[str, 'TreeTaskNode']
     sub_task_depth: int
@@ -469,21 +458,6 @@ class GraphTaskNode(Task):
     """GraphTaskNode is the protocol for all the tasks. It is a graph structure of the tasks.
     
     Attributes:
-        status (TaskStatus):
-            The status of the current task.
-        history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
-            The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
-            The value is a list of the history messages. 
-        
-        uid (str):
-            The unique identifier of the task. Do not specify this field. It will be automatically generated.
-        objective (str):
-            The objective of the task.
-        key_results (str):
-            The key results of the task and the verification method for the results.
-        results (str):
-            The results of the task. If the task is not finished, the results is None.
-        
         dependencies (OrderedDict[str, GraphTaskNode]):
             The dependencies of the task. The key is the unique identifier of the dependency task, and the value is the dependency task.
     """
@@ -514,5 +488,84 @@ class TaskView(Protocol):
         Returns: 
             str:
                 The formatted task view. 
+        """
+        pass
+
+
+@runtime_checkable
+class Scheduler(Protocol):
+    """Scheduler is a protocol for the scheduling the workflow."""
+    
+    @abstractmethod
+    async def schedule(self, target: Stateful, **kwargs) -> Stateful:
+        """Schedule the workflow.
+        
+        Args:
+            target (Stateful):
+                The target to schedule.
+            **kwargs:
+                The additional keyword arguments for scheduling the workflow.
+                
+        Raises:
+            RuntimeError:
+                If the status of the target is not valid.
+        """
+        pass
+    
+
+@runtime_checkable
+class Memory(Protocol):
+    """Memory is the protocol for the memory management. It is used to store the memory of the agent working 
+    on any stateful entity. 
+    """
+    
+    @abstractmethod
+    async def add(
+        self, 
+        messages: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]], 
+        **kwargs,
+    ) -> None:
+        """Add the episode messages to the memory.
+        
+        Args:
+            messages (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]):
+                The episode messages to be added to the memory.
+        """
+        pass
+    
+    @abstractmethod
+    async def get(
+        self, 
+        **kwargs,
+    ) -> list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]:
+        """Get the episode messages from the memory.
+        """
+        pass
+    
+    @abstractmethod
+    async def update(
+        self, 
+        messages: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]],
+        **kwargs,
+    ) -> None:
+        """Update the procedural or semantic messages in the memory.
+        
+        Args:
+            messages (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]):
+                The procedural or semantic messages to be updated in the memory.
+        """
+        pass
+    
+    @abstractmethod
+    async def delete(
+        self, 
+        messages: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]],
+        **kwargs,
+    ) -> None:
+        """Delete the procedural or semantic messages from the memory.
+        
+        Args:
+            messages (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]):
+                The procedural or semantic messages to be deleted from the memory.
         """
         pass
