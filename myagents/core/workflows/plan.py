@@ -137,6 +137,8 @@ class PlanWorkflow(BaseReActFlow):
             orchestration: dict[str, dict], 
             sub_task_depth: int, 
         ) -> TreeTaskNode:
+            sub_task_depth = sub_task_depth - 1
+            
             # Convert the orchestration to string
             key_outputs = ""
             for output in orchestration['关键产出']:
@@ -147,7 +149,7 @@ class PlanWorkflow(BaseReActFlow):
                 uid=uid, 
                 objective=normalize_string(orchestration['目标描述']), 
                 key_results=key_outputs, 
-                sub_task_depth=sub_task_depth, 
+                sub_task_depth=parent.sub_task_depth - 1, 
                 parent=parent, 
                 prev=prev, 
             )
@@ -166,7 +168,7 @@ class PlanWorkflow(BaseReActFlow):
                         parent=new_task, 
                         prev=prev, 
                         orchestration=sub_task, 
-                        sub_task_depth=sub_task_depth - 1, 
+                        sub_task_depth=sub_task_depth, 
                     )
                     # Check status
                     if prev.is_running():
@@ -176,7 +178,7 @@ class PlanWorkflow(BaseReActFlow):
             # Link the dependency
             new_task.prev = prev
 
-            if sub_task_depth == 0 and new_task.prev is None:
+            if new_task.sub_task_depth == 0 and new_task.prev is None:
                 # Set the task status to running
                 new_task.to_running()
                 
@@ -196,7 +198,7 @@ class PlanWorkflow(BaseReActFlow):
                     parent=parent, 
                     prev=prev, 
                     orchestration=sub_task, 
-                    sub_task_depth=sub_task_depth - 1, 
+                    sub_task_depth=sub_task_depth, 
                 )
                 # Check status
                 if prev.is_running():
@@ -249,7 +251,6 @@ class PlanWorkflow(BaseReActFlow):
         
         # Initialize the error and tool call flag
         error_flag = False
-        tool_call_flag = False
         
         # === Thinking ===
         reason_act_prompt = self.prompts["reason_act_prompt"]
@@ -286,7 +287,7 @@ class PlanWorkflow(BaseReActFlow):
         # Update the target with the user message
         target.update(message)
         # Return the target, error flag and tool call flag
-        return target, error_flag, tool_call_flag
+        return target, error_flag, True
     
     async def reflect(
         self, 
@@ -311,6 +312,10 @@ class PlanWorkflow(BaseReActFlow):
             tuple[TreeTaskNode, bool]:
                 The target and the finish flag.
         """
+        if completion_config is not None:
+            # Cancel the json format
+            completion_config.update(format_json=False)
+        
         # Create a new message for layer limit announcement
         layer_limit_message = UserMessage(content=f"## 拆解层次限制\n\n【注意】：你最多只能拆解 {sub_task_depth} 层子任务。")
         # Update the layer limit message to the target
@@ -319,65 +324,6 @@ class PlanWorkflow(BaseReActFlow):
         # Call the parent reflect method
         return await super().reflect(
             target=target, 
-            completion_config=completion_config, 
-            **kwargs,
-        )
-
-    async def reason_act_reflect(
-        self, 
-        target: TreeTaskNode, 
-        sub_task_depth: int, 
-        max_error_retry: int, 
-        max_idle_thinking: int, 
-        completion_config: CompletionConfig = None, 
-        **kwargs,
-    ) -> TreeTaskNode:
-        """Reason and act on the target.
-        
-        Args:
-            target (TreeTaskNode):
-                The target to reason and act on. 
-            sub_task_depth (int):
-                The depth of the sub-task. 
-            max_error_retry (int):
-                The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int):
-                The maximum number of times to idle thinking the agent.
-            completion_config (CompletionConfig):
-                The completion config of the workflow. 
-            **kwargs:
-                The additional keyword arguments for running the workflow.
-                
-        Returns:
-            TreeTaskNode:
-                The target after running the workflow.
-        """
-        # Check if the target has history
-        if len(target.get_history()) == 0:
-            # Get the system prompt from the workflow
-            system_prompt = self.prompts["system_prompt"]
-            # Update the system prompt to the history
-            message = SystemMessage(content=system_prompt)
-            target.update(message)
-            # Create a new messsage announcing the blueprint
-            blueprint = self.agent.env.context.get("blueprint")
-            # Create a UserMessage for the blueprint
-            blueprint_message = UserMessage(content=f"## 任务总体规划蓝图\n\n{blueprint}")
-            # Update the blueprint message to the history
-            target.update(blueprint_message)
-            # Create a new message for the current task results
-            task_results = DocumentTaskView(task=target).format()
-            # Create a UserMessage for the task results
-            task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
-            # Update the task results message to the history
-            target.update(task_results_message)
-        
-        # Run the workflow
-        return await super().reason_act_reflect(
-            target=target, 
-            sub_task_depth=sub_task_depth, 
-            max_error_retry=max_error_retry, 
-            max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config, 
             **kwargs,
         )
@@ -415,23 +361,95 @@ class PlanWorkflow(BaseReActFlow):
             RuntimeError:
                 If the target is not in the valid statuses.
         """
-        if target.is_created():
-            # Reason and act on the target
-            target = await self.reason_act_reflect(
-                target=target, 
-                sub_task_depth=sub_task_depth, 
-                max_error_retry=max_error_retry, 
-                max_idle_thinking=max_idle_thinking, 
-                completion_config=completion_config, 
-                **kwargs,
-            )
-        else:
+        if not target.is_created():
             # Log the error
             logger.error(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
             # Raise an error
             raise RuntimeError(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
+            
+        # Check if the target has history
+        if len(target.get_history()) == 0:
+            # Get the system prompt from the workflow
+            system_prompt = self.prompts["system_prompt"]
+            # Update the system prompt to the history
+            message = SystemMessage(content=system_prompt)
+            target.update(message)
+            # Create a new messsage announcing the blueprint
+            blueprint = self.agent.env.context.get("blueprint")
+            # Create a UserMessage for the blueprint
+            blueprint_message = UserMessage(content=f"## 任务总体规划蓝图\n\n{blueprint}")
+            # Update the blueprint message to the history
+            target.update(blueprint_message)
+            # Create a new message for the current task results
+            task_results = DocumentTaskView(task=target).format()
+            # Create a UserMessage for the task results
+            task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
+            # Update the task results message to the history
+            target.update(task_results_message)
         
-        # Return the target
+        # This is used for no tool calling thinking limit.
+        current_thinking = 0
+        current_error = 0
+        
+        # Run the workflow
+        while target.is_created():
+        
+            # === Reason Stage ===
+            # Reason and act on the target
+            target, error_flag, tool_call_flag = await self.reason_act(
+                target=target, 
+                sub_task_depth=sub_task_depth, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+            
+            # Check if the error flag is set
+            if error_flag:
+                # Increment the error counter
+                current_error += 1
+                # Notify the error limit to Agent
+                message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                target.update(message)
+                # Log the error message
+                logger.info(f"Error Message: \n{message}")
+                # Check if the error counter is greater than the max error retry
+                if current_error >= max_error_retry:
+                    # Set the task status to error
+                    target.to_error()
+                    # Force the react loop to finish
+                    break
+            
+            # === Reflect Stage ===
+            # Reflect on the target
+            target, finish_flag = await self.reflect(
+                target=target, 
+                sub_task_depth=sub_task_depth, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+            # Check if the target is finished
+            if finish_flag:
+                # Force the loop to break
+                break
+            
+            # Check if the tool call flag is not set
+            elif not tool_call_flag:
+                # Increment the idle thinking counter
+                current_thinking += 1
+                # Notify the idle thinking limit to Agent
+                message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                target.update(message)
+                # Log the idle thinking message
+                logger.info(f"Idle Thinking Message: \n{message}")
+                # Check if the idle thinking counter is greater than the max idle thinking
+                if current_thinking >= max_idle_thinking:
+                    # Set the task status to error
+                    target.to_error()
+                    # Log the error message
+                    logger.critical(f"连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。")
+                    # Force the loop to break
+                    break
+            
         return target
 
     async def run(
@@ -471,7 +489,7 @@ class PlanWorkflow(BaseReActFlow):
             return target
         
         # Run the workflow
-        return await super().run(
+        return await self.schedule(
             target=target, 
             sub_task_depth=sub_task_depth, 
             max_error_retry=max_error_retry, 

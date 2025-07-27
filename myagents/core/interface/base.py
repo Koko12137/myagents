@@ -10,7 +10,6 @@ from myagents.core.interface.core import Stateful, ToolsCaller, Scheduler, Memor
 from myagents.core.interface.llm import LLM, CompletionConfig
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
-
 class StepCounter(Protocol):
     """StepCounter is a protocol for the step counter. The limit can be max auto steps or max balance cost. It is better to use 
     the same step counter for all agents. 
@@ -243,8 +242,6 @@ class Agent(Protocol):
                 The maximum number of times to idle thinking the agent. 
             completion_config (CompletionConfig):
                 The completion config of the agent. 
-            *args:
-                The additional arguments for running the agent.
             **kwargs:
                 The additional keyword arguments for running the agent.
                 
@@ -306,7 +303,7 @@ class Workflow(ToolsCaller, Scheduler):
     agent: Agent
     prompts: dict[str, str]
     observe_formats: dict[str, str]
-    # Sub-worflows
+    # Sub-workflows
     sub_workflows: dict[str, 'Workflow']
     
     @abstractmethod
@@ -316,10 +313,6 @@ class Workflow(ToolsCaller, Scheduler):
         Args:
             agent (Agent):
                 The agent to register.
-                
-        Raises:
-            ValueError:
-                If the workflow already has an agent.
         """
         pass
     
@@ -343,8 +336,6 @@ class Workflow(ToolsCaller, Scheduler):
                 The maximum number of times to idle thinking the workflow.
             completion_config (CompletionConfig):
                 The completion config of the workflow. 
-            *args:
-                The additional arguments for running the workflow.
             **kwargs:
                 The additional keyword arguments for running the workflow.
 
@@ -387,40 +378,9 @@ class Workflow(ToolsCaller, Scheduler):
         """
         pass
     
-    
+
 class ReActFlow(Workflow):
     """ReActFlow is a workflow that can reason and act on the target."""
-    
-    @abstractmethod
-    async def reason_act_reflect(
-        self, 
-        target: Stateful, 
-        max_error_retry: int, 
-        max_idle_thinking: int, 
-        completion_config: CompletionConfig, 
-        **kwargs, 
-    ) -> tuple[Stateful, bool, bool]:
-        """Reason and act on the target, and reflect on the target.
-        
-        Args:
-            target (Stateful):
-                The target to reason and act on.
-            max_error_retry (int):
-                The maximum number of times to retry the workflow when the target is errored.
-            max_idle_thinking (int):
-                The maximum number of times to idle thinking the workflow.
-            completion_config (CompletionConfig):
-                The completion config of the workflow.
-            *args:
-                The additional arguments for running the workflow.
-            **kwargs:
-                The additional keyword arguments for running the workflow.
-                
-        Returns:
-            tuple[Stateful, bool, bool]:
-                The target, the error flag and the tool call flag.
-        """
-        pass
     
     @abstractmethod
     async def reason_act(
@@ -436,8 +396,6 @@ class ReActFlow(Workflow):
                 The target to reason and act on.
             completion_config (CompletionConfig):
                 The completion config of the workflow. 
-            *args:
-                The additional arguments for running the workflow.
             **kwargs:
                 The additional keyword arguments for running the workflow.
                 
@@ -461,8 +419,6 @@ class ReActFlow(Workflow):
                 The target to reflect on. 
             completion_config (CompletionConfig):
                 The completion config of the workflow. 
-            *args:
-                The additional arguments for running the workflow.
             **kwargs:
                 The additional keyword arguments for running the workflow.
                 
@@ -504,12 +460,10 @@ class Environment(Stateful, ToolsCaller, Scheduler):
             The profile of the environment. 
         prompts (dict[str, str]):
             The prompts of the environment. The key is the prompt name and the value is the prompt content. 
-        leader (Agent):
-            The leader agent of the environment. 
-        agents (dict[str, Agent]):
-            The agents in the environment. The key is the agent name and the value is the agent. 
         required_agents (list[Enum]):
             The agents in the list must be registered to the environment. 
+        agents (dict[str, Agent]):
+            The agents in the environment. The key is the agent name and the value is the agent. 
         agent_type_map (dict[Enum, list[str]]):
             The map of the agent type to the agent name. The key is the agent type and the value is the agent name list. 
         agent_type_semaphore (dict[Enum, Semaphore]):
@@ -520,8 +474,7 @@ class Environment(Stateful, ToolsCaller, Scheduler):
     profile: str
     prompts: dict[str, str]
     required_agents: list[Enum]
-    # Agents and tools
-    leader: Agent
+    # Agents and concurrency control
     agents: dict[str, Agent]
     agent_type_map: dict[Enum, list[str]]
     agent_type_semaphore: dict[Enum, Semaphore]
@@ -533,16 +486,6 @@ class Environment(Stateful, ToolsCaller, Scheduler):
         Args:
             agent (Agent):
                 The agent to register. 
-        """
-        pass
-    
-    @abstractmethod
-    def set_leader(self, leader_agent: str) -> None:
-        """Set the leader agent to the environment.
-        
-        Args:
-            leader_agent (str):
-                The name of the leader agent to set.
         """
         pass
     
@@ -576,8 +519,6 @@ class Environment(Stateful, ToolsCaller, Scheduler):
                 The completion config of the agent. 
             designated_agent (str):
                 The name of the designated agent to call. If not provided, a random agent will be selected. 
-            *args:
-                The additional arguments to pass to the agent.
             **kwargs:
                 The additional keyword arguments to pass to the agent.
                 
@@ -596,8 +537,6 @@ class Environment(Stateful, ToolsCaller, Scheduler):
         """The main entrypoint of the environment. 
         
         Args:
-            *args:
-                The additional arguments to pass to the run method of the Environment.
             **kwargs:
                 The additional keyword arguments to pass to the run method of the Environment.
                 

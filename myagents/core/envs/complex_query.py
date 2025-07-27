@@ -11,21 +11,22 @@ from myagents.core.interface import Agent, TreeTaskNode, Context
 from myagents.core.agents import AgentType
 from myagents.core.tasks import BaseTreeTaskNode, DocumentTaskView, ToDoTaskView
 from myagents.core.llms.config import BaseCompletionConfig
-from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
+from myagents.core.envs.base import EnvironmentStatus
+from myagents.core.envs.plan_and_exec import PlanAndExecEnv
 from myagents.tools.docs import DocumentLog, BaseDocument, FormatType
 from myagents.prompts.envs.query import (
     NAME, 
     PROFILE, 
     QUERY_SYSTEM_PROMPT, 
     QUERY_DOC_PROMPT, 
-    QUERY_ORCHESTRATION_PROMPT, 
-    QUERY_PLAN_AND_EXECUTE_PROMPT, 
+    QUERY_ORCHESTRATE_PROMPT, 
+    QUERY_EXECUTE_PROMPT, 
     QUERY_SELECT_PROMPT, 
     QUERY_ERROR_PROMPT,
 )
 
 
-REQUIRED_AGENTS = [AgentType.PLAN_AND_EXECUTE, AgentType.REACT]
+REQUIRED_AGENTS = [AgentType.ORCHESTRATE, AgentType.TREE_REACT]
 
 
 class OutputType(Enum):
@@ -42,7 +43,7 @@ class OutputType(Enum):
     SELECTION = "selection"
 
 
-class ComplexQuery(BaseEnvironment):
+class ComplexQuery(PlanAndExecEnv):
     """ComplexQuery is the environment for the multi-turn query and answer the question automatically. This environment 
     will split the question into atomic tasks by the orchestrate agents and then execute the tasks by the react agents. 
     The answer type can be:
@@ -59,8 +60,6 @@ class ComplexQuery(BaseEnvironment):
             The profile of the environment. 
         system_prompt (str):
             The system prompt of the environment. 
-        leader (Agent):
-            The leader agent of the environment. 
         agents (dict[str, Agent]):
             The agents in the environment. The key is the agent name and the value is the agent. 
         required_agents (list[AgentType]):
@@ -87,7 +86,6 @@ class ComplexQuery(BaseEnvironment):
     prompts: dict[str, str]
     required_agents: list[AgentType]
     # Core components
-    leader: Agent
     agents: dict[str, Agent]
     agent_type_map: dict[AgentType, list[str]]
     agent_type_semaphore: dict[AgentType, Semaphore]
@@ -104,13 +102,13 @@ class ComplexQuery(BaseEnvironment):
     
     def __init__(
         self, 
-        profile: str = "", 
-        system_prompt: str = "", 
-        orchestration_prompt: str = "", 
-        plan_and_execute_prompt: str = "", 
-        doc_prompt: str = "", 
-        select_prompt: str = "", 
-        error_prompt: str = "", 
+        profile: str = PROFILE, 
+        system_prompt: str = QUERY_SYSTEM_PROMPT, 
+        orchestrate_prompt: str = QUERY_ORCHESTRATE_PROMPT, 
+        execute_prompt: str = QUERY_EXECUTE_PROMPT, 
+        doc_prompt: str = QUERY_DOC_PROMPT, 
+        select_prompt: str = QUERY_SELECT_PROMPT, 
+        error_prompt: str = QUERY_ERROR_PROMPT, 
         need_user_check: bool = False, 
         intent_recognition: bool = False, 
         **kwargs,
@@ -122,14 +120,16 @@ class ComplexQuery(BaseEnvironment):
                 The profile of the environment.
             system_prompt (str):
                 The system prompt of the environment.
-            orchestration_prompt (str):
-                The orchestration prompt of the environment.
+            orchestrate_prompt (str):
+                The orchestrate prompt of the environment.
+            execute_prompt (str):
+                The execute prompt of the environment.
+            error_prompt (str):
+                The error prompt of the environment.
             doc_prompt (str):
                 The document prompt of the environment.
             select_prompt (str):
                 The select prompt of the environment.
-            error_prompt (str):
-                The error prompt of the environment.
             need_user_check (bool, optional, defaults to False):
                 Whether to need the user to check the orchestration blueprint.
             intent_recognition (bool, optional, defaults to False):
@@ -139,14 +139,14 @@ class ComplexQuery(BaseEnvironment):
         """
         super().__init__(
             name=NAME, 
-            profile=profile if profile != "" else PROFILE, 
+            profile=profile, 
             prompts={
-                "system": system_prompt if system_prompt != "" else QUERY_SYSTEM_PROMPT,
-                "orchestration": orchestration_prompt if orchestration_prompt != "" else QUERY_ORCHESTRATION_PROMPT,
-                "plan_and_execute": plan_and_execute_prompt if plan_and_execute_prompt != "" else QUERY_PLAN_AND_EXECUTE_PROMPT,
-                "doc": doc_prompt if doc_prompt != "" else QUERY_DOC_PROMPT,
-                "select": select_prompt if select_prompt != "" else QUERY_SELECT_PROMPT,
-                "error": error_prompt if error_prompt != "" else QUERY_ERROR_PROMPT,
+                "system": system_prompt,
+                "orchestrate_prompt": orchestrate_prompt,
+                "execute_prompt": execute_prompt,
+                "error_prompt": error_prompt,
+                "doc": doc_prompt,
+                "select": select_prompt,
             }, 
             required_agents=REQUIRED_AGENTS, 
             **kwargs,
@@ -368,7 +368,7 @@ class ComplexQuery(BaseEnvironment):
             """ [[ ## Post process the answer ## ]] """
             # Call for react agent to modify the document or select the answer
             message: AssistantMessage = await self.call_agent(
-                AgentType.REACT, 
+                AgentType.TREE_REACT, 
                 target=self, 
                 document=document, 
                 completion_config=completion_config,
@@ -391,7 +391,7 @@ class ComplexQuery(BaseEnvironment):
                 completion_config.update(tool_choice="select_answer")
             # Call for react agent to select the answer
             message: AssistantMessage = await self.call_agent(
-                AgentType.REACT, 
+                AgentType.TREE_REACT, 
                 target=self, 
                 completion_config=completion_config,
             )
@@ -453,20 +453,13 @@ class ComplexQuery(BaseEnvironment):
         # # Log the answer
         # logger.info(f"Agent Response: \n{message.content}")
         
-        # Call the Plan and Exec Agent to plan and execute the task
-        message: AssistantMessage = await self.call_agent(
-            AgentType.PLAN_AND_EXECUTE, 
+        return await super().schedule(
             target=target, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config,
+            **kwargs,
         )
-        # Update the environment history 
-        self.update(message)
-        # Log the answer
-        logger.info(f"Agent Response: \n{message.content}")
-        
-        return target
 
     async def observe(self, format: str = "document") -> str:
         """Observe the environment. The format can be:

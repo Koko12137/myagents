@@ -1,156 +1,87 @@
+from asyncio import Semaphore
+from typing import Union
+
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.messages import UserMessage
-from myagents.core.interface import Agent, Context, TreeTaskNode, ReActFlow, CompletionConfig
-from myagents.core.workflows.react import TreeTaskReActFlow
-from myagents.core.workflows.orchestrate import OrchestrateFlow
+from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
+from myagents.core.interface import Agent, TreeTaskNode, Context, CompletionConfig
+from myagents.core.agents import AgentType
 from myagents.core.tasks import DocumentTaskView, ToDoTaskView
-from myagents.core.utils.extractor import extract_by_label
-from myagents.prompts.workflows.plan_and_exec import PROFILE
+from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
 
 
-class PlanAndExecFlow(TreeTaskReActFlow):
+REQUIRED_AGENTS = [
+    AgentType.ORCHESTRATE, 
+    AgentType.TREE_REACT, 
+]
+
+
+class PlanAndExecEnv(BaseEnvironment):
     """
-    PlanAndExecFlow is a workflow for splitting a task into sub-tasks and executing the sub-tasks.
-    
-        
-    Attributes:
-        context (Context):
-            The global context container of the workflow.
-        tools (dict[str, FastMcpTool]):
-            The tools can be used for the agent. 
-        
-        profile (str):
-            The profile of the workflow.
-        agent (Agent): 
-            The agent that is used to orchestrate the task.
-        prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
-        observe_format (str):
-            The format of the observation.
-        sub_workflows (dict[str, ReActFlow]):
-            The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the 
-            sub-workflow instance. 
+    PlanAndExecEnv is a environment for splitting a task into sub-tasks and executing the sub-tasks.
     """
-    # Context and tools
-    context: Context
-    tools: dict[str, FastMcpTool]
     # Basic information
+    uid: str
+    name: str
     profile: str
-    agent: Agent
     prompts: dict[str, str]
-    observe_format: str
-    # Sub-worflows
-    sub_workflows: dict[str, ReActFlow]
+    required_agents: list[AgentType]
+    # Core components
+    agents: dict[str, Agent]
+    agent_type_map: dict[AgentType, list[str]]
+    agent_type_semaphore: dict[AgentType, Semaphore]
+    # Tools Mixin
+    tools: dict[str, FastMcpTool]
+    context: Context
+    # Stateful Mixin
+    status: EnvironmentStatus
+    history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
     
     def __init__(
         self, 
+        name: str, 
+        profile: str, 
         prompts: dict[str, str], 
-        observe_formats: dict[str, str], 
-        **kwargs,
+        required_agents: list[AgentType], 
+        **kwargs, 
     ) -> None:
-        """Initialize the OrchestrateFlow.
-
+        """Initialize the BaseEnvironment.
+        
         Args:
-            prompts (dict[str, str]:
-                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
-                The following prompts are required:
-                    "orch_plan_system_prompt": The system prompt for the plan workflow of the orchestrate workflow.
-                    "orch_plan_reason_act_prompt": The reason act prompt for the plan workflow of the orchestrate workflow.
-                    "orch_plan_reflect_prompt": The reflect prompt for the plan workflow of the orchestrate workflow.
-                    "orch_exec_system_prompt": The system prompt for the execute workflow of the orchestrate workflow.
-                    "orch_exec_reason_act_prompt": The reason act prompt for the execute workflow of the orchestrate workflow.
-                    "orch_exec_reflect_prompt": The reflect prompt for the execute workflow of the orchestrate workflow.
-                    "exec_system_prompt": The system prompt for the execute workflow.
-                    "exec_reason_act_prompt": The reason act prompt for the execute workflow.
-                    "exec_reflect_prompt": The reflect prompt for the execute workflow.
-                    "error_prompt": The error prompt for the workflow.
-            observe_formats (dict[str, str]):
-                The formats of the observation. The key is the observation name and the value is the format method name. 
-                The following observe formats are required:
-                    "orch_plan_reason_act_format": The reason act format for the plan workflow of the orchestrate workflow.
-                    "orch_plan_reflect_format": The reflect format for the plan workflow of the orchestrate workflow.
-                    "orch_exec_reason_act_format": The reason act format for the execute workflow of the orchestrate workflow.
-                    "orch_exec_reflect_format": The reflect format for the execute workflow of the orchestrate workflow.
-                    "exec_reason_act_format": The reason act format for the execute workflow.
-                    "exec_reflect_format": The reflect format for the execute workflow.
+            name (str):
+                The name of the environment.
+            profile (str):
+                The profile of the environment.
+            prompts (dict[str, str]):
+                The prompts of the environment. The key is the prompt name and the value is the prompt content. 
+            required_agents (list[AgentType]):
+                The required agents to work on the environment. The agents in the list must be registered to the environment. 
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # Create the sub-workflows
-        sub_workflows = {
-            "plan": OrchestrateFlow(
-                prompts={
-                    "plan_system_prompt": prompts["orch_plan_system_prompt"], 
-                    "plan_reason_act_prompt": prompts["orch_plan_reason_act_prompt"], 
-                    "plan_reflect_prompt": prompts["orch_plan_reflect_prompt"], 
-                    "exec_system_prompt": prompts["orch_exec_system_prompt"], 
-                    "exec_reason_act_prompt": prompts["orch_exec_reason_act_prompt"], 
-                    "exec_reflect_prompt": prompts["orch_exec_reflect_prompt"], 
-                }, 
-                observe_formats={
-                    "plan_reason_act_format": observe_formats['orch_plan_reason_act_format'], 
-                    "plan_reflect_format": observe_formats['orch_plan_reflect_format'], 
-                    "exec_reason_act_format": observe_formats['orch_exec_reason_act_format'], 
-                    "exec_reflect_format": observe_formats['orch_exec_reflect_format'], 
-                }, 
-            ), 
-        }
+        # Check if the required agents are in the required agents list
+        for agent_type in required_agents:
+            if agent_type not in REQUIRED_AGENTS:
+                # Append the agent type to the required agents list
+                required_agents.append(agent_type)
         
-        # Prepare the prompts and observe formats for the exec workflow
-        prompts = {
-            "system_prompt": prompts["exec_system_prompt"], 
-            "reason_act_prompt": prompts["exec_reason_act_prompt"], 
-            "reflect_prompt": prompts["exec_reflect_prompt"], 
-            "error_prompt": prompts["error_prompt"], 
-        }
-        observe_formats = {
-            "reason_act_format": observe_formats["exec_reason_act_format"], 
-            "reflect_format": observe_formats["exec_reflect_format"], 
-        }
-        
+        # Initialize the parent class
         super().__init__(
-            profile=PROFILE, 
+            name=name, 
+            profile=profile, 
             prompts=prompts, 
-            observe_formats=observe_formats, 
-            sub_workflows=sub_workflows, 
+            required_agents=required_agents, 
             **kwargs,
         )
-        
-    async def run(
-        self, 
-        target: TreeTaskNode, 
-        max_error_retry: int, 
-        max_idle_thinking: int, 
-        completion_config: CompletionConfig = None, 
-        **kwargs,
-    ) -> TreeTaskNode:
-        """Run the workflow.
-        
-        Args:
-            target (TreeTaskNode):
-                The target to run.
-            max_error_retry (int):
-                The maximum number of error retries.
-            max_idle_thinking (int):
-                The maximum number of idle thinking.
-            completion_config (CompletionConfig):
-                The completion config of the workflow. 
-            **kwargs:
-                The additional keyword arguments for running the workflow.
-                
-        Returns:
-            TreeTaskNode:
-                The target after running.
-        """
-        return await self.schedule(
-            target=target, 
-            max_error_retry=max_error_retry, 
-            max_idle_thinking=max_idle_thinking, 
-            completion_config=completion_config, 
-            **kwargs,
-        )
+            
+        # Check if the required prompts are in the prompts list
+        for prompt_name in ["orchestrate_prompt", "execute_prompt", "error_prompt"]:
+            if prompt_name not in prompts:
+                # Log the error
+                logger.error(f"Prompt `{prompt_name}` is not in the prompts list.")
+                # Raise the error
+                raise RuntimeError(f"Prompt `{prompt_name}` is not in the prompts list.")
         
     async def schedule(
         self, 
@@ -217,14 +148,26 @@ class PlanAndExecFlow(TreeTaskReActFlow):
                         # Log the deleted sub-task
                         logger.error(f"删除已取消的子任务: \n{ToDoTaskView(sub_task).format()}")
                 
+                # Get the orchestrate prompt from the agent
+                orchestrate_prompt = self.prompts["orchestrate_prompt"]
+                # Create a new user message to record the orchestrate prompt
+                message = UserMessage(content=orchestrate_prompt)
+                # Update the environment history
+                self.update(message)
+                
                 # Plan the task
-                target = await self.plan(
+                message = await self.call_agent(
+                    agent_type=AgentType.ORCHESTRATE, 
                     target=target, 
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
                     completion_config=completion_config, 
                     **kwargs,
                 )
+                # Update the environment history
+                self.update(message)
+                # Log the answer
+                logger.info(f"Agent Response: \n{message.content}")
             
             elif (target.is_created() and len(target.sub_tasks) > 0) or target.is_running():
                 # Execute the task
@@ -276,43 +219,6 @@ class PlanAndExecFlow(TreeTaskReActFlow):
                 raise RuntimeError(f"Invalid target status in plan and exec workflow: {target.get_status()}")
             
         # Return the target
-        return target
-        
-    async def plan(
-        self, 
-        target: TreeTaskNode, 
-        max_error_retry: int, 
-        max_idle_thinking: int, 
-        completion_config: CompletionConfig = None, 
-        **kwargs,
-    ) -> TreeTaskNode:
-        """Plan the task. This is the pre step of the planning in order to inference the real 
-        and detailed requirements of the task. 
-        
-        Args:
-            target (TreeTaskNode):
-                The task to plan.
-            max_error_retry (int):
-                The maximum number of error retries.
-            max_idle_thinking (int):
-                The maximum number of idle thinking. 
-            completion_config (CompletionConfig):
-                The completion config of the workflow. 
-            **kwargs:
-                The additional keyword arguments for running the agent.
-
-        Returns:
-            TreeTaskNode: 
-                The target after planning.
-        """
-        # Call the parent class to reason and act
-        target = await self.sub_workflows["plan"].run(
-            target=target, 
-            max_error_retry=max_error_retry, 
-            max_idle_thinking=max_idle_thinking, 
-            completion_config=completion_config, 
-            **kwargs,
-        )
         return target
     
     async def execute(
@@ -403,13 +309,25 @@ class PlanAndExecFlow(TreeTaskReActFlow):
         # Post traverse the task
         # All the sub-tasks are finished, then reason, act and reflect on the task
         if all(sub_task.is_finished() for sub_task in target.sub_tasks.values()):
+            # Get the execute prompt from the agent
+            execute_prompt = self.prompts["execute_prompt"]
+            # Create a new user message to record the execute prompt
+            message = UserMessage(content=execute_prompt)
+            # Update the environment history
+            self.update(message)
+            
             # Call the parent class to reason, act and reflect
-            target = await self.run(
+            message = await self.call_agent(
+                agent_type=AgentType.TREE_REACT, 
                 target=target, 
                 max_error_retry=max_error_retry, 
                 max_idle_thinking=max_idle_thinking, 
                 completion_config=completion_config, 
                 **kwargs,
             )
+            # Update the environment history
+            self.update(message)
+            # Log the answer
+            logger.info(f"Agent Response: \n{message.content}")
             
         return target 

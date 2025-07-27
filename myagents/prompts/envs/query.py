@@ -26,7 +26,7 @@ QUERY_SYSTEM_PROMPT = """
 """
 
 
-QUERY_ORCHESTRATION_PROMPT = """
+QUERY_ORCHESTRATE_PROMPT = """
 # 任务进度
 当前处于【编排阶段】，这一阶段需要产出任务的总体规划，这个规划可以是树结构也可以是图结构（具体支持类型需要根据提供的工具来决定）。
 
@@ -35,7 +35,7 @@ QUERY_ORCHESTRATION_PROMPT = """
 """
 
 
-QUERY_PLAN_AND_EXECUTE_PROMPT = """
+QUERY_EXECUTE_PROMPT = """
 # 任务进度
 当前处于【规划-执行阶段】，这一阶段需要根据总体规划，完成详细可执行计划并完成任务的执行，产出是任务的详细执行结果报告。
 

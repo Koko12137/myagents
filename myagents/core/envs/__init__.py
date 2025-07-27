@@ -1,7 +1,6 @@
 from enum import Enum
 
 from myagents.core.envs.base import BaseEnvironment
-from myagents.core.envs.query import Query
 from myagents.core.envs.complex_query import ComplexQuery
 from myagents.core.envs.orchestrate import Orchestrate
 
@@ -17,9 +16,8 @@ class EnvironmentType(Enum):
         ORCHESTRATE (EnvironmentType):
             The type of the Orchestrate environment.
     """
-    QUERY = "Query"
     COMPLEX_QUERY = "ComplexQuery"
     ORCHESTRATE = "Orchestrate"
 
 
-__all__ = ["BaseEnvironment", "Query", "ComplexQuery", "Orchestrate", "EnvironmentType"]
+__all__ = ["BaseEnvironment", "ComplexQuery", "Orchestrate", "EnvironmentType"]

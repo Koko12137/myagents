@@ -9,6 +9,8 @@ class AgentType(Enum):
             The proxy agent. This agent is a proxy for user.
         REACT (str):
             The reason and act agent. This agent works on a basic reason and act workflow. 
+        TREE_REACT (str):
+            The tree reason and act agent. This agent works on a tree reason and act workflow. 
         ORCHESTRATE (str):
             The orchestrator agent. This agent works on an objective and key outputs orchestration workflow. 
         PLAN_AND_EXECUTE (str):
@@ -16,5 +18,6 @@ class AgentType(Enum):
     """
     PROXY = "ProxyAgent"
     REACT = "ReActAgent"
+    TREE_REACT = "TreeReActAgent"
     ORCHESTRATE = "OrchestrateAgent"
     PLAN_AND_EXECUTE = "PlanAndExecuteAgent"

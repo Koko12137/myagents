@@ -123,52 +123,6 @@ class BaseReActFlow(BaseWorkflow):
                 content=f"任务已设置为 {target.get_status().value} 状态。",
             )
             return result
-        
-    async def schedule(
-        self, 
-        target: Stateful, 
-        max_error_retry: int, 
-        max_idle_thinking: int, 
-        completion_config: CompletionConfig = None, 
-        **kwargs,
-    ) -> Stateful:
-        """Schedule the workflow. This method is used to schedule the workflow.
-        
-        Args:
-            target (Stateful):
-                The target to schedule.
-            max_error_retry (int):
-                The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int):
-                The maximum number of times to idle thinking the agent.
-            completion_config (CompletionConfig, optional, defaults to None):
-                The completion config of the workflow. 
-            **kwargs:
-                The additional keyword arguments for scheduling the workflow. 
-                
-        Returns:
-            Stateful:
-                The target after scheduling.
-                
-        Raises:
-            RuntimeError:
-                If the target is not in the valid statuses.
-        """
-        # Run the workflow
-        if target.is_running():
-            # Reason and act on the target
-            target = await self.reason_act_reflect(
-                target=target, 
-                max_error_retry=max_error_retry, 
-                max_idle_thinking=max_idle_thinking, 
-                completion_config=completion_config,
-                **kwargs,
-            )
-        else:
-            # Log the error
-            logger.error(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
-            # Raise an error
-            raise RuntimeError(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
 
     async def run(
         self, 
@@ -203,8 +157,8 @@ class BaseReActFlow(BaseWorkflow):
             completion_config=completion_config,
             **kwargs,
         )
-
-    async def reason_act_reflect(
+        
+    async def schedule(
         self, 
         target: Stateful, 
         max_error_retry: int, 
@@ -212,24 +166,35 @@ class BaseReActFlow(BaseWorkflow):
         completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> Stateful:
-        """Reason and act on the target.
+        """Schedule the workflow. This method is used to schedule the workflow.
         
         Args:
             target (Stateful):
-                The target to reason and act on.
+                The target to schedule.
             max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int):
-                The maximum number of times to idle thinking the agent. 
+                The maximum number of times to idle thinking the agent.
             completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow. 
             **kwargs:
-                The additional keyword arguments for running the agent. 
-        
+                The additional keyword arguments for scheduling the workflow. 
+                
         Returns:
             Stateful:
-                The target after reasoning and acting.
+                The target after scheduling.
+                
+        Raises:
+            RuntimeError:
+                If the target is not in the valid statuses.
         """
+        # Check if the target is running
+        if not target.is_running():
+            # Log the error
+            logger.error(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
+            # Raise an error
+            raise RuntimeError(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
+        
         # Check if the target has history
         if len(target.get_history()) == 0:
             # Get the system prompt from the workflow
@@ -471,37 +436,43 @@ class TreeTaskReActFlow(BaseReActFlow):
     """TreeTaskReActFlow is a workflow for the tree task ReAct workflow.
     """    
     
-    async def reason_act_reflect(
+        
+    async def schedule(
         self, 
-        target: TreeTaskNode, 
+        target: Stateful, 
         max_error_retry: int, 
         max_idle_thinking: int, 
         completion_config: CompletionConfig = None, 
         **kwargs,
-    ) -> TreeTaskNode:
-        """Reason, act and reflect on the target. This is the post step of the planning in order to execute the task. 
+    ) -> Stateful:
+        """Schedule the workflow. This method is used to schedule the workflow.
         
         Args:
-            target (TreeTaskNode):
-                The task to reason, act and reflect.
+            target (Stateful):
+                The target to schedule.
             max_error_retry (int):
-                The maximum number of error retries.
+                The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int):
-                The maximum number of idle thinking. 
-            completion_config (CompletionConfig):
+                The maximum number of times to idle thinking the agent.
+            completion_config (CompletionConfig, optional, defaults to None):
                 The completion config of the workflow. 
-            **kwargs: 
-                The additional keyword arguments for running the agent.
+            **kwargs:
+                The additional keyword arguments for scheduling the workflow. 
                 
         Returns:
-            TreeTaskNode:
-                The target after reasoning, acting and reflecting.
+            Stateful:
+                The target after scheduling.
+                
+        Raises:
+            RuntimeError:
+                If the target is not in the valid statuses.
         """
         # Check if the target is running
         if not target.is_running():
-            # The target is not running, return the target
-            logger.warning(f"任务 {target.question} 不是运行状态。")
-            return target
+            # Log the error
+            logger.error(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
+            # Raise an error
+            raise RuntimeError(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
         
         # Check if the target has history
         if len(target.get_history()) == 0:

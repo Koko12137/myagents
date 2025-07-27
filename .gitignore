@@ -38,3 +38,6 @@ data*/
 *.config.yml
 *.config.toml
 *.config.ini
+
+# Benchmark files
+benchmark/

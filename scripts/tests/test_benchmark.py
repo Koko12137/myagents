@@ -8,7 +8,7 @@ from tqdm import tqdm
 from loguru import logger
 from datasets import load_from_disk
 
-from myagents.core.envs.query import Query, OutputType
+from myagents.core.envs.complex_query import ComplexQuery, OutputType
 from myagents.core.factory import AutoAgent, AutoAgentConfig
 
 
@@ -236,7 +236,7 @@ async def process_single_question(
         
         # 创建工厂和查询环境
         factory = AutoAgent()
-        query_env: Query = factory.auto_build(config=config)
+        query_env: ComplexQuery = factory.auto_build(config=config)
         
         # 构建描述，让最终答案放到query的answer里``
         question = f"请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A/B/C/D中的一个。"

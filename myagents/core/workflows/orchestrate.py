@@ -17,54 +17,11 @@ class BlueprintWorkflow(BaseReActFlow):
     """
     sub_workflows: dict[str, ReActFlow]
     
-    async def schedule(
-        self, 
-        target: TreeTaskNode, 
-        sub_task_depth: int, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
-        completion_config: CompletionConfig = None, 
-        **kwargs,
-    ) -> TreeTaskNode:
-        """Override the schedule method of the react workflow.
-        
-        Args:
-            target (TreeTaskNode):
-                The target to schedule.
-            sub_task_depth (int):
-                The depth of the sub-task. 
-            max_error_retry (int):
-                The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int):
-                The maximum number of times to idle thinking the agent.
-            completion_config (CompletionConfig):
-                The completion config of the workflow. 
-            **kwargs:
-                The additional keyword arguments for scheduling the workflow.
-        """
-        if target.is_created():
-            # Reason and act on the target
-            target = await self.reason_act_reflect(
-                target=target, 
-                max_error_retry=max_error_retry, 
-                max_idle_thinking=max_idle_thinking, 
-                completion_config=completion_config, 
-                **kwargs,
-            )
-        else:
-            # Log the error
-            logger.error(f"Blueprint workflow requires the target status to be created, but the target status is {target.get_status().value}.")
-            # Raise an error
-            raise RuntimeError(f"Blueprint workflow requires the target status to be created, but the target status is {target.get_status().value}.")
-        
-        # Return the target
-        return target
-    
     async def run(
         self, 
         target: TreeTaskNode, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
         completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -102,28 +59,44 @@ class BlueprintWorkflow(BaseReActFlow):
             **kwargs,
         )
 
-    async def reason_act_reflect(
+    async def schedule(
         self, 
         target: TreeTaskNode, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
+        sub_task_depth: int, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
         completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> TreeTaskNode:
-        """Reason and act on the target, and reflect on the target.
+        """Override the schedule method of the react workflow.
         
         Args:
             target (TreeTaskNode):
-                The target to reason and act on.
+                The target to schedule.
+            sub_task_depth (int):
+                The depth of the sub-task. 
             max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int):
-                The maximum number of times to idle thinking the agent. 
+                The maximum number of times to idle thinking the agent.
             completion_config (CompletionConfig):
                 The completion config of the workflow. 
             **kwargs:
-                The additional keyword arguments for running the agent. 
+                The additional keyword arguments for scheduling the workflow.
+                
+        Returns:
+            TreeTaskNode:
+                The target after scheduling.
+        
+        Raises:
+            RuntimeError:
+                If the target is not in the valid statuses.
         """
+        if not target.is_created():
+            # Log the error
+            logger.error(f"Blueprint workflow requires the target status to be created, but the target status is {target.get_status().value}.")
+            # Raise an error
+            raise RuntimeError(f"Blueprint workflow requires the target status to be created, but the target status is {target.get_status().value}.")
         
         # Check if the target has history
         if len(target.get_history()) == 0:
@@ -437,77 +410,6 @@ class OrchestrateFlow(PlanWorkflow):
             # Return the target and the flag
             return target, False
     
-    async def reason_act(
-        self, 
-        target: TreeTaskNode, 
-        completion_config: CompletionConfig = None, 
-        **kwargs,
-    ) -> tuple[TreeTaskNode, bool, bool]:
-        """Reason and act on the target.
-        
-        Args:
-            target (TreeTaskNode):
-                The target to reason and act on.
-            completion_config (CompletionConfig):
-                The completion config of the workflow. 
-            **kwargs:
-                The additional keyword arguments for running the agent.
-                
-        Returns:
-            tuple[TreeTaskNode, bool, bool]:
-                The target, the error flag and the tool call flag.
-        """
-        # Check if the completion config is provided
-        if completion_config is None:
-            # Set the completion config to the default completion config
-            completion_config = BaseCompletionConfig(format_json=True)
-        else:
-            # Update the format_json to True
-            completion_config.update(format_json=True)
-        
-        # Initialize the error and tool call flag
-        error_flag = False
-        tool_call_flag = False
-        
-        # === Thinking ===
-        # Observe the target
-        observe = await self.agent.observe(
-            target, 
-            prompt=self.prompts["reason_act_prompt"], 
-            observe_format=self.observe_formats["reason_act_format"], 
-        )
-        # Log the observe
-        logger.info(f"Observe: \n{observe[-1].content}")
-        
-        # Think about the target
-        message = await self.agent.think(
-            observe=observe, 
-            completion_config=completion_config, 
-        )
-        # Update the message to the target
-        target.update(message)
-        # Log the assistant message
-        if logger.level == "DEBUG":
-            logger.debug(f"{str(self.agent)}: \n{message}")
-        else:
-            logger.info(f"{str(self.agent)}: \n{message.content}")
-
-        # === Create Task ===
-        # Create new tasks based on the orchestration json
-        message, error_flag = self.create_task(
-            parent=target, 
-            prev=target.prev, 
-            orchestrate_json=message.content, 
-            sub_task_depth=1,       # NOTE: OrchestrateFlow 只允许创建一级子任务
-        )    # BUG: 这里message.content可能为None
-        # Log the message
-        logger.info(f"Create Task Message: \n{message.content}")
-        # Update the target with the user message
-        target.update(message)
-        
-        # Return the target, error flag and tool call flag
-        return target, error_flag, tool_call_flag
-    
     async def schedule(
         self, 
         target: TreeTaskNode, 
@@ -566,9 +468,14 @@ class OrchestrateFlow(PlanWorkflow):
         
         # Run the ReActFlow to create the tasks
         if target.is_created():
+            # Check the kwargs
+            if "sub_task_depth" in kwargs:
+                sub_task_depth = kwargs.pop("sub_task_depth")
+            
             # Run the react flow
-            target = await super().run(
+            target = await super().schedule(
                 target=target, 
+                sub_task_depth=1, 
                 max_error_retry=max_error_retry, 
                 max_idle_thinking=max_idle_thinking, 
                 completion_config=completion_config, 

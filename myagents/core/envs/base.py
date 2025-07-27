@@ -7,6 +7,7 @@ from typing import Union, Any, Callable
 
 from fastmcp.tools import Tool as FastMCPTool
 
+from myagents.core.interface import Workflow
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
 from myagents.core.interface import Agent, Environment, Context, Stateful
 from myagents.core.agents import AgentType
@@ -45,8 +46,6 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             The prompts of the environment. 
         required_agents (list[AgentType]):
             The required agents to work on the environment. The agents in the list must be registered to the environment. 
-        leader (Agent):
-            The leader agent of the environment.
         agents (dict[str, Agent]):
             The agents in the environment. The key is the agent name and the value is the agent. 
         agent_type_map (dict[AgentType, str]):
@@ -69,7 +68,6 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
     prompts: dict[str, str]
     required_agents: list[AgentType]
     # Core components
-    leader: Agent
     agents: dict[str, Agent]
     agent_type_map: dict[AgentType, list[str]]
     agent_type_semaphore: dict[AgentType, Semaphore]
@@ -112,7 +110,6 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         self.prompts = prompts
         self.required_agents = required_agents
         # Initialize the core components
-        self.leader = None
         self.agents = {}
         self.agent_type_map = {}
         self.agent_type_semaphore = {}
@@ -145,24 +142,6 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         
         self.agent_type_map[agent.agent_type].append(agent.name)
     
-    def set_leader(self, leader_agent: str) -> None:
-        """Set the leader agent to the environment.
-        
-        Args:
-            leader_agent (str):
-                The name of the leader agent to set.
-                
-        Raises:
-            ValueError:
-                If the leader agent name is not registered.
-        """
-        # Check if the leader agent name is registered
-        if leader_agent not in self.agents:
-            raise ValueError(f"Leader agent {leader_agent} is not registered.")
-        
-        # Set the leader agent to the environment
-        self.leader = self.agents[leader_agent]
-    
     async def call_agent(
         self, 
         agent_type: AgentType, 
@@ -170,7 +149,6 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         max_error_retry: int, 
         max_idle_thinking: int, 
         completion_config: BaseCompletionConfig = None, 
-        running_checker: Callable[[Stateful], bool] = None, 
         designated_agent: str = None, 
         **kwargs
     ) -> AssistantMessage:
@@ -188,7 +166,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int):
-                The maximum number of times to idle thinking the agent.
+                The maximum number of times to idle thinking the agent. 
             completion_config (BaseCompletionConfig):
                 The completion config of the agent. 
             running_checker (Callable[[Stateful], bool]):
@@ -237,14 +215,13 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             max_error_retry, 
             max_idle_thinking, 
             completion_config, 
-            running_checker=running_checker, 
             **kwargs,
         )
         # Release the semaphore
         self.agent_type_semaphore[agent_type].release()
         # Return the message
         return message
-    
+
     @abstractmethod
     async def run(self, *args, **kwargs) -> Any:
         """The main entrypoint of the environment. 

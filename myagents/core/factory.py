@@ -1,5 +1,5 @@
 import sys
-from typing import Union, Optional, Any
+from typing import Union, Any
 
 from fastmcp.client import Client as MCPClient
 from pydantic import BaseModel, Field
@@ -11,8 +11,8 @@ from myagents.core.configs.envs import EnvironmentConfig
 from myagents.core.envs.orchestrate import Orchestrate
 from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment
 from myagents.core.llms import OpenAiLLM
-from myagents.core.agents import AgentType, ReActAgent, OrchestrateAgent, PlanAndExecAgent
-from myagents.core.envs import Query, ComplexQuery, EnvironmentType
+from myagents.core.agents import AgentType, ReActAgent, TreeReActAgent, OrchestrateAgent, PlanAndExecAgent
+from myagents.core.envs import ComplexQuery, EnvironmentType
 from myagents.core.utils.step_counters import BaseStepCounter, MaxStepCounter, TokenStepCounter
 from myagents.core.utils.logger import init_logger
 from myagents.core.utils.name_generator import generate_name
@@ -150,6 +150,8 @@ class AutoAgent:
         match agent_type:
             case AgentType.REACT:
                 AGENT = ReActAgent
+            case AgentType.TREE_REACT:
+                AGENT = TreeReActAgent
             case AgentType.ORCHESTRATE:
                 AGENT = OrchestrateAgent
             case AgentType.PLAN_AND_EXECUTE:
@@ -184,8 +186,6 @@ class AutoAgent:
         env_type = EnvironmentType(config.type)
         # Build the environment
         match env_type:
-            case EnvironmentType.QUERY:
-                env = Query
             case EnvironmentType.COMPLEX_QUERY:
                 env = ComplexQuery
             case EnvironmentType.ORCHESTRATE:

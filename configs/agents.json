@@ -15,7 +15,7 @@
         ],
         "agents": [
             {
-                "type": "ReActAgent",
+                "type": "TreeReActAgent",
                 "llm": {
                     "provider": "openai",
                     "base_url": "http://192.168.152.85:65189/v1",
@@ -28,7 +28,7 @@
                 }
             },
             {
-                "type": "PlanAndExecuteAgent",
+                "type": "OrchestrateAgent",
                 "llm": {
                     "provider": "openai",
                     "base_url": "http://192.168.152.85:65189/v1",

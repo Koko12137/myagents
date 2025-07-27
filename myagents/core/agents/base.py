@@ -1,12 +1,14 @@
 import traceback
 from uuid import uuid4
 from asyncio import Lock
-from typing import Union, Optional, Callable
+from typing import Union
 
 from loguru import logger
 from fastmcp import Client as MCPClient
 from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
+from mem0 import AsyncMemory
+from mem0.configs.base import MemoryConfig, VectorStoreConfig, LlmConfig, EmbedderConfig, GraphStoreConfig
 
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
@@ -79,7 +81,7 @@ class BaseAgent(Agent):
         profile: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
-        mcp_client: Optional[MCPClient] = None, 
+        mcp_client: MCPClient = None, 
         prompts: dict[str, str] = None, 
         observe_formats: dict[str, str] = None, 
         **kwargs, 
@@ -97,11 +99,11 @@ class BaseAgent(Agent):
                 The LLM to use for the agent. 
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
-            mcp_client (MCPClient, optional):
+            mcp_client (MCPClient):
                 The MCP client to use for the agent. If not provided, No MCP tools can be used.  
-            prompts (dict[str, str], optional):
+            prompts (dict[str, str]):
                 The prompts for running specific workflow of the workflow. 
-            observe_formats (dict[str, str], optional):
+            observe_formats (dict[str, str]):
                 The format of the observation. 
             **kwargs:
                 The keyword arguments to be passed to the parent class.
@@ -276,11 +278,10 @@ class BaseAgent(Agent):
 
     async def run(
         self, 
-        target: Stateful,
-        max_error_retry: int = 3,
-        max_idle_thinking: int = 1,
-        completion_config: BaseCompletionConfig = None,
-        running_checker: Callable[[Stateful], bool] = None,
+        target: Stateful, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        completion_config: BaseCompletionConfig = None, 
         **kwargs
     ) -> AssistantMessage:
         """Run the agent on the task or environment. Before running the agent, you should get the lock of the agent. 
@@ -288,14 +289,12 @@ class BaseAgent(Agent):
         Args:
             target (Stateful): 
                 The stateful entity to run the agent on. 
-            max_error_retry (int, optional, defaults to 3): 
+            max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored. 
-            max_idle_thinking (int, optional, defaults to 1): 
+            max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent. 
-            completion_config (CompletionConfig, optional, defaults to None):
+            completion_config (CompletionConfig, defaults to None):
                 The completion config of the agent. 
-            running_checker (Callable[[Stateful], bool], optional, defaults to None):
-                The checker to check if the workflow should be running.
             **kwargs:
                 The additional keyword arguments for running the agent.
                 
@@ -331,7 +330,6 @@ class BaseAgent(Agent):
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
             completion_config=completion_config, 
-            running_checker=running_checker, 
             **kwargs,
         )
         
@@ -407,3 +405,96 @@ class BaseAgent(Agent):
         
         # Register the environment
         self.env = env
+
+
+class MemoryAgent(BaseAgent):
+    """MemoryAgent is an agent that can use the memory to think and act.
+    
+    Attributes:
+        memory (Memory):
+            The memory of the agent.
+    """
+    # Memory
+    memory_config: MemoryConfig
+    memory: AsyncMemory
+    
+    def __init__(
+        self, 
+        llm_provider: str, 
+        llm_model: str, 
+        llm_base_url: str, 
+        llm_api_key: str, 
+        embedder_provider: str, 
+        embedder_model: str, 
+        **kwargs
+    ) -> None:
+        super().__init__(**kwargs)
+        self.memory_config = MemoryConfig(
+            vector_store=VectorStoreConfig(
+                provider="milvus",
+                config={
+                    "collection_name": "test",
+                    "embedding_model_dims": "512",
+                    "url": "./milvus/milvus.db",
+                },
+            ),
+            llm=LlmConfig(
+                provider=llm_provider,
+                config={
+                    "model": llm_model,
+                    "base_url": llm_base_url,
+                    "api_key": llm_api_key,
+                },
+            ),
+            embedder=EmbedderConfig(
+                provider=embedder_provider,
+                config={
+                    "model": embedder_model,
+                },
+            ),
+        )
+        self.memory = AsyncMemory(self.memory_config)
+    
+    async def observe(
+        self, 
+        target: Stateful, 
+        prompt: str, 
+        observe_format: str, 
+        **kwargs, 
+    ) -> list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
+        """Observe the target, and update the memory of the agent. 
+        
+        Args:
+            target (Stateful):
+                The stateful entity to observe. 
+            prompt (str): 
+                The prompt instruction after the observation. 
+            observe_format (str):
+                The format of the observation. This must be a valid observe format of the target
+            **kwargs:
+                The additional keyword arguments for observing the target. 
+                
+        Returns:
+            list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
+                The up to date information observed from the stateful entity.  
+        """
+        observe = await super().observe(
+            target, 
+            prompt, 
+            observe_format, 
+            **kwargs, 
+        )
+        # Update the memory of the agent
+        await self.memory.add(observe)
+        return observe
+    
+    async def think(
+        self, 
+        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
+        completion_config: BaseCompletionConfig, 
+        **kwargs, 
+    ) -> AssistantMessage:
+        """Think about the environment.
+        
+        """
+        

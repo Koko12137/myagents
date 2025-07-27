@@ -15,7 +15,7 @@ from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
 from myagents.prompts.envs.query import (
     NAME, 
     PROFILE, 
-    QUERY_ORCHESTRATION_PROMPT, 
+    QUERY_ORCHESTRATE_PROMPT, 
 )
 
 
@@ -78,7 +78,7 @@ class Orchestrate(BaseEnvironment):
     def __init__(
         self, 
         profile: str = PROFILE, 
-        orchestration_prompt: str = QUERY_ORCHESTRATION_PROMPT, 
+        orchestration_prompt: str = QUERY_ORCHESTRATE_PROMPT, 
         **kwargs,
     ) -> None:
         """Initialize the Orchestrate environment.
