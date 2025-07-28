@@ -6,16 +6,16 @@ from myagents.core.configs.agents import AgentConfig, CounterConfig
 
 
 class EnvironmentConfig(BaseModel):
-    """EnvironmentConfig is the configuration for the environment.
+    """环境的配置类
     
-    Attributes:
+    属性:
         type (str):
-            The type of the environment.
+            环境的类型
         agents (list[AgentConfig]):
-            The configurations for the agents.
+            代理的配置列表
         step_counters (list[CounterConfig]):
-            The configuration for the step counters.
+            步骤计数器的配置
     """
-    type: str = Field(description="The type of the environment.")
-    agents: list[AgentConfig] = Field(description="The configuration for the agents.")
-    step_counters: list[CounterConfig] = Field(description="The configuration for the step counters.")
+    type: str = Field(description="环境的类型")
+    agents: list[AgentConfig] = Field(description="代理的配置列表")
+    step_counters: list[CounterConfig] = Field(description="步骤计数器的配置")

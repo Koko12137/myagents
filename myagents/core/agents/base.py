@@ -1,3 +1,4 @@
+from abc import abstractmethod
 import traceback
 from uuid import uuid4
 from asyncio import Lock
@@ -7,8 +8,9 @@ from loguru import logger
 from fastmcp import Client as MCPClient
 from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
-from mem0 import AsyncMemory
-from mem0.configs.base import MemoryConfig, VectorStoreConfig, LlmConfig, EmbedderConfig, GraphStoreConfig
+from pymilvus import MilvusClient, MilvusException, DataType
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
@@ -407,94 +409,33 @@ class BaseAgent(Agent):
         self.env = env
 
 
-class MemoryAgent(BaseAgent):
-    """MemoryAgent is an agent that can use the memory to think and act.
-    
-    Attributes:
-        memory (Memory):
-            The memory of the agent.
+class BaseMemoryAgent(BaseAgent):
+    """BaseMemoryAgent is the base class for all the agents that can use the memory to think and act.
     """
-    # Memory
-    memory_config: MemoryConfig
-    memory: AsyncMemory
     
-    def __init__(
+    async def extract_semantic_memory(
         self, 
-        llm_provider: str, 
-        llm_model: str, 
-        llm_base_url: str, 
-        llm_api_key: str, 
-        embedder_provider: str, 
-        embedder_model: str, 
-        **kwargs
-    ) -> None:
-        super().__init__(**kwargs)
-        self.memory_config = MemoryConfig(
-            vector_store=VectorStoreConfig(
-                provider="milvus",
-                config={
-                    "collection_name": "test",
-                    "embedding_model_dims": "512",
-                    "url": "./milvus/milvus.db",
-                },
-            ),
-            llm=LlmConfig(
-                provider=llm_provider,
-                config={
-                    "model": llm_model,
-                    "base_url": llm_base_url,
-                    "api_key": llm_api_key,
-                },
-            ),
-            embedder=EmbedderConfig(
-                provider=embedder_provider,
-                config={
-                    "model": embedder_model,
-                },
-            ),
-        )
-        self.memory = AsyncMemory(self.memory_config)
-    
-    async def observe(
-        self, 
-        target: Stateful, 
-        prompt: str, 
-        observe_format: str, 
-        **kwargs, 
-    ) -> list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
-        """Observe the target, and update the memory of the agent. 
-        
-        Args:
-            target (Stateful):
-                The stateful entity to observe. 
-            prompt (str): 
-                The prompt instruction after the observation. 
-            observe_format (str):
-                The format of the observation. This must be a valid observe format of the target
-            **kwargs:
-                The additional keyword arguments for observing the target. 
-                
-        Returns:
-            list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
-                The up to date information observed from the stateful entity.  
+        text: str, 
+        **kwargs,
+    ) -> list[str]:
+        """Extract the semantic memory from the text.
         """
-        observe = await super().observe(
-            target, 
-            prompt, 
-            observe_format, 
-            **kwargs, 
-        )
-        # Update the memory of the agent
-        await self.memory.add(observe)
-        return observe
+        pass
     
-    async def think(
+    async def extract_episodic_memory(
         self, 
-        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
-        completion_config: BaseCompletionConfig, 
-        **kwargs, 
-    ) -> AssistantMessage:
-        """Think about the environment.
-        
+        text: str, 
+        **kwargs,
+    ) -> list[str]:
+        """Extract the episodic memory from the text.
         """
-        
+        pass
+    
+    async def extract_procedural_memory(
+        self, 
+        text: str, 
+        **kwargs,
+    ) -> list[str]:
+        """Extract the procedural memory from the text.
+        """
+        pass

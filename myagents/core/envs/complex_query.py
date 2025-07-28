@@ -312,13 +312,13 @@ class ComplexQuery(PlanAndExecEnv):
         ))
         # Create a new Task
         task = BaseTreeTaskNode(
-            uid=f"任务{len(self.tasks) + 1}",
+            name=f"任务{len(self.tasks) + 1}",
             objective=question, 
             key_results=description, 
             sub_task_depth=sub_task_depth,
         )
         # Set the task as the sub-task
-        self.tasks[task.uid] = task
+        self.tasks[task.name] = task
         # Log the task
         logger.info(f"任务创建: \n{task.objective}")
         
@@ -341,7 +341,7 @@ class ComplexQuery(PlanAndExecEnv):
             # Log the content
             logger.info(f"最终答案: \n{task.outputs}")
             # Record the answer
-            self.answers[task.uid] = task.outputs
+            self.answers[task.name] = task.outputs
             # Return the answer
             return task.outputs
         
@@ -400,7 +400,7 @@ class ComplexQuery(PlanAndExecEnv):
             # Log the answer
             logger.info(f"Agent Response: \n{message.content}")
             # Return the answer
-            return self.answers[task.uid]
+            return self.answers[task.name]
         
         else:
             raise ValueError(f"Unknown output type: {output_type}")

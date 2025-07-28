@@ -2,19 +2,19 @@ from pydantic import BaseModel, Field
 
 
 class MCPConfig(BaseModel):
-    """MCPConfig is the configuration for the MCP client.
+    """MCP 客户端的配置类
     
-    Attributes:
+    属性:
         server_name (str):
-            The name of the MCP server.
+            MCP 服务器的名称
         server_url (str):
-            The URL of the MCP server.
+            MCP 服务器的URL
         server_port (int):
-            The port of the MCP server.
+            MCP 服务器的端口
         auth_token (str):
-            The authentication token to use.
+            要使用的认证令牌
     """
-    server_name: str = Field(description="The name of the MCP server.")
-    server_url: str = Field(description="The URL of the MCP server.")
-    server_port: int = Field(description="The port of the MCP server.")
-    auth_token: str = Field(description="The authentication token to use.")
+    server_name: str = Field(description="MCP 服务器的名称")
+    server_url: str = Field(description="MCP 服务器的URL")
+    server_port: int = Field(description="MCP 服务器的端口")
+    auth_token: str = Field(description="要使用的认证令牌")

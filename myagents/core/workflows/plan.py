@@ -131,7 +131,7 @@ class PlanWorkflow(BaseReActFlow):
                 The error flag. 
         """
         def dfs_create_task(
-            uid: str,
+            name: str,
             parent: TreeTaskNode, 
             prev: TreeTaskNode, 
             orchestration: dict[str, dict], 
@@ -146,7 +146,7 @@ class PlanWorkflow(BaseReActFlow):
             
             # Create a new task
             new_task = BaseTreeTaskNode(
-                uid=uid, 
+                name=name, 
                 objective=normalize_string(orchestration['目标描述']), 
                 key_results=key_outputs, 
                 sub_task_depth=parent.sub_task_depth - 1, 
@@ -154,17 +154,17 @@ class PlanWorkflow(BaseReActFlow):
                 prev=prev, 
             )
             # Add the new task to the parent task
-            parent.sub_tasks[uid] = new_task
+            parent.sub_tasks[name] = new_task
             
             # Get the sub-tasks
             sub_tasks: dict[str, dict] = orchestration.get('子任务', {})
             # Check the sub-task depth
             if len(sub_tasks) > 0 and sub_task_depth > 0:
                 # Traverse and create all sub-tasks
-                for uid, sub_task in sub_tasks.items():
+                for name, sub_task in sub_tasks.items():
                     # Create the sub-tasks
                     prev = dfs_create_task(
-                        uid=uid, 
+                        name=name, 
                         parent=new_task, 
                         prev=prev, 
                         orchestration=sub_task, 
@@ -191,10 +191,10 @@ class PlanWorkflow(BaseReActFlow):
             orchestration: dict[str, dict[str, str]] = json.loads(orchestrate_json)
             
             # Traverse all the sub-tasks
-            for uid, sub_task in orchestration.items():
+            for name, sub_task in orchestration.items():
                 # Create the sub-tasks
                 prev = dfs_create_task(
-                    uid=uid, 
+                    name=name, 
                     parent=parent, 
                     prev=prev, 
                     orchestration=sub_task, 

@@ -19,39 +19,43 @@ from myagents.core.utils.name_generator import generate_name
 
 
 class AutoAgentConfig(BaseModel):
-    """AutoAgentConfig is the configuration for the AutoAgent.
+    """AutoAgent 的配置类
     
-    Attributes:
+    属性:
         environment (EnvironmentConfig):
-            The configuration for the environment.
-        debug (bool, optional, defaults to False):
-            Whether to enable the debug mode for the auto agent.
-        log_level (str, optional, defaults to "INFO"):
-            The log level for the auto agent.
-        save_dir (str, optional, defaults to "stdout"):
-            The directory to save the logs for the auto agent.
+            环境的配置
+        debug (bool, 可选, 默认为 False):
+            是否启用自动代理的调试模式
+        log_level (str, 可选, 默认为 "INFO"):
+            自动代理的日志级别
+        save_dir (str, 可选, 默认为 "stdout"):
+            保存自动代理日志的目录
     """
-    environment: EnvironmentConfig = Field(description="The configuration for the environment.")
-    # Debug and logging settings
-    debug: bool = Field(default=False, description="Whether to enable the debug mode for the auto agent.")
-    log_level: str = Field(default="INFO", description="The log level for the auto agent.")
-    save_dir: str = Field(default="stdout", description="The directory to save the logs for the auto agent.")
+    environment: EnvironmentConfig = Field(description="环境的配置")
+    # 调试和日志设置
+    debug: bool = Field(default=False, description="是否启用自动代理的调试模式")
+    log_level: str = Field(default="INFO", description="自动代理的日志级别")
+    save_dir: str = Field(default="stdout", description="保存自动代理日志的目录")
     
     
 class AutoAgent:
-    """AutoAgent is a factory for creating agents and allocating them to the environment and workflows.
+    """AutoAgent 是一个用于创建代理并将其分配到环境和工作流的工厂类
     """
     
     def __init__(self):
-        """Initialize the AutoAgent factory."""
+        """初始化 AutoAgent 工厂"""
         self._existing_names = []  # 跟踪已创建的agent名字
     
     def build_counter(self, config: CounterConfig) -> StepCounter:
-        """Build a step counter.
+        """构建步骤计数器
         
-        Args:
+        参数:
             config (CounterConfig):
-                The configuration for the step counter.
+                步骤计数器的配置
+                
+        返回:
+            StepCounter:
+                步骤计数器
         """
         name = config.name
         
@@ -63,22 +67,22 @@ class AutoAgent:
             case "token":
                 return TokenStepCounter(limit=config.limit)
             case _:
-                raise ValueError(f"Invalid step counter name: {name}")
+                raise ValueError(f"无效的步骤计数器名称: {name}")
     
     def __build_llm(self, config: LLMConfig) -> LLM:
-        """Build a LLM.
+        """构建语言模型
         
-        Args:
+        参数:
             config (LLMConfig):
-                The configuration for the LLM.
+                语言模型的配置
                 
-        Returns:
+        返回:
             LLM:
-                The LLM.
+                语言模型
         """
         provider = config.provider
         
-        # Create kwargs for the LLM
+        # 为语言模型创建参数字典
         kwargs: dict[str, Any] = {}
         if config.extra_body != {}:
             kwargs["extra_body"] = config.extra_body
@@ -94,23 +98,23 @@ class AutoAgent:
                     **kwargs, 
                 )
             case _:
-                raise ValueError(f"Invalid LLM name: {provider}")
+                raise ValueError(f"无效的语言模型名称: {provider}")
             
     def __build_mcp_client(self, config: MCPConfig) -> MCPClient:
-        """Build a MCP client.
+        """构建 MCP 客户端
         
-        Args:
+        参数:
             config (MCPConfig):
-                The configuration for the MCP client.
+                MCP 客户端的配置
                 
-        Returns:
+        返回:
             MCPClient:
-                The MCP client. 
+                MCP 客户端
         """
         if config is None:
             return None
         
-        # Create the MCP client
+        # 创建 MCP 客户端
         mcp_client = MCPClient(
             server_name=config.server_name, 
             server_url=config.server_url, 
@@ -118,31 +122,31 @@ class AutoAgent:
             auth_token=config.auth_token, 
         )
         
-        # Return the MCP client
+        # 返回 MCP 客户端
         return mcp_client
         
         
     def __build_agent(self, config: AgentConfig, step_counters: list[StepCounter]) -> Agent:
-        """Build an agent.
+        """构建代理
         
-        Args:
+        参数:
             config (AgentConfig):
-                The configuration for the agent.
+                代理的配置
             step_counters (list[StepCounter]):
-                The step counters for the agent. Any of one reach the limit, the agent will be stopped. 
+                代理的步骤计数器。任何一个达到限制，代理就会停止
         
-        Returns:
+        返回:
             Agent:
-                The agent.
+                代理
         """
         agent_type = AgentType(config.type)
         
-        # Build the LLM
+        # 构建语言模型
         llm = self.__build_llm(config.llm)
-        # Build the MCP client
+        # 构建 MCP 客户端
         mcp_client = self.__build_mcp_client(config.mcp_client)
         
-        # 生成唯一的agent名字
+        # 生成唯一的代理名字
         agent_name = generate_name(excluded_names=self._existing_names)
         # 添加到已存在名字列表
         self._existing_names.append(agent_name)
@@ -157,9 +161,9 @@ class AutoAgent:
             case AgentType.PLAN_AND_EXECUTE:
                 AGENT = PlanAndExecAgent
             case _:
-                raise ValueError(f"Invalid agent type: {agent_type}")
+                raise ValueError(f"无效的代理类型: {agent_type}")
         
-        # Build the agent
+        # 构建代理
         return AGENT(
             name=agent_name,
             llm=llm, 
@@ -168,70 +172,70 @@ class AutoAgent:
         )
             
     def __build_environment(self, config: EnvironmentConfig) -> Environment:
-        """Build an environment.
+        """构建环境
         
-        Args:
+        参数:
             config (EnvironmentConfig):
-                The configuration for the environment.
+                环境的配置
         
-        Returns:
+        返回:
             Environment:
-                The environment.
+                环境
         """
-        # Build Global Step Counter
+        # 构建全局步骤计数器
         counters = [self.build_counter(counter) for counter in config.step_counters]
-        # Build the agents
+        # 构建代理
         agents = [self.__build_agent(agent, counters) for agent in config.agents]
         
         env_type = EnvironmentType(config.type)
-        # Build the environment
+        # 构建环境
         match env_type:
             case EnvironmentType.COMPLEX_QUERY:
                 env = ComplexQuery
             case EnvironmentType.ORCHESTRATE:
                 env = Orchestrate
             case _:
-                raise ValueError(f"Invalid environment type: {env_type}")
+                raise ValueError(f"无效的环境类型: {env_type}")
         
-        # Build the environment
+        # 构建环境
         env = env()
-        # Register the agents to the environment
+        # 将代理注册到环境
         for agent in agents:
-            # Register the agent to the environment
+            # 将代理注册到环境
             env.register_agent(agent)
-            # Register the environment to the agent
+            # 将环境注册到代理
             agent.register_env(env)
-        # Return the environment
+        # 返回环境
         return env
             
     def auto_build(self, config: AutoAgentConfig) -> Union[Environment, Workflow]:
-        """Build an auto agent.
+        """构建自动代理
         
-        Args:
+        参数:
             config (AutoAgentConfig):
-                The configuration for the auto agent.
+                自动代理的配置
                 
-        Returns:
+        返回:
             Union[Environment, Workflow]:
-                The environment or workflow.
+                环境或工作流
                 
-        Raises:
+        异常:
             ValueError:
-                If both environment and workflow are provided. Or no environment or workflow is provided. 
+                如果同时提供了环境和工作流，或者没有提供环境和工作流
         """
-        # Set the debug and log level
+        # 设置调试和日志级别
         log_level = "DEBUG" if config.debug else "INFO"
-        # Create a logger
+        # 创建日志记录器
         custom_logger = init_logger(
             sink=config.save_dir, 
             level=log_level, 
             colorize=True, 
         )
-        # If sink is not stdout, add an additional stdout logger
+        # 如果输出不是标准输出，添加额外的标准输出日志记录器
         if config.save_dir != "stdout":
             custom_logger.add(sys.stdout, level=log_level, colorize=True)
         
-        # Build the environment
+        # 构建环境
         environment = self.__build_environment(config.environment)
-        # Return the environment
+        # 返回环境
         return environment

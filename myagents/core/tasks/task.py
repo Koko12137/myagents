@@ -1,5 +1,6 @@
 import re
 import json
+from uuid import uuid4
 from collections import OrderedDict
 from typing import Union
 
@@ -18,8 +19,9 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]):
             The history of the status of the task. The key is the status of the task, and it indicates the state of the task. 
             The value is a list of the history messages. 
-        uid (str): 
-            The unique identifier of the task. Do not specify this field. It will be automatically generated.
+        
+        name (str): 
+            The unique identifier of the task. 
         objective (str): 
             The objective of the task.
         key_results (str):
@@ -42,6 +44,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
     history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
 
     uid: str
+    name: str
     objective: str
     key_results: str
     results: str 
@@ -54,7 +57,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
     
     def __init__(
         self, 
-        uid: str, 
+        name: str, 
         objective: str, 
         key_results: str, 
         sub_task_depth: int, 
@@ -66,8 +69,8 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         Initialize the TreeTaskNode.
         
         Args:
-            uid (str):
-                The unique identifier of the task.
+            name (str):
+                The name of the task.
             objective (str):
                 The objective of the task.
             key_results (str):
@@ -78,7 +81,8 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
                 The parent task of the current task. If the task does not have a parent task, the parent is None.
         """
         super().__init__(status_class=TaskStatus, **kwargs)
-        self.uid = uid
+        self.uid = str(uuid4())
+        self.name = name
         assert isinstance(objective, str), "The objective must be a string."
         self.objective = objective
         assert isinstance(key_results, str), "The key results must be a string."
@@ -239,7 +243,7 @@ class ToDoTaskView(TaskView):
             The template of the task view.
     """
     task: TreeTaskNode
-    template: str = """{status_value} {uid} \n\t - 目标: {objective}\n\t - 关键结果: {key_results}"""
+    template: str = """{status_value} {name} \n\t - 目标: {objective}\n\t - 关键结果: {key_results}"""
     
     def __init__(self, task: TreeTaskNode) -> None:
         self.task = task
@@ -279,7 +283,7 @@ class ToDoTaskView(TaskView):
     def _format_markdown(self) -> str:
         return self.template.format(
             status_value=self.task.status.value,
-            uid=self.task.uid,
+            name=self.task.name,
             objective=self.task.objective, 
             key_results=self.task.key_results, 
         )
@@ -313,7 +317,7 @@ class DocumentTaskView(TaskView):
                 raise ValueError(f"The status {self.task.status} is not supported.")
         
         # Add the question and answer of the current task
-        answer = f"# {self.task.uid}: {self.task.objective}\n\n{self.task.key_results}\n\n{answer}"
+        answer = f"# {self.task.name}: {self.task.objective}\n\n{self.task.key_results}\n\n{answer}"
         
         if layer > 0 and self.task.sub_task_depth > 0:
             sub_answers = [] 
@@ -338,11 +342,11 @@ class JsonTaskView(TaskView):
     of the task, and the value is a dictionary of the task. Example:
     ```json
     {
-        "uid": {
+        "name": {
             "objective": "The objective of the task.",
             "key_results": "The key results of the task and the verification method for the results.",
             "sub_tasks": {
-                "sub_task_uid": {
+                "sub_task_name": {
                     "objective": "The objective of the sub-task.",
                     "key_results": "The key results of the sub-task and the verification method for the results.",
                     "sub_tasks": {}
@@ -369,11 +373,11 @@ class JsonTaskView(TaskView):
     def _format_dict(self, task: TreeTaskNode) -> dict:
         """Recursively format the task and its sub-tasks to a dictionary."""
         return {
-            task.uid: {
+            task.name: {
                 "objective": task.objective,
                 "key_results": task.key_results,
                 "sub_tasks": {
-                    sub_task.uid: self._format_dict(sub_task)[sub_task.uid]
+                    sub_task.name: self._format_dict(sub_task)[sub_task.name]
                     for sub_task in getattr(task, 'sub_tasks', {}).values()
                 }
             }

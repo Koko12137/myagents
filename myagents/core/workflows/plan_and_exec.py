@@ -213,7 +213,7 @@ class PlanAndExecFlow(TreeTaskReActFlow):
                     unfinished_sub_tasks = [sub_task for sub_task in target.sub_tasks.values() if sub_task.is_cancelled()]
                     # Delete the unfinished sub-tasks
                     for sub_task in unfinished_sub_tasks:
-                        del target.sub_tasks[sub_task.uid]
+                        del target.sub_tasks[sub_task.name]
                         # Log the deleted sub-task
                         logger.error(f"删除已取消的子任务: \n{ToDoTaskView(sub_task).format()}")
                 

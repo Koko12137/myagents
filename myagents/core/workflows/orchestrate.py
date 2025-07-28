@@ -62,7 +62,6 @@ class BlueprintWorkflow(BaseReActFlow):
     async def schedule(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int, 
         max_error_retry: int, 
         max_idle_thinking: int, 
         completion_config: CompletionConfig = None, 
@@ -73,8 +72,6 @@ class BlueprintWorkflow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to schedule.
-            sub_task_depth (int):
-                The depth of the sub-task. 
             max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int):
@@ -379,7 +376,7 @@ class OrchestrateFlow(PlanWorkflow):
                 The flag to check if the orchestration blueprint is valid.
         """
         # Call the blueprint workflow
-        target = await self.sub_workflows["plan"].reason_act_reflect(
+        target = await self.sub_workflows["plan"].schedule(
             target=target, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 

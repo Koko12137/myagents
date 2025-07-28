@@ -6,15 +6,13 @@ from myagents.core.envs.orchestrate import Orchestrate
 
 
 class EnvironmentType(Enum):
-    """EnvironmentType is the type of the environment.
+    """环境的类型
     
-    Attributes:
-        QUERY (EnvironmentType):
-            The type of the Query environment.
+    属性:
         COMPLEX_QUERY (EnvironmentType):
-            The type of the ComplexQuery environment.
+            复杂询问环境的类型
         ORCHESTRATE (EnvironmentType):
-            The type of the Orchestrate environment.
+            编排环境的类型
     """
     COMPLEX_QUERY = "ComplexQuery"
     ORCHESTRATE = "Orchestrate"
