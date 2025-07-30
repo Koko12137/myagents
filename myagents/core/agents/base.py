@@ -1,4 +1,3 @@
-from abc import abstractmethod
 import traceback
 from uuid import uuid4
 from asyncio import Lock
@@ -8,52 +7,49 @@ from loguru import logger
 from fastmcp import Client as MCPClient
 from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
-from pymilvus import MilvusClient, MilvusException, DataType
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from myagents.core.llms.config import BaseCompletionConfig
-from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
 from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow
+from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
+from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.agents.types import AgentType
 from myagents.core.utils.step_counters import MaxStepsError
 
 
 class BaseAgent(Agent):
-    """BaseAgent is the base class for all the agents that can:
-    - Observe the environment or task.
-    - Think about the environment or task.
-    - Call the tools.
-    - Run the agent.
+    """BaseAgent 是所有智能体的基类，可以：
+    - 观察环境或任务。
+    - 思考环境或任务。
+    - 调用工具。
+    - 运行智能体。
     
-    Attributes:
+    属性：
         uid (str):
-            The unique identifier of the agent.
+            智能体的唯一标识符。
         name (str):
-            The name of the agent.
+            智能体名称。
         type (AgentType):
-            The type of the agent.
+            智能体类型。
         profile (str):
-            The profile of the agent.
+            智能体简介。
         llm (LLM):
-            The LLM to use for the agent. 
+            智能体使用的大语言模型。
         mcp_client (MCPClient):
-            The MCP client to use for the agent.
+            智能体使用的 MCP 客户端。
         tools (dict[str, FastMcpTool]):
-            The tools to use for the agent.
+            智能体可用的工具。
         workflow (Workflow):
-            The workflow to that the agent is running on.
+            智能体运行的工作流。
         env (Environment):
-            The environment to that the agent is running on.
+            智能体运行的环境。
         step_counters (dict[str, StepCounter]):
-            The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
+            智能体的步数计数器，任一计数器达到上限时，智能体将停止。
         lock (Lock):
-            The synchronization lock of the agent. The agent can only work on one task at a time. 
-            If the agent is running concurrently, the global context may not be working properly.
+            智能体的同步锁，保证同一时刻只能处理一个任务。
+            若并发运行，可能导致全局上下文异常。
         prompts (dict[str, str]):
-            The prompts for running the workflow. 
+            工作流运行时用到的提示词。
         observe_format (dict[str, str]):
-            The format of the observation the target. 
+            观察目标时的信息格式。
     """
     # Basic information
     uid: str
@@ -88,27 +84,27 @@ class BaseAgent(Agent):
         observe_formats: dict[str, str] = None, 
         **kwargs, 
     ) -> None:
-        """Initialize the BaseAgent.
+        """初始化 BaseAgent。
         
-        Args:
+        参数：
             name (str):
-                The name of the agent.
+                智能体名称。
             agent_type (AgentType):
-                The type of the agent.
+                智能体类型。
             profile (str):
-                The profile of the agent.
+                智能体简介。
             llm (LLM):
-                The LLM to use for the agent. 
+                智能体使用的大语言模型。
             step_counters (list[StepCounter]):
-                The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
+                智能体的步数计数器，任一计数器达到上限时，智能体将停止。
             mcp_client (MCPClient):
-                The MCP client to use for the agent. If not provided, No MCP tools can be used.  
+                智能体使用的 MCP 客户端。若未提供，则无法使用 MCP 工具。
             prompts (dict[str, str]):
-                The prompts for running specific workflow of the workflow. 
+                运行特定工作流时用到的提示词。
             observe_formats (dict[str, str]):
-                The format of the observation. 
+                观察信息的格式。
             **kwargs:
-                The keyword arguments to be passed to the parent class.
+                传递给父类的其他参数。
         """
         # Initialize the parent class
         super().__init__(**kwargs)
@@ -133,29 +129,56 @@ class BaseAgent(Agent):
         self.prompts = prompts
         self.observe_formats = observe_formats
         
+    async def prompt(
+        self, 
+        prompt: Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult], 
+        target: Stateful, 
+        **kwargs,
+    ) -> None:
+        """环境向智能体发送提示
+        
+        参数:
+            prompt (Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]):
+                提示信息
+            target (Stateful):
+                提示的目标
+            **kwargs:
+                提示的额外关键字参数
+        """
+        if isinstance(prompt, SystemMessage):
+            if len(target.get_history()) == 0:
+                # Update the system message to the target
+                target.update(prompt)
+        elif isinstance(prompt, UserMessage):
+            # Update the user message to the target
+            target.update(prompt)
+        elif isinstance(prompt, AssistantMessage):
+            # Update the assistant message to the target
+            target.update(prompt)
+        elif isinstance(prompt, ToolCallResult):
+            # Update the tool call result to the target
+            target.update(prompt)
+        else:
+            raise ValueError(f"The type of the prompt is not valid. Expected SystemMessage, UserMessage, or ToolCallResult, but got {type(prompt)}.")
+    
     async def observe(
         self, 
         target: Stateful, 
-        prompt: str, 
         observe_format: str, 
         **kwargs, 
     ) -> list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
-        """Observe the target. A series of messages will be returned, including the system message, user message, 
-        assistant message and tool call result. 
+        """观察目标对象。返回一系列消息，包括系统消息、用户消息、助手消息和工具调用结果。
         
-        Args:
+        参数：
             target (Stateful):
-                The stateful entity to observe. 
-            prompt (str): 
-                The prompt instruction after the observation. 
+                需要观察的有状态实体。
             observe_format (str):
-                The format of the observation. This must be a valid observe format of the target
+                观察信息的格式，必须为目标支持的格式。
             **kwargs:
-                The additional keyword arguments for observing the target. 
-            
-        Returns:
+                观察目标时的其他参数。
+        返回：
             list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
-                The up to date information observed from the stateful entity.  
+                从有状态实体中获取的最新信息。
         """
         # Check if the target is observable
         if not isinstance(target, Stateful):
@@ -164,9 +187,9 @@ class BaseAgent(Agent):
         # Call the observe function of the target
         observation = await target.observe(observe_format, **kwargs)
         # Create a new user message
-        user_message = UserMessage(content=f"## 观察\n以下是观察到的信息:\n{observation}\n\n# 任务指令\n\n{prompt}")
+        user_message = UserMessage(content=f"## 观察\n以下是观察到的信息:\n{observation}")
         # Update the user_message to the target
-        target.update(user_message)
+        await self.prompt(user_message, target)
         # Return the history of the target
         return target.get_history()
     
@@ -176,19 +199,18 @@ class BaseAgent(Agent):
         completion_config: BaseCompletionConfig, 
         **kwargs, 
     ) -> AssistantMessage:
-        """Think about the environment.
+        """对环境进行思考。
         
-        Args:
+        参数：
             observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
-                The messages observed from the environment. 
+                从环境中观察到的消息。
             completion_config (CompletionConfig):
-                The completion config of the agent. 
-            **kwargs: 
-                The additional keyword arguments for thinking about the observed messages. 
-
-        Returns:
+                智能体的补全配置。
+            **kwargs:
+                其他思考参数。
+        返回：
             AssistantMessage:
-                The completion message thought about by the LLM. 
+                LLM 生成的思考回复。
         """
         # Check if the limit of the step counters is reached
         for step_counter in self.step_counters.values():
@@ -214,28 +236,23 @@ class BaseAgent(Agent):
         if len(errors) > 0:
             raise errors[0] from errors[0]
         
-        # Update the memory of the target
-        
         # Return the response
         return message
     
     async def act(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
-        """Call a tool. 
-        If there is any error caused by the tool call, the flag `is_error` will be set to True. 
-        However, if there is any error caused by the MCP client connection, this should raise a RuntimeError.  
+        """调用工具。
         
-        Args:
-            tool_call (ToolCallRequest): 
-                The tool call request including the tool call id and the tool call arguments.
+        参数：
+            tool_call (ToolCallRequest):
+                工具调用请求，包括工具调用 id 和参数。
             **kwargs:
-                The additional keyword arguments for calling the tool.
-        Returns:
-            ToolCallResult: 
-                The result of the tool call. 
-                
-        Raises:
+                其他调用参数。
+        返回：
+            ToolCallResult:
+                工具调用结果。
+        异常：
             RuntimeError:
-                The runtime error raised by the MCP client connection. 
+                MCP 客户端连接异常。
         """
         # Check if the tool call belongs to the agent
         if tool_call.name not in self.tools:
@@ -286,23 +303,22 @@ class BaseAgent(Agent):
         completion_config: BaseCompletionConfig = None, 
         **kwargs
     ) -> AssistantMessage:
-        """Run the agent on the task or environment. Before running the agent, you should get the lock of the agent. 
+        """在任务或环境上运行智能体。运行前需获取智能体锁。
         
-        Args:
-            target (Stateful): 
-                The stateful entity to run the agent on. 
+        参数：
+            target (Stateful):
+                运行目标。
             max_error_retry (int):
-                The maximum number of times to retry the agent when the target is errored. 
+                目标出错时最大重试次数。
             max_idle_thinking (int):
-                The maximum number of times to idle thinking the agent. 
-            completion_config (CompletionConfig, defaults to None):
-                The completion config of the agent. 
+                最大空闲思考次数。
+            completion_config (CompletionConfig, 默认为 None):
+                智能体补全配置。
             **kwargs:
-                The additional keyword arguments for running the agent.
-                
-        Returns:
+                其他运行参数。
+        返回：
             AssistantMessage:
-                The assistant message returned by the agent after running on the stateful entity or any other entity.
+                智能体在目标上运行后的回复。
         """
         # Check if the workflow is registered
         if self.workflow is None:
@@ -351,91 +367,45 @@ class BaseAgent(Agent):
         return message
 
     def register_counter(self, counter: StepCounter) -> None:
-        """Register a step counter to the base agent.
+        """为智能体注册步数计数器。
         
-        Args:
+        参数：
             counter (StepCounter):
-                The step counter to register.
+                要注册的步数计数器。
         """
         self.step_counters[counter.uid] = counter
 
 
     def register_workflow(self, workflow: Workflow) -> None:
-        """Register a workflow to the base agent.
+        """为智能体注册工作流。
         
-        Args:
+        参数：
             workflow (Workflow):
-                The workflow to register.
-                
-        Raises:
+                要注册的工作流。
+        异常：
             ValueError:
-                If the type of the workflow is not valid.
-            ValueError:
-                If the workflow is already registered to the agent.
+                workflow 类型不正确。
         """
         # Check if the workflow is available
         if not isinstance(workflow, Workflow):
             raise ValueError(f"The type of the workflow is not valid. Expected Workflow, but got {type(workflow)}.")
         
-        # Check if the workflow is already registered
-        if self.workflow is not None:
-            raise ValueError("The workflow is already registered to the agent.")
-        
         # Register the workflow
         self.workflow = workflow
         
     def register_env(self, env: Environment) -> None:
-        """Register an environment to the base agent.
+        """为智能体注册环境。
         
-        Args:
+        参数：
             env (Environment):
-                The environment to register.
-                
-        Raises:
+                要注册的环境。
+        异常：
             ValueError:
-                If the type of the environment is not valid.
-            ValueError:
-                If the environment is already registered to the agent.
+                env 类型不正确。
         """
         # Check if the environment is available
         if not isinstance(env, Environment):
             raise ValueError(f"The type of the environment is not valid. Expected Environment, but got {type(env)}.")
         
-        # Check if the environment is already registered
-        if self.env is not None:
-            raise ValueError("The environment is already registered to the agent.")
-        
         # Register the environment
         self.env = env
-
-
-class BaseMemoryAgent(BaseAgent):
-    """BaseMemoryAgent is the base class for all the agents that can use the memory to think and act.
-    """
-    
-    async def extract_semantic_memory(
-        self, 
-        text: str, 
-        **kwargs,
-    ) -> list[str]:
-        """Extract the semantic memory from the text.
-        """
-        pass
-    
-    async def extract_episodic_memory(
-        self, 
-        text: str, 
-        **kwargs,
-    ) -> list[str]:
-        """Extract the episodic memory from the text.
-        """
-        pass
-    
-    async def extract_procedural_memory(
-        self, 
-        text: str, 
-        **kwargs,
-    ) -> list[str]:
-        """Extract the procedural memory from the text.
-        """
-        pass

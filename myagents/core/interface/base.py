@@ -137,11 +137,14 @@ class Stateful(Protocol):
     according to the current status and the format of the observation.
     
     Attributes:
+        uid (str):
+            The unique identifier of the stateful entity.
         status (Status):
             The status of the stateful entity.
         history (dict[Status, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]):
             The history of the stateful entity.
     """
+    uid: str
     status: Status
     history: dict[Status, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]
     

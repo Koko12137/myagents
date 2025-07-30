@@ -195,13 +195,11 @@ class BaseReActFlow(BaseWorkflow):
             # Raise an error
             raise RuntimeError(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
         
-        # Check if the target has history
-        if len(target.get_history()) == 0:
-            # Get the system prompt from the workflow
-            system_prompt = self.prompts["system_prompt"]
-            # Update the system prompt to the history
-            message = SystemMessage(content=system_prompt)
-            target.update(message)
+        # Get the system prompt from the workflow
+        system_prompt = self.prompts["system_prompt"]
+        # Update the system prompt to the history
+        message = SystemMessage(content=system_prompt)
+        await self.agent.prompt(message, target)
         
         # Initialize the error and idle thinking counter
         current_thinking = 0
@@ -224,7 +222,7 @@ class BaseReActFlow(BaseWorkflow):
                 current_error += 1
                 # Notify the error limit to Agent
                 message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
-                target.update(message)
+                await self.agent.prompt(message, target)
                 # Log the error message
                 logger.info(f"Error Message: \n{message}")
                 # Check if the error counter is greater than the max error retry
@@ -252,7 +250,7 @@ class BaseReActFlow(BaseWorkflow):
                 current_thinking += 1
                 # Notify the idle thinking limit to Agent
                 message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
-                target.update(message)
+                await self.agent.prompt(message, target)
                 # Log the idle thinking message
                 logger.info(f"Idle Thinking Message: \n{message}")
                 # Check if the idle thinking counter is greater than the max idle thinking
@@ -308,18 +306,16 @@ class BaseReActFlow(BaseWorkflow):
         tool_call_flag = False
         
         # === Thinking ===
+        # Prompt the agent
+        await self.agent.prompt(UserMessage(content=self.prompts["reason_act_prompt"]), target)
         # Observe the target
-        observe = await self.agent.observe(
-            target, 
-            prompt=self.prompts["reason_act_prompt"], 
-            observe_format=self.observe_formats["reason_act_format"]
-        )
+        observe = await self.agent.observe(target, observe_format=self.observe_formats["reason_act_format"])
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Think about the target
         message = await self.agent.think(observe=observe, completion_config=completion_config)
         # Update the message to the target
-        target.update(message)
+        await self.agent.prompt(message, target)
         # Log the assistant message
         if logger.level == "DEBUG":
             logger.debug(f"{str(self.agent)}: \n{message}")
@@ -343,7 +339,7 @@ class BaseReActFlow(BaseWorkflow):
                 # Log the tool call result
                 logger.info(f"Tool Call Result: \n{result}")
                 # Update the target with the tool call results
-                target.update(result)
+                await self.agent.prompt(result, target)
                 # Check if the tool call is errored
                 if result.is_error:
                     # Set the error flag to True
@@ -382,18 +378,16 @@ class BaseReActFlow(BaseWorkflow):
             )
         
         # === Thinking ===
+        # Prompt the agent
+        await self.agent.prompt(UserMessage(content=self.prompts["reflect_prompt"]), target)
         # Observe the target after acting
-        observe = await self.agent.observe(
-            target, 
-            prompt=self.prompts["reflect_prompt"], 
-            observe_format=self.observe_formats["reflect_format"]
-        )
+        observe = await self.agent.observe(target, observe_format=self.observe_formats["reflect_format"])
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Reflect the action taken on the target
         message = await self.agent.think(observe=observe, completion_config=completion_config)
         # Update the message to the target
-        target.update(message)
+        await self.agent.prompt(message, target)
         # Log the assistant message
         if logger.level == "DEBUG":
             logger.debug(f"{str(self.agent)}: \n{message}")
@@ -414,7 +408,7 @@ class BaseReActFlow(BaseWorkflow):
                 # Log the tool call result
                 logger.info(f"Tool Call Result: \n{result}")
                 # Update the target with the tool call results
-                target.update(result)
+                await self.agent.prompt(result, target)
         
         # === Check Finish Flag ===
         # Check if the finish flag is set
@@ -482,14 +476,14 @@ class TreeTaskReActFlow(BaseReActFlow):
             # Append the system prompt to the history
             message = SystemMessage(content=exec_system)
             # Update the system message to the history
-            target.update(message)
+            await self.agent.prompt(message, target)
             
             # Get the task from the context
             task = self.agent.env.context.get("task")
             # Create a UserMessage for the task results
             task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=task).format()}")
             # Update the task message to the history
-            target.update(task_message)
+            await self.agent.prompt(task_message, target)
         
         # This is used for no tool calling thinking limit.
         current_thinking = 0
@@ -509,7 +503,7 @@ class TreeTaskReActFlow(BaseReActFlow):
                 current_error += 1
                 # Notify the error limit to Agent
                 message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
-                target.update(message)
+                await self.agent.prompt(message, target)
                 # Log the error message
                 logger.info(f"Error Message: \n{message}")
                 # Check if the error counter is greater than the max error retry
@@ -535,7 +529,7 @@ class TreeTaskReActFlow(BaseReActFlow):
                     logger.warning(f"Empty final output: \n{message.content}")
                     # Create a new user message to record the empty final output
                     message = UserMessage(content=f"【警告】：没有在<final_output>标签中找到任何内容，你必须将最终输出放在<final_output>标签中。")
-                    target.update(message)
+                    await self.agent.prompt(message, target)
             
             # === Reflect ===
             target, finish_flag = await self.reflect(
@@ -553,7 +547,7 @@ class TreeTaskReActFlow(BaseReActFlow):
                 current_thinking += 1
                 # Notify the idle thinking limit to Agent
                 message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请遵守反思结果，尽快输出最终输出。")
-                target.update(message)
+                await self.agent.prompt(message, target)
                 # Log the idle thinking message
                 logger.info(f"Idle Thinking Message: \n{message}")
                 # Check if the idle thinking counter is greater than the max idle thinking

@@ -207,7 +207,7 @@ class PlanAndExecFlow(TreeTaskReActFlow):
                         error_reason=target.results,
                         current_result=current_result,
                     ))
-                    target.update(message)
+                    await self.agent.prompt(message, target)
                 
                     # Get all the unfinished sub-tasks
                     unfinished_sub_tasks = [sub_task for sub_task in target.sub_tasks.values() if sub_task.is_cancelled()]

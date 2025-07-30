@@ -143,10 +143,31 @@ class Agent(Protocol):
     observe_format: dict[str, str]
     
     @abstractmethod
+    async def prompt(
+        self, 
+        prompt: Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult], 
+        target: Stateful, 
+        **kwargs
+    ) -> None:
+        """环境向智能体发送提示
+        
+        参数:
+            prompt (Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]):
+                提示信息
+            target (Stateful):
+                提示的目标
+            **kwargs:
+                提示的额外关键字参数
+        
+        返回:
+            None
+        """
+        pass
+    
+    @abstractmethod
     async def observe(
         self, 
         target: Stateful, 
-        prompt: str, 
         observe_format: str, 
         **kwargs, 
     ) -> list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
@@ -155,8 +176,6 @@ class Agent(Protocol):
         参数:
             target (Stateful):
                 要观察的有状态实体
-            prompt (str): 
-                观察前的提示
             observe_format (str):
                 观察的格式。这必须是目标的有效观察格式
             **kwargs:
@@ -166,7 +185,7 @@ class Agent(Protocol):
             list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
                 从目标观察到的最新信息
         """
-        pass    # TODO: 以后需要在 observe 中实现调用 memory，同时通过 Agent属性 来确定 观察格式，禁止通过参数传递，定义一个 workflow 的状态，传入 observe 中，以确定当前的观察方式
+        pass 
     
     @abstractmethod
     async def think(
@@ -189,7 +208,7 @@ class Agent(Protocol):
             AssistantMessage:
                 语言模型思考的完成消息
         """
-        pass    # TODO: 以后需要在 think 中实现更新 memory, 同时通过 Agent属性 和 workflow状态 来确定 Prompt，禁止通过参数传递，定义一个 workflow 的状态，传入 think 中，以确定当前的思考方式
+        pass 
     
     @abstractmethod
     async def act(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
@@ -209,7 +228,7 @@ class Agent(Protocol):
             ValueError:
                 如果工具调用名称未注册到工作流或环境
         """
-        pass    # TODO: 以后需要在 act 中实现更新 memory
+        pass 
     
     @abstractmethod
     async def run(

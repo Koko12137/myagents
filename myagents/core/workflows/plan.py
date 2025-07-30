@@ -256,18 +256,16 @@ class PlanWorkflow(BaseReActFlow):
         reason_act_prompt = self.prompts["reason_act_prompt"]
         # Append layer limit to the reason act prompt
         reason_act_prompt = f"{reason_act_prompt}\n\n{PLAN_LAYER_LIMIT.format(detail_level=sub_task_depth)}"
+        # Prompt the agent
+        await self.agent.prompt(UserMessage(content=reason_act_prompt), target)
         # Observe the target
-        observe = await self.agent.observe(
-            target, 
-            prompt=reason_act_prompt, 
-            observe_format=self.observe_formats["reason_act_format"]
-        )
+        observe = await self.agent.observe(target, observe_format=self.observe_formats["reason_act_format"])
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Think about the target
         message = await self.agent.think(observe=observe, completion_config=completion_config)
         # Update the message to the target
-        target.update(message)
+        await self.agent.prompt(message, target)
         # Log the assistant message
         if logger.level == "DEBUG":
             logger.debug(f"{str(self.agent)}: \n{message}")
@@ -285,7 +283,7 @@ class PlanWorkflow(BaseReActFlow):
         # Log the message
         logger.info(f"Create Task Message: \n{message.content}")
         # Update the target with the user message
-        target.update(message)
+        await self.agent.prompt(message, target)
         # Return the target, error flag and tool call flag
         return target, error_flag, True
     
@@ -319,7 +317,7 @@ class PlanWorkflow(BaseReActFlow):
         # Create a new message for layer limit announcement
         layer_limit_message = UserMessage(content=f"## 拆解层次限制\n\n【注意】：你最多只能拆解 {sub_task_depth} 层子任务。")
         # Update the layer limit message to the target
-        target.update(layer_limit_message)
+        await self.agent.prompt(layer_limit_message, target)
         
         # Call the parent reflect method
         return await super().reflect(
@@ -373,19 +371,19 @@ class PlanWorkflow(BaseReActFlow):
             system_prompt = self.prompts["system_prompt"]
             # Update the system prompt to the history
             message = SystemMessage(content=system_prompt)
-            target.update(message)
+            await self.agent.prompt(message, target)
             # Create a new messsage announcing the blueprint
             blueprint = self.agent.env.context.get("blueprint")
             # Create a UserMessage for the blueprint
             blueprint_message = UserMessage(content=f"## 任务总体规划蓝图\n\n{blueprint}")
             # Update the blueprint message to the history
-            target.update(blueprint_message)
+            await self.agent.prompt(blueprint_message, target)
             # Create a new message for the current task results
             task_results = DocumentTaskView(task=target).format()
             # Create a UserMessage for the task results
             task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
             # Update the task results message to the history
-            target.update(task_results_message)
+            await self.agent.prompt(task_results_message, target)
         
         # This is used for no tool calling thinking limit.
         current_thinking = 0
@@ -409,7 +407,7 @@ class PlanWorkflow(BaseReActFlow):
                 current_error += 1
                 # Notify the error limit to Agent
                 message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
-                target.update(message)
+                await self.agent.prompt(message, target)
                 # Log the error message
                 logger.info(f"Error Message: \n{message}")
                 # Check if the error counter is greater than the max error retry
@@ -438,7 +436,7 @@ class PlanWorkflow(BaseReActFlow):
                 current_thinking += 1
                 # Notify the idle thinking limit to Agent
                 message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
-                target.update(message)
+                await self.agent.prompt(message, target)
                 # Log the idle thinking message
                 logger.info(f"Idle Thinking Message: \n{message}")
                 # Check if the idle thinking counter is greater than the max idle thinking

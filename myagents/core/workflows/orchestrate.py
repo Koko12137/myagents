@@ -95,13 +95,11 @@ class BlueprintWorkflow(BaseReActFlow):
             # Raise an error
             raise RuntimeError(f"Blueprint workflow requires the target status to be created, but the target status is {target.get_status().value}.")
         
-        # Check if the target has history
-        if len(target.get_history()) == 0:
-            # Get the system prompt from the agent
-            system_prompt = self.prompts["system_prompt"]
-            # Update system prompt to history
-            message = SystemMessage(content=system_prompt)
-            target.update(message)
+        # Get the system prompt from the workflow
+        system_prompt = self.prompts["system_prompt"]
+        # Update the system prompt to the history
+        message = SystemMessage(content=system_prompt)
+        await self.agent.prompt(message, target)
         
         # Error and idle thinking control
         current_thinking = 0
@@ -133,7 +131,7 @@ class BlueprintWorkflow(BaseReActFlow):
                 current_error += 1
                 # Notify the error limit to Agent
                 message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
-                target.update(message)
+                await self.agent.prompt(message, target)
                 # Log the error message
                 logger.info(f"Error Message: \n{message}")
                 # Check if the error counter is greater than the max error retry
@@ -166,7 +164,7 @@ class BlueprintWorkflow(BaseReActFlow):
                     content=f"没有在<orchestration>标签中找到规划蓝图。请将你的规划放到<orchestration>标签中。你已经思考了 {current_thinking} 次，" \
                         f"在最多思考 {max_idle_thinking} 次后，任务会直接失败。下一步你必须给出规划蓝图，否则你将会被惩罚。",
                 )
-                target.update(message)
+                await self.agent.prompt(message)
                 # Log the idle thinking message
                 logger.warning(f"模型回复中没有找到规划蓝图，提醒模型重新思考。")
                 # Check if the idle thinking counter is greater than the max idle thinking
@@ -221,18 +219,16 @@ class BlueprintWorkflow(BaseReActFlow):
         tool_call_flag = False
         
         # === Thinking ===
+        # Prompt the agent
+        await self.agent.prompt(UserMessage(content=self.prompts["reason_act_prompt"]), target)
         # Observe the target
-        observe = await self.agent.observe(
-            target, 
-            prompt=self.prompts["reason_act_prompt"], 
-            observe_format=self.observe_formats["reason_act_format"]
-        )
+        observe = await self.agent.observe(target, observe_format=self.observe_formats["reason_act_format"])
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Think about the target
         message = await self.agent.think(observe=observe, completion_config=completion_config)
         # Update the message to the target
-        target.update(message)
+        await self.agent.prompt(message, target)
         # Log the assistant message
         if logger.level == "DEBUG":
             logger.debug(f"{str(self.agent)}: \n{message}")
@@ -456,7 +452,7 @@ class OrchestrateFlow(PlanWorkflow):
                     # Call the proxy agent of the environment for response
                     message = await self.agent.env.call_agent()
                     # Update the message to the target
-                    target.update(message)
+                    await self.agent.prompt(message, target)
                     # Log the message
                     logger.info(f"User Check Message: \n{message.content}")
                 else:
