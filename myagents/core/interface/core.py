@@ -95,7 +95,7 @@ class Agent(Protocol):
     """在环境中运行的代理，根据工作流处理任务
     
     属性:
-        uid (str):
+        uid (int):
             代理的唯一标识符
         name (str):
             代理的名称
@@ -123,7 +123,7 @@ class Agent(Protocol):
             目标观察的格式
     """
     # 基本信息
-    uid: str
+    uid: int
     name: str
     agent_type: Enum
     profile: str
@@ -295,35 +295,35 @@ class MemoryAgent(Agent):
     """
     
     @abstractmethod
-    async def extract_semantic_memory(
+    async def extract_memory(
         self, 
         text: str, 
         **kwargs,
-    ) -> list[str]:
-        """从文本中提取语义记忆
+    ) -> list:
+        """从文本中提取记忆
         """
         pass
     
     @abstractmethod
-    async def extract_episodic_memory(
+    async def search_memory(
         self, 
         text: str, 
-        **kwargs,
-    ) -> list[str]:
-        """从文本中提取情节记忆
+        limit: int, 
+        **kwargs, 
+    ) -> list:
+        """从记忆中搜索信息
         """
         pass
     
     @abstractmethod
-    async def extract_procedural_memory(
+    async def update_memory(
         self, 
-        text: str, 
-        **kwargs,
-    ) -> list[str]:
-        """从文本中提取程序记忆
+        memories: list, 
+        **kwargs, 
+    ) -> None:
+        """更新记忆
         """
         pass
-
 
 
 class Workflow(ToolsCaller, Scheduler):
@@ -464,7 +464,7 @@ class Environment(Stateful, ToolsCaller, Scheduler):
     工具可用于修改环境。
     
     属性:
-        uid (str):
+        uid (int):
             环境的唯一标识符
         name (str):
             环境的名称
@@ -481,7 +481,7 @@ class Environment(Stateful, ToolsCaller, Scheduler):
         agent_type_semaphore (dict[Enum, Semaphore]):
             代理类型的信号量。键是代理类型，值是信号量
     """
-    uid: str
+    uid: int
     name: str
     profile: str
     prompts: dict[str, str]

@@ -1,90 +1,107 @@
 import json
 from typing import Union
 
-from myagents.core.agents.base import BaseAgent
-from myagents.core.interface import Stateful, TableMemory, VectorMemory
+from myagents.core.interface import Stateful,  VectorMemory, TableMemory, EmbeddingLLM
 from myagents.core.messages import AssistantMessage, ToolCallResult, SystemMessage, UserMessage
 from myagents.core.llms import BaseCompletionConfig
+from myagents.core.agents.base import BaseAgent
+from myagents.core.memories.schemas import SemanticMemory, EpisodeMemory, ProceduralMemory, MemoryType
 
 
 class BaseMemoryAgent(BaseAgent):
     """BaseMemoryAgent 是所有具备记忆能力的智能体基类。
     
     属性:
-        semantic_memory (VectorMemory):
-            语义记忆(事实记忆)，包含事实、知识、信息、数据等
-        episodic_memory (VectorMemory):
-            情节记忆(过程记忆)，包含情节、事件、场景、状态等
-        procedural_memory (VectorMemory):
-            程序性记忆(指令记忆)，包含指令、步骤、操作、方法等
-        trajectory_memory (VectorMemory):
-            轨迹记忆(轨迹记忆)，包含完整的行动轨迹，包括行动、结果、反馈等
-        system_prompt_template (str):
-            系统提示词模板，用于格式化程序性记忆
-        user_prompt_template (str):
-            用户提示词模板，用于格式化语义记忆、情节记忆
-        semantic_search_prompt (str):
-            语义记忆检索提示词
-        episodic_search_prompt (str):
-            情节记忆检索提示词
-        procedural_search_prompt (str):
-            程序性记忆检索提示词
+        embedding_llm (EmbeddingLLM):
+            嵌入语言模型
+        vector_memory (VectorMemory):
+            向量记忆，包含事实、知识、信息、数据等
+        trajectory_memory (TableMemory):
+            轨迹记忆，包含历史信息
+        prompt_template (dict[str, str]):
+            用户提示词模板，用于格式化向量记忆
+        extract_prompts (dict[str, str]):
+            记忆提取提示词
+        memory_classes (dict[str, type[Union[SemanticMemory, EpisodeMemory, ProceduralMemory]]]):
+            记忆类，用于创建记忆对象
     """
-    semantic_memory: VectorMemory
-    episodic_memory: VectorMemory
-    procedural_memory: VectorMemory
+    # 嵌入语言模型
+    embedding_llm: EmbeddingLLM
+    # 向量记忆
+    vector_memory: VectorMemory
+    # 轨迹记忆
     trajectory_memory: TableMemory
     # Prompt 样板，用于格式化召回的信息
-    system_prompt_template: str
-    user_prompt_template: str
+    prompt_template: dict[str, str]
     # 记忆提取提示词
-    semantic_extract_prompt: str
-    episodic_extract_prompt: str
-    procedural_extract_prompt: str
-    # 记忆检索提示词
-    semantic_search_prompt: str
-    episodic_search_prompt: str
-    procedural_search_prompt: str
+    extract_prompts: dict[str, str]
+    # 记忆类
+    memory_classes: dict[str, type[Union[SemanticMemory, EpisodeMemory, ProceduralMemory]]] = {
+        "semantic_memory": SemanticMemory,
+        "episode_memory": EpisodeMemory,
+        "procedural_memory": ProceduralMemory,
+    }
     
     def __init__(
         self, 
-        semantic_memory: VectorMemory, 
-        episodic_memory: VectorMemory, 
-        procedural_memory: VectorMemory, 
+        vector_memory: VectorMemory, 
         trajectory_memory: TableMemory, 
-        system_prompt_template: str, 
-        user_prompt_template: str, 
-        semantic_extract_prompt: str, 
-        episodic_extract_prompt: str, 
-        procedural_extract_prompt: str, 
-        semantic_search_prompt: str, 
-        episodic_search_prompt: str, 
-        procedural_search_prompt: str, 
+        prompts: dict[str, str], 
         **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.semantic_memory = semantic_memory
-        self.episodic_memory = episodic_memory
-        self.procedural_memory = procedural_memory
+    ) -> None:
+        super().__init__(prompts=prompts, **kwargs)
+        self.vector_memory = vector_memory
         self.trajectory_memory = trajectory_memory
-        self.system_prompt_template = system_prompt_template
-        self.user_prompt_template = user_prompt_template
-        self.semantic_extract_prompt = semantic_extract_prompt
-        self.episodic_extract_prompt = episodic_extract_prompt
-        self.procedural_extract_prompt = procedural_extract_prompt
-        self.semantic_search_prompt = semantic_search_prompt
-        self.episodic_search_prompt = episodic_search_prompt
-        self.procedural_search_prompt = procedural_search_prompt
+        
+        self.prompt_template = {
+            "semantic_memory": prompts["semantic_prompt_template"],
+            "episode_memory": prompts["episode_prompt_template"],
+            "procedural_memory": prompts["procedural_prompt_template"],
+        }
+        self.extract_prompts = {
+            "semantic_memory": prompts["semantic_extract_prompts"],
+            "episode_memory": prompts["episode_extract_prompts"],
+            "procedural_memory": prompts["procedural_extract_prompts"],
+        }
     
-    async def extract_semantic_memory(
+    async def extract_memory(
         self, 
         text: str, 
+        target: Stateful, 
+        memory_type: MemoryType, 
         **kwargs,
-    ) -> list[str]:
-        """从文本中抽取语义（事实）记忆。"""
+    ) -> list[Union[SemanticMemory, EpisodeMemory, ProceduralMemory]]:
+        """
+        从文本中抽取记忆。
+        
+        参数:
+            text (str):
+                需要提取记忆的文本
+            target (Stateful):
+                任务目标，应该是 Stateful 的子类
+            memory_type (MemoryType):
+                需要提取的记忆类型
+            **kwargs:
+                其他参数
+        返回:
+            list[Union[SemanticMemory, EpisodeMemory, ProceduralMemory]]:
+                从文本中抽取的记忆列表
+        """
+        # 根据 memory_type 获取记忆类
+        MEMORY = self.memory_classes[memory_type.value]
+        
+        # 检测相似的记忆，避免冲突
+        memories = await self.search_memory(
+            text=text, 
+            limit=20, 
+            score_threshold=0.5, 
+            memory_type=memory_type,
+            target=target,
+        )
+        
         messages = []
         # 构建 SystemMessage
-        system_message = SystemMessage(content=self.semantic_extract_prompt)
+        system_message = SystemMessage(content=self.extract_prompts[memory_type.value])
         # 将 SystemMessage 添加到 messages 中
         messages.append(system_message)
         # 构建 UserMessage
@@ -97,59 +114,61 @@ class BaseMemoryAgent(BaseAgent):
         # 调用 LLM 提取语义记忆
         response = await self.llm.completion(messages, completion_config=completion_config)
         # 格式化 response 
-        response = json.loads(response.content)
-        # 嵌入 response 到语义记忆
-        await self.semantic_memory.update(response)
+        response: list[dict] = json.loads(response.content) 
+        # 将 response 转换为 SemanticMemory、EpisodeMemory、ProceduralMemory 列表
+        memories = []
+        for memory in response:
+            # 获取当前的 env_id、agent_id、task_id
+            env_id = self.env.uid
+            agent_id = self.uid
+            task_id = target.uid
+            # 更新 memory 的 env_id、agent_id、task_id
+            memory["env_id"] = env_id
+            memory["agent_id"] = agent_id
+            memory["task_id"] = task_id
+            
+            # 获取嵌入向量
+            embedding = await self.embedding_llm.embed(memory["content"])
+            # 更新 memory 的 embedding
+            memory["embedding"] = embedding
+            
+            # 根据 memory_type 创建对应的记忆对象
+            memories.append(MEMORY(**memory))
+            
+        return memories
     
-    async def extract_episodic_memory(
+    async def update_memory(
+        self, 
+        memories: list[Union[SemanticMemory, EpisodeMemory, ProceduralMemory]], 
+        **kwargs,
+    ) -> None:
+        """更新记忆。"""
+        await self.vector_memory.update(memories)
+        
+    async def search_memory(
         self, 
         text: str, 
+        limit: int, 
+        score_threshold: float, 
+        memory_type: MemoryType, 
+        target: Stateful, 
         **kwargs,
-    ) -> list[str]:
-        """从文本中抽取情节（过程）记忆。"""
-        messages = []
-        # 构建 SystemMessage
-        system_message = SystemMessage(content=self.episodic_extract_prompt)
-        # 将 SystemMessage 添加到 messages 中
-        messages.append(system_message)
-        # 构建 UserMessage
-        user_message = UserMessage(content=text)
-        # 将 UserMessage 添加到 messages 中
-        messages.append(user_message)
-        
-        # 创建 CompletionConfig
-        completion_config = BaseCompletionConfig(format_json=True)
-        # 调用 LLM 提取情节记忆
-        response = await self.llm.completion(messages, completion_config=completion_config)
-        # 格式化 response 
-        response = json.loads(response.content)
-        # 嵌入 response 到情节记忆
-        await self.episodic_memory.update(response)
-    
-    async def extract_procedural_memory(
-        self, 
-        text: str, 
-        **kwargs,
-    ) -> list[str]:
-        """从文本中抽取程序性（指令）记忆。"""
-        messages = []
-        # 构建 SystemMessage
-        system_message = SystemMessage(content=self.procedural_extract_prompt)
-        # 将 SystemMessage 添加到 messages 中
-        messages.append(system_message)
-        # 构建 UserMessage
-        user_message = UserMessage(content=text)
-        # 将 UserMessage 添加到 messages 中
-        messages.append(user_message)
-        
-        # 创建 CompletionConfig
-        completion_config = BaseCompletionConfig(format_json=True)
-        # 调用 LLM 提取程序性记忆
-        response = await self.llm.completion(messages, completion_config=completion_config)
-        # 格式化 response 
-        response = json.loads(response.content)
-        # 嵌入 response 到程序性记忆
-        await self.procedural_memory.update(response)
+    ) -> list[Union[SemanticMemory, EpisodeMemory, ProceduralMemory]]:
+        """从记忆中搜索信息。"""
+        # 把 text 转换为向量
+        embedding = await self.embedding_llm.embed(text)
+        expr = f"memory_type == {memory_type}"
+        # 从向量记忆中搜索
+        memories = await self.vector_memory.search(
+            query_embedding=embedding, 
+            top_k=limit, 
+            score_threshold=score_threshold, 
+            condition=expr, 
+            env_id=self.env.uid, 
+            agent_id=self.uid, 
+            task_id=target.uid, 
+        )
+        return memories
     
     async def prompt(
         self, 
@@ -172,21 +191,18 @@ class BaseMemoryAgent(BaseAgent):
         """
         super().prompt(prompt, target, **kwargs)
         
-        if isinstance(prompt, SystemMessage) or isinstance(prompt, UserMessage):
-            # 从 prompt 中抽取程序性记忆并更新
-            procedural_memory = await self.extract_procedural_memory(prompt.content)
-            # 更新程序性记忆
-            self.procedural_memory.update(procedural_memory)
-        elif isinstance(prompt, AssistantMessage):
-            # 从 prompt 中抽取情节记忆并更新
-            episodic_memory = await self.extract_episodic_memory(prompt.content)
-            # 更新情节记忆
-            self.episodic_memory.update(episodic_memory)
-        elif isinstance(prompt, ToolCallResult):
-            # 从 prompt 中抽取语义记忆并更新
-            semantic_memory = await self.extract_semantic_memory(prompt.content)
-            # 更新语义记忆
-            self.semantic_memory.update(semantic_memory)
+        # 从 prompt 中抽取 semantic 记忆
+        memories = await self.extract_memory(prompt.content, target, MemoryType.SEMANTIC)
+        # 更新向量记忆
+        await self.update_memory(memories)
+        # 从 prompt 中抽取 episode 记忆
+        memories = await self.extract_memory(prompt.content, target, MemoryType.EPISODE)
+        # 更新向量记忆
+        await self.update_memory(memories)
+        # 从 prompt 中抽取 procedural 记忆
+        memories = await self.extract_memory(prompt.content, target, MemoryType.PROCEDURAL)
+        # 更新向量记忆
+        await self.update_memory(memories)
     
     async def observe(
         self, 
@@ -209,29 +225,53 @@ class BaseMemoryAgent(BaseAgent):
         """
         history: list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]] = []
         
-        # 从 procedural memory 中获取当前的程序性记忆
-        procedural_memory = await self.procedural_memory.search(self.procedural_search_prompt)
+        # 观察
+        observation = await target.observe(observe_format, **kwargs)
+        
+        # 提取程序性记忆
+        text = f"根据我所观察到的信息，我现在该做什么？该注意什么？#观察信息: {observation}"
+        memories = await self.search_memory(
+            text=text, 
+            limit=20, 
+            score_threshold=0.5, 
+            memory_type=MemoryType.PROCEDURAL, 
+            target=target, 
+        )
         # 根据程序性记忆，构建 SystemMessage
-        system_message = SystemMessage(content=self.system_prompt_template.format(procedural_memory))
+        system_message = SystemMessage(content=self.prompt_template.format(memories))
         # 将 SystemMessage 添加到 history 中
         history.append(system_message)
         
-        # 从 semantic memory 中获取当前的语义记忆
-        semantic_memory = await self.semantic_memory.search(self.semantic_search_prompt)
-        # 从 episodic memory 中获取当前的情节记忆
-        episodic_memory = await self.episodic_memory.search(self.episodic_search_prompt)
-        # 根据语义记忆和情节记忆，构建 UserMessage
-        user_message = UserMessage(content=self.user_prompt_template.format(semantic_memory, episodic_memory))
+        # 提取语义记忆
+        text = f"根据我所观察到的信息，我需要什么信息？#观察信息: {observation}"
+        memories = await self.search_memory(
+            text=text, 
+            limit=20, 
+            score_threshold=0.5, 
+            memory_type=MemoryType.SEMANTIC, 
+            target=target, 
+        )
+        # 根据语义记忆，构建 UserMessage
+        user_message = UserMessage(content=self.prompt_template.format(memories))
         # 将 UserMessage 添加到 history 中
         history.append(user_message)
         
-        # 观察
-        observation = await target.observe(observe_format, **kwargs)
-        # 根据观察结果，构建 UserMessage
-        user_message = UserMessage(content=observation)
+        # 提取情节记忆
+        text = f"根据我所观察到的信息，我历史的行动中有什么值得注意的？#观察信息: {observation}"
+        memories = await self.search_memory(
+            text=text, 
+            limit=20, 
+            score_threshold=0.5, 
+            memory_type=MemoryType.EPISODE, 
+            target=target, 
+        )
+        # 根据情节记忆，构建 UserMessage
+        user_message = UserMessage(content=self.prompt_template.format(memories))
         # 将 UserMessage 添加到 history 中
         history.append(user_message)
-        # 将 observation 嵌入到 trajectory memory 中
-        await self.trajectory_memory.add(observation)
+        
+        # 将 observation 添加到 history 中
+        observe_message = UserMessage(content=observation)
+        history.append(observe_message)
         
         return history

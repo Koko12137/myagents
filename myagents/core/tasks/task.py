@@ -20,6 +20,8 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
             The history of the status of the task. The key is the status of the task, and it indicates the state of the task. 
             The value is a list of the history messages. 
         
+        uid (int): 
+            The unique identifier of the task. 
         name (str): 
             The unique identifier of the task. 
         objective (str): 
@@ -43,7 +45,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
     status: TaskStatus
     history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
 
-    uid: str
+    uid: int
     name: str
     objective: str
     key_results: str
@@ -81,7 +83,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
                 The parent task of the current task. If the task does not have a parent task, the parent is None.
         """
         super().__init__(status_class=TaskStatus, **kwargs)
-        self.uid = str(uuid4())
+        
         self.name = name
         assert isinstance(objective, str), "The objective must be a string."
         self.objective = objective

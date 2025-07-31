@@ -10,7 +10,7 @@ class StateMixin(Stateful):
     """StateMixin is a mixin class for stateful entity management.
     
     Attributes:
-        uid (str):
+        uid (int):
             The unique identifier of the stateful entity.
         status_class (Enum):
             The status class of the stateful entity.
@@ -19,7 +19,7 @@ class StateMixin(Stateful):
         history (dict[str, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]):
             The history of the stateful entity.
     """
-    uid: str
+    uid: int
     status_class: Enum
     status: Enum
     history: dict[str, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]
@@ -37,7 +37,7 @@ class StateMixin(Stateful):
         """
         super().__init__(*args, **kwargs)
         # Initialize the uid
-        self.uid = kwargs.get("uid", str(uuid4()))
+        self.uid = uuid4().int
         # Initialize the status class
         self.status_class = status_class
         # Initialize the history

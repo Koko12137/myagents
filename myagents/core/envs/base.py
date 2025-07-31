@@ -36,7 +36,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
     """BaseEnvironment is the base class for all the environments.
     
     Attributes:
-        uid (str):
+        uid (int):
             The unique identifier of the environment.
         name (str):
             The name of the environment.
@@ -62,7 +62,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             The history of the environment.
     """
     # Basic information
-    uid: str
+    uid: int
     name: str
     profile: str
     prompts: dict[str, str]
@@ -104,7 +104,6 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         super().__init__(status_class=EnvironmentStatus, **kwargs)
         
         # Initialize the basic information
-        self.uid = str(uuid4())
         self.name = name
         self.profile = profile
         self.prompts = prompts

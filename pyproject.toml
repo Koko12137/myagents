@@ -31,6 +31,7 @@ dependencies = [
     "pymilvus>=2.5.14",
     "pynvml>=12.0.0",
     "pytest>=8.4.0",
+    "pytest-asyncio>=1.1.0",
     "pyzmq>=27.0.0",
     "ray>=2.47.0",
     "safetensors>=0.5.3",

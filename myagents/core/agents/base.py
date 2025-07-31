@@ -23,7 +23,7 @@ class BaseAgent(Agent):
     - 运行智能体。
     
     属性：
-        uid (str):
+        uid (int):
             智能体的唯一标识符。
         name (str):
             智能体名称。
@@ -52,7 +52,7 @@ class BaseAgent(Agent):
             观察目标时的信息格式。
     """
     # Basic information
-    uid: str
+    uid: int
     name: str
     agent_type: AgentType
     profile: str
@@ -110,7 +110,7 @@ class BaseAgent(Agent):
         super().__init__(**kwargs)
         
         # Initialize the basic information
-        self.uid = str(uuid4())
+        self.uid = uuid4().int
         self.name = name
         self.agent_type = agent_type
         self.profile = profile
