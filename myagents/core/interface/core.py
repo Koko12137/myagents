@@ -8,6 +8,7 @@ from fastmcp import Client as MCPClient
 
 from myagents.core.interface.base import Stateful, ToolsCaller, Scheduler
 from myagents.core.interface.llm import LLM, CompletionConfig
+from myagents.core.interface.memory import VectorMemoryItem, MemoryOperation
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
 
@@ -298,9 +299,22 @@ class MemoryAgent(Agent):
     async def extract_memory(
         self, 
         text: str, 
+        target: Stateful, 
         **kwargs,
-    ) -> list:
+    ) -> list[MemoryOperation]:
         """从文本中提取记忆
+        
+        参数:
+            text (str):
+                文本
+            target (Stateful):
+                目标
+            **kwargs:
+                额外参数
+                
+        返回:
+            list[MemoryOperation]:
+                从文本中提取的记忆
         """
         pass
     
@@ -310,18 +324,36 @@ class MemoryAgent(Agent):
         text: str, 
         limit: int, 
         **kwargs, 
-    ) -> list:
+    ) -> list[VectorMemoryItem]:
         """从记忆中搜索信息
+        
+        参数:
+            text (str):
+                文本
+            limit (int):
+                限制
+            **kwargs:
+                额外参数
+        
+        返回:
+            list[VectorMemoryItem]:
+                从记忆中搜索的信息
         """
         pass
     
     @abstractmethod
     async def update_memory(
         self, 
-        memories: list, 
+        memories: list[MemoryOperation], 
         **kwargs, 
     ) -> None:
         """更新记忆
+        
+        参数:
+            memories (list[MemoryOperation]):
+                要更新的记忆
+            **kwargs:
+                额外参数
         """
         pass
 

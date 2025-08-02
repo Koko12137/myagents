@@ -319,6 +319,8 @@ class ComplexQuery(PlanAndExecEnv):
         )
         # Set the task as the sub-task
         self.tasks[task.name] = task
+        # Add task to the context
+        self.context = self.context.create_next(task)
         # Log the task
         logger.info(f"任务创建: \n{task.objective}")
         
@@ -342,6 +344,8 @@ class ComplexQuery(PlanAndExecEnv):
             logger.info(f"最终答案: \n{task.outputs}")
             # Record the answer
             self.answers[task.name] = task.outputs
+            # Done the context
+            self.context = self.context.done()
             # Return the answer
             return task.outputs
         
@@ -375,6 +379,8 @@ class ComplexQuery(PlanAndExecEnv):
             )
             # Update the environment history
             self.update(message)
+            # Done the context
+            self.context = self.context.done()
             # Log the answer
             logger.info(f"Agent Response: \n{message.content}")
             # Return the answer
@@ -397,13 +403,13 @@ class ComplexQuery(PlanAndExecEnv):
             )
             # Set the status to finished
             self.to_finished()
+            # Done the context
+            self.context = self.context.done()
             # Log the answer
             logger.info(f"Agent Response: \n{message.content}")
             # Return the answer
             return self.answers[task.name]
         
-        else:
-            raise ValueError(f"Unknown output type: {output_type}")
 
     async def schedule(
         self, 

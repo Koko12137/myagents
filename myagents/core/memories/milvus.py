@@ -8,7 +8,7 @@ from pymilvus import (
     DataType,
 )
 
-from myagents.core.memories.schemas import BaseVectorMemory, MemoryOperation, MemoryOperationType, MemoryType
+from myagents.core.memories.schemas import BaseVectorMemoryItem, BaseMemoryOperation, MemoryOperationType, MemoryType
 
 
 class MilvusMemoryCollection:
@@ -50,7 +50,7 @@ class MilvusMemoryCollection:
         self.client = client
         self.collection_name = collection_name
         
-    async def operate(self, operation: MemoryOperation) -> bool:
+    async def operate(self, operation: BaseMemoryOperation) -> bool:
         """执行记忆操作"""
         if operation.operation == MemoryOperationType.ADD:
             return await self.add(operation.after)
@@ -61,7 +61,7 @@ class MilvusMemoryCollection:
         else:
             raise ValueError(f"不支持的操作类型: {operation.operation}")
     
-    async def add(self, memories: list[BaseVectorMemory]) -> bool:
+    async def add(self, memories: list[BaseVectorMemoryItem]) -> bool:
         """插入向量记忆"""
         try:
             # 准备数据
@@ -113,7 +113,7 @@ class MilvusMemoryCollection:
                 for hit in hits:
                     if hit.score >= score_threshold:
                         # 合法性检查
-                        memory = BaseVectorMemory(
+                        memory = BaseVectorMemoryItem(
                             memory_id=hit.get("memory_id"),
                             env_id=hit.get("env_id"),
                             agent_id=hit.get("agent_id"),
@@ -129,7 +129,7 @@ class MilvusMemoryCollection:
             logger.error(f"搜索向量记忆失败: {e}")
             return []
     
-    async def update(self, memories: list[BaseVectorMemory]) -> bool:
+    async def update(self, memories: list[BaseVectorMemoryItem]) -> bool:
         """更新向量记忆"""
         try:
             # 删除旧记录

@@ -8,11 +8,22 @@ from myagents.core.configs.agents import CounterConfig, AgentConfig
 from myagents.core.configs.llms import LLMConfig
 from myagents.core.configs.mcps import MCPConfig
 from myagents.core.configs.envs import EnvironmentConfig
+from myagents.core.configs.memories import VectorMemoryConfig
 from myagents.core.envs.orchestrate import Orchestrate
-from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment
+from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment, VectorMemoryDB
 from myagents.core.llms import OpenAiLLM
-from myagents.core.agents import AgentType, ReActAgent, TreeReActAgent, OrchestrateAgent, PlanAndExecAgent
+from myagents.core.agents import (
+    AgentType, 
+    ReActAgent, TreeReActAgent, 
+    OrchestrateAgent, 
+    PlanAndExecAgent, 
+    MemoryReActAgent, 
+    MemoryTreeReActAgent, 
+    MemoryOrchestrateAgent, 
+    MemoryPlanAndExecAgent, 
+)
 from myagents.core.envs import ComplexQuery, EnvironmentType
+from myagents.core.memories import MilvusManager, MilvusMemoryCollection
 from myagents.core.utils.step_counters import BaseStepCounter, MaxStepCounter, TokenStepCounter
 from myagents.core.utils.logger import init_logger
 from myagents.core.utils.name_generator import generate_name
@@ -100,6 +111,39 @@ class AutoAgent:
             case _:
                 raise ValueError(f"无效的语言模型名称: {provider}")
             
+    async def __build_vector_memory(self, config: VectorMemoryConfig) -> VectorMemoryDB:
+        """构建向量记忆数据库
+        
+        参数:
+            config (VectorMemoryConfig):
+                向量记忆数据库的配置
+        """
+        if config is None:
+            return None
+        
+        # 构建向量记忆数据库
+        match config.type:
+            case "milvus":
+                manager = MilvusManager(
+                    url=config.url, 
+                    host=config.host, 
+                    port=config.port, 
+                    user=config.username, 
+                    password=config.password, 
+                    db_name=config.database, 
+                )
+                collection = await manager.create_vector_memory(
+                    collection_name=config.collection_name, 
+                    dimension=config.dimension, 
+                    index_type=config.index_type, 
+                    metric_type=config.metric_type, 
+                )
+            case _:
+                raise ValueError(f"无效的向量记忆数据库类型: {config.type}")
+            
+        # 返回向量记忆数据库
+        return collection
+    
     def __build_mcp_client(self, config: MCPConfig) -> MCPClient:
         """构建 MCP 客户端
         
@@ -126,7 +170,7 @@ class AutoAgent:
         return mcp_client
         
         
-    def __build_agent(self, config: AgentConfig, step_counters: list[StepCounter]) -> Agent:
+    async def __build_agent(self, config: AgentConfig, step_counters: list[StepCounter]) -> Agent:
         """构建代理
         
         参数:
@@ -153,15 +197,44 @@ class AutoAgent:
         
         match agent_type:
             case AgentType.REACT:
-                AGENT = ReActAgent
+                if config.use_memory:
+                    AGENT = MemoryReActAgent
+                else:
+                    AGENT = ReActAgent
             case AgentType.TREE_REACT:
-                AGENT = TreeReActAgent
+                if config.use_memory:
+                    AGENT = MemoryTreeReActAgent
+                else:
+                    AGENT = TreeReActAgent
             case AgentType.ORCHESTRATE:
-                AGENT = OrchestrateAgent
+                if config.use_memory:
+                    AGENT = MemoryOrchestrateAgent
+                else:
+                    AGENT = OrchestrateAgent
             case AgentType.PLAN_AND_EXECUTE:
-                AGENT = PlanAndExecAgent
+                if config.use_memory:
+                    AGENT = MemoryPlanAndExecAgent
+                else:
+                    AGENT = PlanAndExecAgent
             case _:
                 raise ValueError(f"无效的代理类型: {agent_type}")
+        
+        # 检查是否需要记忆
+        if config.use_memory:
+            # 构建嵌入语言模型
+            embedding_llm = self.__build_llm(config.embedding_llm)
+            # 构建向量记忆数据库
+            vector_memory = await self.__build_vector_memory(config.memory_config)
+            
+            # 构建代理
+            AGENT = AGENT(
+                name=agent_name,
+                llm=llm, 
+                step_counters=step_counters, 
+                mcp_client=mcp_client, 
+                vector_memory=vector_memory, 
+                embedding_llm=embedding_llm, 
+            )
         
         # 构建代理
         return AGENT(
@@ -171,7 +244,7 @@ class AutoAgent:
             mcp_client=mcp_client, 
         )
             
-    def __build_environment(self, config: EnvironmentConfig) -> Environment:
+    async def __build_environment(self, config: EnvironmentConfig) -> Environment:
         """构建环境
         
         参数:
@@ -185,7 +258,7 @@ class AutoAgent:
         # 构建全局步骤计数器
         counters = [self.build_counter(counter) for counter in config.step_counters]
         # 构建代理
-        agents = [self.__build_agent(agent, counters) for agent in config.agents]
+        agents = [await self.__build_agent(agent, counters) for agent in config.agents]
         
         env_type = EnvironmentType(config.type)
         # 构建环境
@@ -208,7 +281,7 @@ class AutoAgent:
         # 返回环境
         return env
             
-    def auto_build(self, config: AutoAgentConfig) -> Union[Environment, Workflow]:
+    async def auto_build(self, config: AutoAgentConfig) -> Union[Environment, Workflow]:
         """构建自动代理
         
         参数:
@@ -236,6 +309,6 @@ class AutoAgent:
             custom_logger.add(sys.stdout, level=log_level, colorize=True)
         
         # 构建环境
-        environment = self.__build_environment(config.environment)
+        environment = await self.__build_environment(config.environment)
         # 返回环境
         return environment

@@ -30,7 +30,7 @@ async def test_async_query():
     # Create Factory
     factory = AutoAgent()
     # Build ReActFlow
-    query: ComplexQuery = factory.auto_build(config=config)
+    query: ComplexQuery = await factory.auto_build(config=config)
     
     # Run the query
     answer = await query.run(

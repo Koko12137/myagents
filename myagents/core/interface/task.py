@@ -4,7 +4,7 @@ from collections import OrderedDict
 from typing import runtime_checkable, Protocol
 
 from myagents.core.interface.base import Stateful
-from myagents.core.interface.memory import VectorMemory, TableMemory
+from myagents.core.interface.memory import VectorMemoryDB, TableMemoryDB
 
 
 class TaskStatus(Enum):
@@ -158,10 +158,10 @@ class MemoryTreeTaskNode(TreeTaskNode):
         trajectory_memory (TableMemory):
             The trajectory memory of the task.
     """
-    semantic_memory: VectorMemory
-    episodic_memory: VectorMemory
-    procedural_memory: VectorMemory
-    trajectory_memory: TableMemory
+    semantic_memory: VectorMemoryDB
+    episodic_memory: VectorMemoryDB
+    procedural_memory: VectorMemoryDB
+    trajectory_memory: TableMemoryDB
     
     @abstractmethod
     async def add(

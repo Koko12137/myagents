@@ -1,9 +1,116 @@
 from abc import abstractmethod
-from typing import runtime_checkable, Protocol
+from enum import Enum
+from typing import runtime_checkable, Protocol, Union
 
 
 @runtime_checkable
-class VectorMemory(Protocol):
+class VectorMemoryItem(Protocol):
+    """向量记忆项的协议。向量数据库里存储的最小单元
+    """
+    
+    @abstractmethod
+    def get_memory_id(self) -> int:
+        """获取向量记忆项的ID。向量记忆项的ID是向量数据库中存储的唯一标识符。
+        
+        返回:
+            int: 向量记忆项的ID
+        """
+        pass
+    
+    @abstractmethod
+    def get_agent_id(self) -> int:
+        """获取向量记忆项的代理ID。向量记忆项的代理ID是向量数据库中存储的代理ID。
+        
+        返回:
+            int: 向量记忆项的代理ID
+        """
+        pass
+    
+    @abstractmethod
+    def get_task_id(self) -> int:
+        """获取向量记忆项的任务ID。向量记忆项的任务ID是向量数据库中存储的任务ID。
+        
+        返回:
+            int: 向量记忆项的任务ID
+        """
+        pass
+    
+    @abstractmethod
+    def get_task_status(self) -> str:
+        """获取向量记忆项的任务状态。向量记忆项的任务状态是向量数据库中存储的任务状态。
+        
+        返回:
+            str: 向量记忆项的任务状态
+        """
+        pass
+    
+    @abstractmethod
+    def get_content(self) -> str:
+        """获取向量记忆项的内容。向量记忆项的内容是向量数据库中存储的内容。
+        
+        返回:
+            str: 向量记忆项的内容
+        """
+        pass
+    
+    @abstractmethod
+    def get_embedding(self) -> list[float]:
+        """获取向量记忆项的嵌入向量。
+        
+        返回:
+            list[float]: 向量记忆项的嵌入向量
+        """
+        pass
+    
+    @abstractmethod
+    def format(self, **kwargs) -> Union[str, list[dict]]:
+        """将向量记忆项格式化为字符串。
+        
+        参数:
+            **kwargs:
+                格式化参数
+        
+        返回:
+            Union[str, list[dict]]: 格式化后的向量记忆项
+        """
+        pass
+    
+    @abstractmethod
+    def to_dict(self) -> dict:
+        """将向量记忆项转换为字典。
+        
+        返回:
+            dict: 向量记忆项的字典
+        """
+        pass
+    
+    
+@runtime_checkable
+class MemoryOperation(Protocol):
+    """记忆操作的协议。用于存储代理在任何有状态实体上工作的记忆操作
+    """
+    
+    @abstractmethod
+    def get_operation(self) -> Enum:
+        """获取记忆操作的类型。记忆操作的类型是向量数据库中存储的类型。
+        
+        返回:
+            str: 记忆操作的类型
+        """
+        pass
+    
+    @abstractmethod
+    def get_memory(self) -> VectorMemoryItem:
+        """获取记忆操作的记忆。记忆操作的记忆是向量数据库中存储的记忆。
+        
+        返回:
+            VectorMemoryItem: 记忆操作的记忆
+        """
+        pass
+
+
+@runtime_checkable
+class VectorMemoryDB(Protocol):
     """向量记忆管理的协议。用于存储代理在任何有状态实体上工作的向量记忆
     """
     
@@ -73,7 +180,7 @@ class VectorMemory(Protocol):
 
 
 @runtime_checkable
-class TableMemory(Protocol):
+class TableMemoryDB(Protocol):
     """表记忆管理的协议。用于存储代理在任何有状态实体上工作的表记忆
     """
     

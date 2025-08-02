@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from myagents.core.configs.llms import LLMConfig
 from myagents.core.configs.mcps import MCPConfig
+from myagents.core.configs.memories import VectorMemoryConfig
 
 
 class CounterConfig(BaseModel):
@@ -29,6 +30,8 @@ class AgentConfig(BaseModel):
             语言模型的配置
         mcp_client (MCPConfig, 可选):
             MCP 客户端的配置
+        use_memory (bool, 可选):
+            是否使用记忆
         extra_config (dict[str, Any]):
             代理的额外配置
     """
@@ -38,6 +41,18 @@ class AgentConfig(BaseModel):
         description="MCP 客户端的配置", 
         default=None, 
     )
+    use_memory: Optional[bool] = Field(
+        description="是否使用记忆", 
+        default=False, 
+    )
+    embedding_llm: Optional[LLMConfig] = Field(
+        description="嵌入语言模型的配置", 
+        default=None, 
+    )
+    memory_config: Optional[VectorMemoryConfig] = Field(
+        description="向量记忆数据库的配置", 
+        default=None, 
+    )   
     extra_config: dict[str, Any] = Field(
         description="代理的额外配置",
         default={},
