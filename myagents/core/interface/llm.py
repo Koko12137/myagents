@@ -131,7 +131,7 @@ class EmbeddingLLM(LLM):
     """
     
     @abstractmethod
-    async def embed(self, text: str) -> list[float]:
+    async def embed(self, text: str, **kwargs) -> list[float]:
         """嵌入文本并返回嵌入向量
         
         参数:

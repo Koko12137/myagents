@@ -320,7 +320,7 @@ class ComplexQuery(PlanAndExecEnv):
         # Set the task as the sub-task
         self.tasks[task.name] = task
         # Add task to the context
-        self.context = self.context.create_next(task)
+        self.context = self.context.create_next(task=task)
         # Log the task
         logger.info(f"任务创建: \n{task.objective}")
         

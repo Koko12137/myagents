@@ -1,7 +1,7 @@
 import json
 from typing import Union
 
-from myagents.core.interface import Stateful,  VectorMemoryDB, TableMemoryDB, EmbeddingLLM
+from myagents.core.interface import Stateful,  VectorMemoryCollection, TableMemoryDB, EmbeddingLLM
 from myagents.core.messages import AssistantMessage, ToolCallResult, SystemMessage, UserMessage
 from myagents.core.llms import BaseCompletionConfig
 from myagents.core.agents.base import BaseAgent
@@ -62,7 +62,7 @@ class BaseMemoryAgent(BaseAgent):
     # 嵌入语言模型
     embedding_llm: EmbeddingLLM
     # 向量记忆
-    vector_memory: VectorMemoryDB
+    vector_memory: VectorMemoryCollection
     # 轨迹记忆
     trajectory_memory: TableMemoryDB
     # Prompt 样板，用于格式化召回的信息
@@ -78,13 +78,13 @@ class BaseMemoryAgent(BaseAgent):
     
     def __init__(
         self, 
-        vector_memory: VectorMemoryDB, 
+        vector_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
         # trajectory_memory: TableMemoryDB, # TODO: 暂时不使用轨迹记忆
         memory_prompts: dict[str, str], 
         **kwargs,
     ) -> None:
-        super().__init__(prompts=memory_prompts, **kwargs)
+        super().__init__(**kwargs)
         self.vector_memory = vector_memory
         self.embedding_llm = embedding_llm
         # self.trajectory_memory = trajectory_memory # TODO: 暂时不使用轨迹记忆
@@ -128,9 +128,9 @@ class BaseMemoryAgent(BaseAgent):
         
         # 检测相似的记忆，避免冲突
         sim_memories = await self.search_memory(
-            text=text, 
-            limit=20, 
-            score_threshold=0.5, 
+            text=text,
+            limit=20,
+            score_threshold=0.5,
             memory_type=memory_type,
             target=target,
         )
@@ -173,7 +173,7 @@ class BaseMemoryAgent(BaseAgent):
             memory["task_status"] = task_status
             
             # 获取嵌入向量
-            embedding = await self.embedding_llm.embed(memory["content"])
+            embedding = await self.embedding_llm.embed(memory["content"], dimensions=self.vector_memory.get_dimension())
             # 更新 memory 的 embedding
             memory["embedding"] = embedding
             
@@ -213,8 +213,8 @@ class BaseMemoryAgent(BaseAgent):
         MEMORY = self.memory_classes[memory_type.value]
         
         # 把 text 转换为向量
-        embedding = await self.embedding_llm.embed(text)
-        expr = f"memory_type == {memory_type}"
+        embedding = await self.embedding_llm.embed(text, dimensions=self.vector_memory.get_dimension())
+        expr = f'memory_type == "{memory_type.value}"'
         # 从向量记忆中搜索
         memories = await self.vector_memory.search(
             query_embedding=embedding, 
@@ -249,7 +249,7 @@ class BaseMemoryAgent(BaseAgent):
         返回:
             None
         """
-        super().prompt(prompt, target, **kwargs)
+        await super().prompt(prompt, target, **kwargs)
         
         # 从 prompt 中抽取 semantic 记忆
         memories = await self.extract_memory(prompt.content, target, MemoryType.SEMANTIC)

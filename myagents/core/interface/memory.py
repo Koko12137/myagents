@@ -110,9 +110,36 @@ class MemoryOperation(Protocol):
 
 
 @runtime_checkable
-class VectorMemoryDB(Protocol):
+class VectorMemoryCollection(Protocol):
     """向量记忆管理的协议。用于存储代理在任何有状态实体上工作的向量记忆
     """
+    
+    @abstractmethod
+    def get_dimension(self) -> int:
+        """获取向量记忆项的维度。向量记忆项的维度是向量数据库中存储的维度。
+        
+        返回:
+            int: 向量记忆项的维度
+        """
+        pass
+    
+    @abstractmethod
+    def get_index_type(self) -> str:
+        """获取向量记忆项的索引类型。向量记忆项的索引类型是向量数据库中存储的索引类型。
+        
+        返回:
+            str: 向量记忆项的索引类型
+        """
+        pass
+    
+    @abstractmethod
+    def get_metric_type(self) -> str:
+        """获取向量记忆项的距离度量类型。向量记忆项的距离度量类型是向量数据库中存储的距离度量类型。
+        
+        返回:
+            str: 向量记忆项的距离度量类型
+        """
+        pass
     
     @abstractmethod
     async def add(self, memories: list, **kwargs) -> None:

@@ -3,7 +3,6 @@ from typing import Union
 
 from pydantic import BaseModel, Field
 
-from myagents.core.interface import VectorMemoryItem, MemoryOperation
 from myagents.prompts.memories import SEMANTIC_ITEM_FORMAT, EPISODE_ITEM_FORMAT, PROCEDURAL_ITEM_FORMAT
 
 
@@ -14,11 +13,11 @@ class MemoryType(Enum):
     PROCEDURAL = "procedural_memory"
 
 
-class BaseVectorMemoryItem(VectorMemoryItem, BaseModel):
+class BaseVectorMemoryItem(BaseModel):
     """向量记忆数据结构
     
     属性：
-        memory_type (MemoryType): 记忆类型
+        memory_type (str): 记忆类型
         memory_id (int): 记忆ID
         env_id (int): 环境ID
         agent_id (int): 代理ID
@@ -26,7 +25,7 @@ class BaseVectorMemoryItem(VectorMemoryItem, BaseModel):
         content (str): 记忆内容
         embedding (List[float]): 记忆向量
     """
-    memory_type: MemoryType = Field(description="记忆类型")
+    memory_type: str = Field(description="记忆类型")
     memory_id: int = Field(description="记忆ID")
     env_id: int = Field(description="环境ID")
     agent_id: int = Field(description="代理ID")
@@ -37,6 +36,9 @@ class BaseVectorMemoryItem(VectorMemoryItem, BaseModel):
     
     def get_memory_id(self) -> int:
         return self.memory_id
+    
+    def get_memory_type(self) -> MemoryType:
+        return MemoryType(self.memory_type)
     
     def get_env_id(self) -> int:
         return self.env_id
@@ -68,11 +70,12 @@ class BaseVectorMemoryItem(VectorMemoryItem, BaseModel):
             "embedding": self.embedding,
         }
 
+
 class SemanticMemoryItem(BaseVectorMemoryItem):
     """语义记忆数据结构
     
     属性：
-        memory_type (MemoryType): 记忆类型
+        memory_type (str): 记忆类型
         memory_id (int): 记忆ID
         env_id (int): 环境ID
         agent_id (int): 代理ID
@@ -99,7 +102,7 @@ class EpisodeMemoryItem(BaseVectorMemoryItem):
     """情节记忆数据结构
     
     属性：
-        memory_type (MemoryType): 记忆类型
+        memory_type (str): 记忆类型
         memory_id (int): 记忆ID
         env_id (int): 环境ID
         agent_id (int): 代理ID
@@ -125,7 +128,7 @@ class ProceduralMemoryItem(BaseVectorMemoryItem):
     """程序性记忆数据结构
     
     属性：
-        memory_type (MemoryType): 记忆类型
+        memory_type (str): 记忆类型
         memory_id (int): 记忆ID
         env_id (int): 环境ID
         agent_id (int): 代理ID
@@ -168,7 +171,7 @@ class MemoryOperationType(Enum):
     UPDATE = "update"
     DELETE = "delete"
 
-class BaseMemoryOperation(MemoryOperation, BaseModel):
+class BaseMemoryOperation(BaseModel):
     """记忆操作数据结构
     
     属性：

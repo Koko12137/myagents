@@ -8,9 +8,9 @@ from myagents.core.configs.agents import CounterConfig, AgentConfig
 from myagents.core.configs.llms import LLMConfig
 from myagents.core.configs.mcps import MCPConfig
 from myagents.core.configs.envs import EnvironmentConfig
-from myagents.core.configs.memories import VectorMemoryConfig
+from myagents.core.configs.memories import VectorCollectionConfig
 from myagents.core.envs.orchestrate import Orchestrate
-from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment, VectorMemoryDB
+from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment, VectorMemoryCollection
 from myagents.core.llms import OpenAiLLM
 from myagents.core.agents import (
     AgentType, 
@@ -23,7 +23,7 @@ from myagents.core.agents import (
     MemoryPlanAndExecAgent, 
 )
 from myagents.core.envs import ComplexQuery, EnvironmentType
-from myagents.core.memories import MilvusManager, MilvusMemoryCollection
+from myagents.core.memories import MilvusManager
 from myagents.core.utils.step_counters import BaseStepCounter, MaxStepCounter, TokenStepCounter
 from myagents.core.utils.logger import init_logger
 from myagents.core.utils.name_generator import generate_name
@@ -52,6 +52,7 @@ class AutoAgentConfig(BaseModel):
 class AutoAgent:
     """AutoAgent 是一个用于创建代理并将其分配到环境和工作流的工厂类
     """
+    vector_dbs: dict[str, VectorMemoryCollection] = {}
     
     def __init__(self):
         """初始化 AutoAgent 工厂"""
@@ -111,39 +112,53 @@ class AutoAgent:
             case _:
                 raise ValueError(f"无效的语言模型名称: {provider}")
             
-    async def __build_vector_memory(self, config: VectorMemoryConfig) -> VectorMemoryDB:
-        """构建向量记忆数据库
+    async def __connect_memory_collection(self, config: VectorCollectionConfig) -> VectorMemoryCollection:
+        """连接向量记忆集合
         
         参数:
-            config (VectorMemoryConfig):
-                向量记忆数据库的配置
+            config (VectorCollectionConfig):
+                向量记忆集合的配置
+                
+        返回:
+            VectorMemoryCollection:
+                向量记忆集合
         """
         if config is None:
             return None
         
-        # 构建向量记忆数据库
-        match config.type:
-            case "milvus":
-                manager = MilvusManager(
-                    url=config.url, 
-                    host=config.host, 
-                    port=config.port, 
-                    user=config.username, 
-                    password=config.password, 
-                    db_name=config.database, 
-                )
-                collection = await manager.create_vector_memory(
-                    collection_name=config.collection_name, 
-                    dimension=config.dimension, 
-                    index_type=config.index_type, 
-                    metric_type=config.metric_type, 
-                )
-            case _:
-                raise ValueError(f"无效的向量记忆数据库类型: {config.type}")
+        # 获取向量记忆数据库配置
+        db_config = config.vector_db
+        if db_config is None:
+            raise ValueError("向量记忆数据库配置为空，请检查配置文件")
+        
+        # 如果数据库已经连接，则返回
+        if f"{db_config.type}://{db_config.url}" in self.vector_dbs:
+            manager = self.vector_dbs[f"{db_config.type}://{db_config.url}"]
+        else:
+            # 连接向量记忆数据库
+            match db_config.type:
+                case "milvus":
+                    manager = MilvusManager(
+                        url=db_config.url, 
+                        host=db_config.host, 
+                        port=db_config.port, 
+                        user=db_config.username, 
+                        password=db_config.password, 
+                        db_name=db_config.database, 
+                    )
+                case _:
+                    raise ValueError(f"无效的向量记忆数据库类型: {db_config.type}")
             
-        # 返回向量记忆数据库
+            # 注册到工厂
+            self.vector_dbs[f"{db_config.type}://{manager.url}"] = manager
+            
+        # 获取向量记忆集合
+        collection = await manager.get_collection(
+            collection_name=config.collection_name, 
+        )
+        # 返回向量记忆集合
         return collection
-    
+        
     def __build_mcp_client(self, config: MCPConfig) -> MCPClient:
         """构建 MCP 客户端
         
@@ -224,10 +239,10 @@ class AutoAgent:
             # 构建嵌入语言模型
             embedding_llm = self.__build_llm(config.embedding_llm)
             # 构建向量记忆数据库
-            vector_memory = await self.__build_vector_memory(config.memory_config)
+            vector_memory = await self.__connect_memory_collection(config.memory_config)
             
             # 构建代理
-            AGENT = AGENT(
+            return AGENT(
                 name=agent_name,
                 llm=llm, 
                 step_counters=step_counters, 

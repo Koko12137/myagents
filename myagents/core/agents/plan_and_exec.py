@@ -4,7 +4,7 @@ from typing import Optional
 from fastmcp.client import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryDB, EmbeddingLLM
+from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
@@ -262,7 +262,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
         llm: LLM, 
         embedding_llm: EmbeddingLLM, 
         step_counters: list[StepCounter], 
-        vector_memory: VectorMemoryDB, 
+        vector_memory: VectorMemoryCollection, 
         # trajectory_memory: TableMemoryDB, # TODO: 暂时不使用轨迹记忆
         mcp_client: Optional[MCPClient] = None, 
         orch_plan_system_prompt: str = ORCH_PLAN_SYSTEM_PROMPT, 
@@ -335,40 +335,31 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # Initialize the vector memory
-        self.vector_memory = vector_memory
-        self.embedding_llm = embedding_llm
-        # Initialize the trajectory memory
-        # self.trajectory_memory = trajectory_memory # TODO: 暂时不使用轨迹记忆
-        
         super().__init__(
             llm=llm, 
             name=name, 
-            agent_type=AgentType.PLAN_AND_EXECUTE, 
-            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
-            step_counters=step_counters, 
             mcp_client=mcp_client, 
-            prompts={
-                "orch_plan_system_prompt": orch_plan_system_prompt, 
-                "orch_plan_reason_act_prompt": orch_plan_think_prompt, 
-                "orch_plan_reflect_prompt": orch_plan_reflect_prompt, 
-                "orch_exec_system_prompt": orch_exec_system_prompt, 
-                "orch_exec_reason_act_prompt": orch_exec_think_prompt, 
-                "orch_exec_reflect_prompt": orch_exec_reflect_prompt, 
-                "exec_system_prompt": exec_system_prompt, 
-                "exec_reason_act_prompt": exec_think_prompt, 
-                "exec_reflect_prompt": exec_reflect_prompt, 
-                "error_prompt": error_prompt, 
-            }, 
-            observe_formats={
-                "orch_plan_reason_act_format": orch_plan_think_format, 
-                "orch_plan_reflect_format": orch_plan_reflect_format, 
-                "orch_exec_reason_act_format": orch_exec_think_format, 
-                "orch_exec_reflect_format": orch_exec_reflect_format, 
-                "exec_reason_act_format": exec_think_format, 
-                "exec_reflect_format": exec_reflect_format, 
-                "agent_format": agent_format, 
-            }, 
+            step_counters=step_counters, 
+            vector_memory=vector_memory, 
+            embedding_llm=embedding_llm, 
+            # trajectory_memory=trajectory_memory, # TODO: 暂时不使用轨迹记忆
+            orch_plan_system_prompt=orch_plan_system_prompt, 
+            orch_plan_think_prompt=orch_plan_think_prompt, 
+            orch_plan_reflect_prompt=orch_plan_reflect_prompt, 
+            orch_exec_system_prompt=orch_exec_system_prompt, 
+            orch_exec_think_prompt=orch_exec_think_prompt, 
+            orch_exec_reflect_prompt=orch_exec_reflect_prompt, 
+            exec_system_prompt=exec_system_prompt, 
+            exec_think_prompt=exec_think_prompt, 
+            exec_reflect_prompt=exec_reflect_prompt, 
+            error_prompt=error_prompt, 
+            orch_plan_think_format=orch_plan_think_format, 
+            orch_plan_reflect_format=orch_plan_reflect_format, 
+            orch_exec_think_format=orch_exec_think_format, 
+            orch_exec_reflect_format=orch_exec_reflect_format, 
+            exec_think_format=exec_think_format, 
+            exec_reflect_format=exec_reflect_format, 
+            agent_format=agent_format, 
             memory_prompts={
                 "semantic_extract_prompt": semantic_memory_extract, 
                 "episode_extract_prompt": episode_memory_extract, 

@@ -2,7 +2,7 @@ from .llm import LLM, Provider, CompletionConfig, EmbeddingLLM
 from .logger import Logger
 from .base import Stateful, Context, ToolsCaller, Status, Scheduler
 from .task import TaskStatus, Task, TreeTaskNode, GraphTaskNode, TaskView, MemoryTreeTaskNode
-from .memory import VectorMemoryItem, MemoryOperation, VectorMemoryDB, TableMemoryDB
+from .memory import VectorMemoryItem, MemoryOperation, VectorMemoryCollection, TableMemoryDB
 from .core import StepCounter, Agent, Workflow, Environment, ReActFlow, MemoryAgent
 
 
@@ -22,7 +22,7 @@ __all__ = [
      
     "VectorMemoryItem", 
     "MemoryOperation", 
-    "VectorMemoryDB", 
+    "VectorMemoryCollection", 
     "TableMemoryDB", 
     
     "LLM", 

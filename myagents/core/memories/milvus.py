@@ -6,6 +6,7 @@ from pymilvus import (
     CollectionSchema, 
     FieldSchema, 
     DataType,
+    MilvusException,
 )
 
 from myagents.core.memories.schemas import BaseVectorMemoryItem, BaseMemoryOperation, MemoryOperationType, MemoryType
@@ -19,6 +20,12 @@ class MilvusMemoryCollection:
             Milvus客户端
         collection_name (str):
             集合名称
+        dimension (int, defaults to 1024):
+            向量维度
+        index_type (str, defaults to "IVF_FLAT"):
+            索引类型
+        metric_type (str, defaults to "COSINE"):
+            距离度量类型
         valid_memory_types (list[MemoryType]):
             合法的记忆类型，包括:
                 MemoryType.SEMANTIC: 语义(事实、知识、信息、数据)记忆
@@ -27,6 +34,9 @@ class MilvusMemoryCollection:
     """
     client: AsyncMilvusClient
     collection_name: str
+    dimension: int
+    index_type: str
+    metric_type: str
     valid_memory_types: list[MemoryType] = [
         MemoryType.SEMANTIC, 
         MemoryType.EPISODE, 
@@ -37,6 +47,9 @@ class MilvusMemoryCollection:
         self, 
         client: AsyncMilvusClient, 
         collection_name: str, 
+        dimension: int = 1024, 
+        index_type: str = "IVF_FLAT", 
+        metric_type: str = "COSINE", 
         **kwargs, 
     ):
         """
@@ -45,21 +58,40 @@ class MilvusMemoryCollection:
         Args:
             client: Milvus客户端
             collection_name: 集合名称
+            dimension: 向量维度
+            index_type: 索引类型
+            metric_type: 距离度量类型
             **kwargs: 其他参数
         """
         self.client = client
         self.collection_name = collection_name
+        self.dimension = dimension
+        self.index_type = index_type
+        self.metric_type = metric_type
         
-    async def operate(self, operation: BaseMemoryOperation) -> bool:
-        """执行记忆操作"""
-        if operation.operation == MemoryOperationType.ADD:
-            return await self.add(operation.after)
-        elif operation.operation == MemoryOperationType.UPDATE:
-            return await self.update(operation.before, operation.after)
-        elif operation.operation == MemoryOperationType.DELETE:
-            return await self.delete(operation.before)
-        else:
-            raise ValueError(f"不支持的操作类型: {operation.operation}")
+    def get_dimension(self) -> int:
+        """获取向量记忆项的维度。向量记忆项的维度是向量数据库中存储的维度。
+        
+        返回:
+            int: 向量记忆项的维度
+        """
+        return self.dimension
+    
+    def get_index_type(self) -> str:
+        """获取向量记忆项的索引类型。向量记忆项的索引类型是向量数据库中存储的索引类型。
+        
+        返回:
+            str: 向量记忆项的索引类型
+        """
+        return self.index_type
+    
+    def get_metric_type(self) -> str:
+        """获取向量记忆项的距离度量类型。向量记忆项的距离度量类型是向量数据库中存储的距离度量类型。
+        
+        返回:
+            str: 向量记忆项的距离度量类型
+        """
+        return self.metric_type
     
     async def add(self, memories: list[BaseVectorMemoryItem]) -> bool:
         """插入向量记忆"""
@@ -82,6 +114,8 @@ class MilvusMemoryCollection:
         env_id: str,
         agent_id: str,
         task_id: str,
+        task_status: str,
+        memory_type: str,
         query_embedding: list[float], 
         top_k: int = 10,
         score_threshold: float = 0.5, 
@@ -90,9 +124,9 @@ class MilvusMemoryCollection:
         """搜索相似向量记忆"""
         try:
             # 查询条件
-            expr = f"env_id == {env_id} and agent_id == {agent_id} and task_id == {task_id}"
+            expr = f'env_id == {env_id} AND agent_id == {agent_id} AND task_id == {task_id} AND task_status == "{task_status}" AND memory_type == "{memory_type}"'
             if condition is not None:
-                expr += f" and {condition}"
+                expr += f' AND {condition}'
             
             # 执行搜索
             results = await self.client.search(
@@ -101,7 +135,7 @@ class MilvusMemoryCollection:
                 anns_field="embedding",
                 limit=top_k,
                 output_fields=[
-                    "env_id", "agent_id", "task_id", "memory_id", "content", "embedding", 
+                    "env_id", "agent_id", "task_id", "task_status", "memory_id", "memory_type", "content", "embedding", 
                 ],
                 filter=expr,
                 search_params={"nprobe": 10}, 
@@ -114,10 +148,12 @@ class MilvusMemoryCollection:
                     if hit.score >= score_threshold:
                         # 合法性检查
                         memory = BaseVectorMemoryItem(
+                            memory_type=hit.get("memory_type"),
                             memory_id=hit.get("memory_id"),
                             env_id=hit.get("env_id"),
                             agent_id=hit.get("agent_id"),
                             task_id=hit.get("task_id"),
+                            task_status=hit.get("task_status"),
                             content=hit.get("content"),
                             embedding=hit.get("embedding"),
                         )
@@ -232,9 +268,11 @@ class MilvusManager:
             # 定义字段模式
             fields = [
                 FieldSchema(name="memory_id", dtype=DataType.INT64, is_primary=True),
+                FieldSchema(name="memory_type", dtype=DataType.VARCHAR, max_length=256),
                 FieldSchema(name="env_id", dtype=DataType.INT64),
                 FieldSchema(name="agent_id", dtype=DataType.INT64),
                 FieldSchema(name="task_id", dtype=DataType.INT64),
+                FieldSchema(name="task_status", dtype=DataType.VARCHAR, max_length=256),
                 FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
                 FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dimension),
             ]
@@ -242,10 +280,11 @@ class MilvusManager:
             schema = CollectionSchema(fields=fields, description=f"Vector memory collection: {collection_name}")
             
             # 创建索引参数
-            index_params = await self.client.prepare_index_params(
+            index_params = self.client.prepare_index_params(
                 field_name="embedding", 
             )
             index_params.add_index(
+                field_name="embedding", 
                 index_type=index_type, 
                 metric_type=metric_type, 
             )
@@ -262,6 +301,9 @@ class MilvusManager:
             memory = MilvusMemoryCollection(
                 collection_name=collection_name, 
                 client=self.client, 
+                dimension=dimension, 
+                index_type=index_type, 
+                metric_type=metric_type, 
                 **kwargs,
             )
             
@@ -270,9 +312,9 @@ class MilvusManager:
             logger.info(f"成功创建向量记忆管理器: {collection_name}")
             return memory
                 
-        except Exception as e:
+        except MilvusException as e:
             logger.error(f"创建向量记忆管理器失败: {e}")
-            return None
+            raise e
     
     async def drop_vector_memory(self, collection_name: str) -> bool:
         """删除向量记忆管理器"""
@@ -287,3 +329,49 @@ class MilvusManager:
         except Exception as e:
             logger.error(f"删除向量记忆管理器失败: {e}")
             return False
+
+    async def get_collection(
+        self, 
+        collection_name: str, 
+        dimension: int = 1536,
+        index_type: str = "IVF_FLAT",
+        metric_type: str = "COSINE", 
+        **kwargs,
+    ) -> MilvusMemoryCollection:
+        """获取向量记忆管理器
+        
+        参数:
+            collection_name: 集合名称
+            **kwargs: 其他参数
+            
+        返回:
+            MilvusMemoryCollection: 向量记忆管理器
+        """
+        try:
+            if collection_name not in self.loaded_collections:
+                # 加载集合
+                await self.client.load_collection(collection_name)
+                # 创建新的向量记忆管理器
+                memory = MilvusMemoryCollection(
+                    collection_name=collection_name, 
+                    client=self.client, 
+                    dimension=dimension,
+                    index_type=index_type,
+                    metric_type=metric_type,
+                    **kwargs,
+                )
+                # 添加到已加载的集合中
+                self.loaded_collections[collection_name] = memory
+                return memory
+            else:
+                # 返回已加载的集合
+                return self.loaded_collections[collection_name]
+        except MilvusException as e:
+            logger.error(f"获取向量记忆管理器失败: {e}，尝试创建新的向量记忆管理器")
+            return await self.create_vector_memory(
+                collection_name=collection_name, 
+                dimension=dimension, 
+                index_type=index_type, 
+                metric_type=metric_type, 
+                **kwargs,
+            )
