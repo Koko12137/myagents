@@ -45,19 +45,22 @@ PROCEDURAL_MEMORY_EXTRACT_PROMPT = """
 ### 示例
 **历史记忆**：
 ```json
-{"memory_id": 12345, "memory_type": "procedural_memory", "content": "做蛋糕需先加糖后加盐", "what": "加糖和盐", "how": "先加糖后加盐"}
-{"memory_id": 12346, "memory_type": "procedural_memory", "content": "蛋糕烤好后要静置5分钟", "what": "静置蛋糕", "how": "静置5分钟"}
-{"memory_id": 12347, "memory_type": "procedural_memory", "content": "禁止在会议室吸烟", "what": "禁止的行为：在会议室吸烟", "whynot": "维持会议室环境整洁"}
+{{"memory_id": 12345, "memory_type": "procedural_memory", "content": "做蛋糕需先加糖后加盐", "what": "加糖和盐", "how": "先加糖后加盐"}}
+{{"memory_id": 12346, "memory_type": "procedural_memory", "content": "蛋糕烤好后要静置5分钟", "what": "静置蛋糕", "how": "静置5分钟"}}
+{{"memory_id": 12347, "memory_type": "procedural_memory", "content": "禁止在会议室吸烟", "what": "禁止的行为：在会议室吸烟", "whynot": "维持会议室环境整洁"}}
 ```
 
 **当前上下文**："做蛋糕需先加盐后加糖。蛋糕烤好后要静置10分钟再脱模，因为热蛋糕容易变形。会议室现在允许吸烟。"
 
 **提取结果**：
 ```json
-{"operation": "update", "memory": {"memory_type": "procedural_memory", "content": "做蛋糕需先加盐后加糖", "what": "加盐和糖", "how": "先加盐后加糖"}}
-{"operation": "update", "memory": {"memory_type": "procedural_memory", "content": "蛋糕烤好后要静置10分钟再脱模", "what": "静置蛋糕10分钟再脱模", "how": "静置10分钟", "why": "避免热蛋糕变形"}}
-{"operation": "delete", "memory_id": 12347}
+[
+  {{"operation": "update", "memory": {{"memory_type": "procedural_memory", "content": "做蛋糕需先加盐后加糖", "what": "加盐和糖", "how": "先加盐后加糖"}}}}
+  {{"operation": "update", "memory": {{"memory_type": "procedural_memory", "content": "蛋糕烤好后要静置10分钟再脱模", "what": "静置蛋糕10分钟再脱模", "how": "静置10分钟", "why": "避免热蛋糕变形"}}}}
+  {{"operation": "delete", "memory_id": 12347}}
+]
 ```
+【警告】：必须是Jsonl格式，否则会报错！
 
 ### 注意事项
 - 仔细对比历史记忆与当前信息，准确判断冲突情况

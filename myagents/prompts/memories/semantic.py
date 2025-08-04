@@ -38,20 +38,23 @@ SEMANTIC_MEMORY_EXTRACT_PROMPT = """
 ### 示例
 **历史记忆**：
 ```json
-{"memory_id": 12345, "memory_type": "semantic_memory", "content": "水的沸点是100℃", "truth_value": "true"}
-{"memory_id": 12346, "memory_type": "semantic_memory", "content": "地球是平的", "truth_value": "true"}
-{"memory_id": 12347, "memory_type": "semantic_memory", "content": "月球是地球的卫星", "truth_value": "true"}
+{{"memory_id": 12345, "memory_type": "semantic_memory", "content": "水的沸点是100℃", "truth_value": "true"}}
+{{"memory_id": 12346, "memory_type": "semantic_memory", "content": "地球是平的", "truth_value": "true"}}
+{{"memory_id": 12347, "memory_type": "semantic_memory", "content": "月球是地球的卫星", "truth_value": "true"}}
 ```
 
 **当前上下文**："小明在2024年5月1日尝试做蛋糕。水的沸点实际上是95℃。地球是圆的。月球不是地球的卫星。"
 
 **提取结果**：
 ```json
-{"operation": "add", "memory": {"memory_type": "semantic_memory", "content": "2024年5月1日小明尝试做蛋糕", "truth_value": "true"}}
-{"operation": "update", "memory": {"memory_type": "semantic_memory", "content": "水的沸点是95℃", "truth_value": "true"}}
-{"operation": "update", "memory": {"memory_type": "semantic_memory", "content": "地球是圆的", "truth_value": "true"}}
-{"operation": "delete", "memory_id": 12347}
+[
+  {{"operation": "add", "memory": {{"memory_type": "semantic_memory", "content": "2024年5月1日小明尝试做蛋糕", "truth_value": "true"}}}}
+  {{"operation": "update", "memory": {{"memory_type": "semantic_memory", "content": "水的沸点是95℃", "truth_value": "true"}}}}
+  {{"operation": "update", "memory": {{"memory_type": "semantic_memory", "content": "地球是圆的", "truth_value": "true"}}}}
+  {{"operation": "delete", "memory_id": 12347}}
+]
 ```
+【警告】：必须是Jsonl格式，否则会报错！
 
 ### 注意事项
 - 仔细对比历史记忆与当前信息，准确判断冲突情况

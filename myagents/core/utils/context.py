@@ -36,22 +36,20 @@ class BaseContext(BaseModel):
         
         self.key_values[key] = value
 
-    def get(self, key: str) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:
         """Get the value of the context.
         
         Args:
             key (str):
                 The key of the value.
+            default (Any, optional):
+                The default value if the key is not found.
                 
         Returns:
             Any:
                 The value of the context.
-                
-        Raises:
-            KeyError:
-                If the key is not found.
         """
-        return self.key_values.get(key)
+        return self.key_values.get(key, default)
     
     def update(self, key: str, value: Any) -> None:
         """Update the value of the key.

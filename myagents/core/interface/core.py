@@ -8,7 +8,7 @@ from fastmcp import Client as MCPClient
 
 from myagents.core.interface.base import Stateful, ToolsCaller, Scheduler
 from myagents.core.interface.llm import LLM, CompletionConfig
-from myagents.core.interface.memory import VectorMemoryItem, MemoryOperation
+from myagents.core.interface.memory import VectorMemoryItem, MemoryOperation, VectorMemoryCollection
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
 
@@ -294,6 +294,43 @@ class Agent(Protocol):
 class MemoryAgent(Agent):
     """MemoryAgent 是一个可以使用记忆来思考和行动的代理
     """
+    
+    @abstractmethod
+    def get_memory_classes(self) -> dict[str, type]:
+        """获取记忆类
+        
+        返回:
+            dict[str, type]:
+                记忆类
+        """
+        pass
+    
+    @abstractmethod
+    def get_vector_memory(self) -> VectorMemoryCollection:
+        """获取向量记忆
+        
+        返回:
+            VectorMemoryCollection:
+                向量记忆
+        """
+        pass
+    
+    @abstractmethod
+    async def embed(self, text: str, dimensions: int, **kwargs) -> list[float]:
+        """嵌入文本
+        
+        参数:
+            text (str):
+                文本
+            dimensions (int):
+                嵌入维度
+            **kwargs:
+                额外参数
+        
+        返回:
+            list[float]:
+                嵌入向量
+        """
     
     @abstractmethod
     async def extract_memory(

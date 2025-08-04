@@ -157,7 +157,6 @@ class VectorMemoryCollection(Protocol):
         query_embedding: list[float], 
         top_k: int, 
         score_threshold: float, 
-        condition: str, 
         **kwargs,
     ) -> list[tuple[dict, float]]:
         """从记忆中搜索相关文本

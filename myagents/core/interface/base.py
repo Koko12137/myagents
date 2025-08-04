@@ -52,20 +52,18 @@ class Context(Protocol):
         pass
     
     @abstractmethod
-    def get(self, key: str) -> Any:
+    def get(self, key: str, default: Any) -> Any:
         """Get the value of the key.
         
         Args:
             key (str):
                 The key of the value.
+            default (Any):
+                The default value if the key is not found.
 
         Returns:
             Any:
                 The value of the key.
-                
-        Raises:
-            KeyError:
-                If the key is not found.
         """
         pass
     

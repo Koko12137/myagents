@@ -99,6 +99,23 @@ class BaseMemoryAgent(BaseAgent):
             "episode_memory": memory_prompts["episode_extract_prompt"],
             "procedural_memory": memory_prompts["procedural_extract_prompt"],
         }
+        
+    async def embed(self, text: str, dimensions: int, **kwargs) -> list[float]:
+        """嵌入文本
+        
+        参数:
+            text (str):
+                文本
+            dimensions (int):
+                嵌入维度
+            **kwargs:
+                额外参数
+                
+        返回:
+            list[float]:
+                嵌入向量
+        """
+        return await self.embedding_llm.embed(text, dimensions=dimensions, **kwargs)
     
     async def extract_memory(
         self, 
@@ -139,7 +156,7 @@ class BaseMemoryAgent(BaseAgent):
         messages = []
         # 构建 SystemMessage
         system_message = SystemMessage(
-            content=self.extract_prompts[memory_type.value].format(sim_memories)
+            content=self.extract_prompts[memory_type.value].format(sim_memories=sim_memories)
         )
         # 将 SystemMessage 添加到 messages 中
         messages.append(system_message)
@@ -152,8 +169,8 @@ class BaseMemoryAgent(BaseAgent):
         completion_config = BaseCompletionConfig(format_json=True)
         # 调用 LLM 提取语义记忆
         response = await self.llm.completion(messages, completion_config=completion_config)
-        # 格式化 response 
-        response: list[dict] = json.loads(response.content) 
+        # 格式化 response
+        response: list[dict] = json.loads(response.content)
         # 将 response 转换为 SemanticMemory、EpisodeMemory、ProceduralMemory 列表
         memory_ops = []
         for memory_op in response:
@@ -214,16 +231,16 @@ class BaseMemoryAgent(BaseAgent):
         
         # 把 text 转换为向量
         embedding = await self.embedding_llm.embed(text, dimensions=self.vector_memory.get_dimension())
-        expr = f'memory_type == "{memory_type.value}"'
         # 从向量记忆中搜索
         memories = await self.vector_memory.search(
             query_embedding=embedding, 
             top_k=limit, 
             score_threshold=score_threshold, 
-            condition=expr, 
             env_id=self.env.uid, 
             agent_id=self.uid, 
             task_id=target.uid, 
+            task_status=target.status.value, 
+            memory_type=memory_type.value, 
         )
         
         # 将 dict 转为 MemoryItem 列表

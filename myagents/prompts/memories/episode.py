@@ -64,18 +64,21 @@ EPISODE_MEMORY_EXTRACT_PROMPT = """
 ### 示例
 **历史记忆**：
 ```json
-{"memory_id": 12345, "memory_type": "episode_memory", "content": "提交了项目报告", "positive_impact": "none"}
-{"memory_id": 12346, "memory_type": "episode_memory", "content": "项目报告获得领导表扬", "positive_impact": "true"}
-{"memory_id": 12347, "memory_type": "episode_memory", "content": "这次报告准备充分，格式规范，领导对内容很满意", "positive_impact": "true"}
+{{"memory_id": 12345, "memory_type": "episode_memory", "content": "提交了项目报告", "positive_impact": "none"}}
+{{"memory_id": 12346, "memory_type": "episode_memory", "content": "项目报告获得领导表扬", "positive_impact": "true"}}
+{{"memory_id": 12347, "memory_type": "episode_memory", "content": "这次报告准备充分，格式规范，领导对内容很满意", "positive_impact": "true"}}
 ```
 
 **当前上下文**："提交的报告被退回修改，团队感到失望。项目最终按时完成，大家都很满意。会议被取消了。"
 
 **提取结果**：
 ```json
-{"operation": "update", "memory": {"memory_type": "episode_memory", "content": "提交的报告被退回修改", "positive_impact": "false"}}
-{"operation": "update", "memory": {"memory_type": "episode_memory", "content": "项目按时完成，大家都很满意", "positive_impact": "true"}}
+[
+   {{"operation": "update", "memory": {{"memory_type": "episode_memory", "content": "提交的报告被退回修改", "positive_impact": "false"}}}}
+   {{"operation": "update", "memory": {{"memory_type": "episode_memory", "content": "项目按时完成，大家都很满意", "positive_impact": "true"}}}}
+]
 ```
+【警告】：必须是Jsonl格式，否则会报错！
 
 ### 注意事项
 - 仔细对比历史记忆与当前信息，准确判断冲突情况

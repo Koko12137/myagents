@@ -135,10 +135,9 @@ class MilvusMemoryCollection:
                 anns_field="embedding",
                 limit=top_k,
                 output_fields=[
-                    "env_id", "agent_id", "task_id", "task_status", "memory_id", "memory_type", "content", "embedding", 
+                    "memory_id", "memory_type", "env_id", "agent_id", "task_id", "task_status", "content", 
                 ],
                 filter=expr,
-                search_params={"nprobe": 10}, 
             )
             
             # 解析结果

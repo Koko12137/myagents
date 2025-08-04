@@ -17,6 +17,13 @@ class BlueprintWorkflow(BaseReActFlow):
     """
     sub_workflows: dict[str, ReActFlow]
     
+    def __init__(
+        self, 
+        profile: str = PROFILE, 
+        **kwargs,
+    ) -> None:
+        super().__init__(profile=profile, **kwargs)
+    
     async def run(
         self, 
         target: TreeTaskNode, 
@@ -96,7 +103,7 @@ class BlueprintWorkflow(BaseReActFlow):
             raise RuntimeError(f"Blueprint workflow requires the target status to be created, but the target status is {target.get_status().value}.")
         
         # Get the system prompt from the workflow
-        system_prompt = self.prompts["system_prompt"]
+        system_prompt = self.prompts["system_prompt"].format(profile=self.profile)
         # Update the system prompt to the history
         message = SystemMessage(content=system_prompt)
         await self.agent.prompt(message, target)
