@@ -9,6 +9,7 @@ from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
 from myagents.core.workflows import OrchestrateFlow
+from myagents.core.workflows.memory import BaseMemoryWorkflow
 from myagents.prompts.workflows.orchestrate import (
     PROFILE, 
     PLAN_SYSTEM_PROMPT, 
@@ -18,13 +19,11 @@ from myagents.prompts.workflows.orchestrate import (
     EXEC_THINK_PROMPT, 
     EXEC_REFLECT_PROMPT, 
 )
-from myagents.prompts.memories import (
-    SEMANTIC_MEMORY_EXTRACT_PROMPT, 
-    EPISODE_MEMORY_EXTRACT_PROMPT, 
-    PROCEDURAL_MEMORY_EXTRACT_PROMPT, 
-    SEMANTIC_FORMAT, 
-    EPISODE_FORMAT, 
-    PROCEDURAL_FORMAT, 
+from myagents.prompts.workflows.memory import (
+    SYSTEM_PROMPT as MEMORY_SYSTEM_PROMPT, 
+    REASON_ACT_PROMPT as MEMORY_REASON_ACT_PROMPT, 
+    REFLECT_PROMPT as MEMORY_REFLECT_PROMPT, 
+    MEMORY_FORMAT as MEMORY_PROMPT_TEMPLATE, 
 )
 
 
@@ -261,12 +260,11 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
         exec_reason_act_format: str = "json", 
         exec_reflect_format: str = "json", 
         agent_format: str = "todo", 
-        semantic_memory_extract: str = SEMANTIC_MEMORY_EXTRACT_PROMPT, 
-        episode_memory_extract: str = EPISODE_MEMORY_EXTRACT_PROMPT, 
-        procedural_memory_extract: str = PROCEDURAL_MEMORY_EXTRACT_PROMPT, 
-        semantic_memory_prompt: str = SEMANTIC_FORMAT, 
-        episode_memory_prompt: str = EPISODE_FORMAT, 
-        procedural_memory_prompt: str = PROCEDURAL_FORMAT, 
+        # Memory
+        memory_system_prompt: str = MEMORY_SYSTEM_PROMPT, 
+        memory_reason_act_prompt: str = MEMORY_REASON_ACT_PROMPT, 
+        memory_reflect_prompt: str = MEMORY_REFLECT_PROMPT, 
+        memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
         **kwargs, 
     ) -> None: 
         """
@@ -314,13 +312,26 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 初始化 MemoryWorkflow
+        memory_workflow = BaseMemoryWorkflow(
+            prompts={
+                "system_prompt": memory_system_prompt, 
+                "reason_act_prompt": memory_reason_act_prompt, 
+                "reflect_prompt": memory_reflect_prompt, 
+                "prompt_template": memory_prompt_template, 
+            }, 
+            observe_formats={
+                "reason_act_format": "document", 
+                "reflect_format": "document", 
+            }, 
+            **kwargs,
+        )
+        
         # Initialize the parent class
         super().__init__(
             llm=llm, 
             name=name, 
             step_counters=step_counters, 
-            vector_memory=vector_memory, 
-            embedding_llm=embedding_llm, 
             # trajectory_memory=trajectory_memory, # TODO: 暂时不使用轨迹记忆
             mcp_client=mcp_client, 
             need_user_check=need_user_check, 
@@ -335,14 +346,11 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             exec_reason_act_format=exec_reason_act_format, 
             exec_reflect_format=exec_reflect_format, 
             agent_format=agent_format, 
-            memory_prompts={
-                "semantic_extract_prompt": semantic_memory_extract, 
-                "episode_extract_prompt": episode_memory_extract, 
-                "procedural_extract_prompt": procedural_memory_extract, 
-                "semantic_prompt_template": semantic_memory_prompt, 
-                "episode_prompt_template": episode_memory_prompt, 
-                "procedural_prompt_template": procedural_memory_prompt, 
-            }, 
+            # Memory
+            vector_memory=vector_memory, 
+            embedding_llm=embedding_llm, 
+            memory_workflow=memory_workflow, 
+            memory_prompt_template=memory_prompt_template, 
             **kwargs,
         )
         

@@ -296,12 +296,12 @@ class MemoryAgent(Agent):
     """
     
     @abstractmethod
-    def get_memory_classes(self) -> dict[str, type]:
-        """获取记忆类
+    def get_memory_workflow(self) -> 'MemoryWorkflow':
+        """获取记忆工作流
         
         返回:
-            dict[str, type]:
-                记忆类
+            MemoryWorkflow:
+                记忆工作流
         """
         pass
     
@@ -335,23 +335,20 @@ class MemoryAgent(Agent):
     @abstractmethod
     async def extract_memory(
         self, 
-        text: str, 
         target: Stateful, 
         **kwargs,
-    ) -> list[MemoryOperation]:
-        """从文本中提取记忆
+    ) -> Stateful:
+        """从有状态实体中提取记忆，并更新状态和记忆
         
         参数:
-            text (str):
-                文本
             target (Stateful):
-                目标
+                有状态实体
             **kwargs:
                 额外参数
                 
         返回:
-            list[MemoryOperation]:
-                从文本中提取的记忆
+            Stateful:
+                更新后的有状态实体
         """
         pass
     
@@ -361,7 +358,7 @@ class MemoryAgent(Agent):
         text: str, 
         limit: int, 
         **kwargs, 
-    ) -> list[VectorMemoryItem]:
+    ) -> str:
         """从记忆中搜索信息
         
         参数:
@@ -373,7 +370,7 @@ class MemoryAgent(Agent):
                 额外参数
         
         返回:
-            list[VectorMemoryItem]:
+            str:
                 从记忆中搜索的信息
         """
         pass
@@ -506,6 +503,41 @@ class ReActFlow(Workflow):
         返回:
             tuple[Stateful, bool]:
                 修改后的目标、是否完成
+        """
+        pass
+    
+
+class MemoryWorkflow(Workflow):
+    """MemoryWorkflow 是一个基于记忆的工作流
+    """
+    
+    @abstractmethod
+    def get_memory_agent(self) -> MemoryAgent:
+        """获取记忆代理
+        
+        返回:
+            MemoryAgent:
+                记忆代理
+        """
+        pass
+
+    @abstractmethod
+    async def extract_memory(
+        self, 
+        target: Stateful, 
+        **kwargs, 
+    ) -> Stateful:
+        """从有状态实体中提取记忆，并更新状态和记忆
+        
+        参数:
+            target (Stateful):
+                有状态实体
+            **kwargs:
+                额外参数
+                
+        返回:
+            Stateful:
+                更新后的有状态实体
         """
         pass
 

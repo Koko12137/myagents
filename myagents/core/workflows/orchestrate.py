@@ -356,7 +356,7 @@ class OrchestrateFlow(PlanWorkflow):
         max_idle_thinking: int, 
         completion_config: CompletionConfig = None, 
         **kwargs, 
-    ) -> tuple[TreeTaskNode, bool]:
+    ) -> tuple[TreeTaskNode, str]:
         """Reason about the task. This is the pre step of the planning in order to inference the real 
         and detailed requirements of the task. 
         
@@ -375,8 +375,8 @@ class OrchestrateFlow(PlanWorkflow):
         Returns:
             TreeTaskNode: 
                 The target after reasoning.
-            bool:
-                The flag to check if the orchestration blueprint is valid.
+            str:
+                The orchestration blueprint.
         """
         # Call the blueprint workflow
         target = await self.sub_workflows["plan"].schedule(
@@ -396,19 +396,16 @@ class OrchestrateFlow(PlanWorkflow):
             if blueprint == "":
                 # Log the error
                 logger.error("The blueprint is not valid.")
-                # Return the target and the flag
-                return target, False
             
             # Update the blueprint to self context
             self.context = self.context.create_next(blueprint=blueprint, task=target)
-            # Return the target and the flag
-            return target, True
         
         except Exception as e:
             # Log the error
             logger.error(f"Error updating the blueprint to the environment context: {e}")
-            # Return the target and the flag
-            return target, False
+        
+        # Return the target and the blueprint
+        return target, blueprint
     
     async def schedule(
         self, 
@@ -443,7 +440,7 @@ class OrchestrateFlow(PlanWorkflow):
         # Run the ReActFlow to create the tasks
         while target.is_created():
             # Reason about the task and get the orchestration blueprint
-            target, blueprint_valid = await self.reason(
+            target, blueprint = await self.reason(
                 target=target, 
                 max_error_retry=max_error_retry, 
                 max_idle_thinking=max_idle_thinking, 
@@ -452,7 +449,7 @@ class OrchestrateFlow(PlanWorkflow):
             )
         
             # Check if the orchestration blueprint is valid
-            if blueprint_valid:
+            if blueprint != "":
                 # Check if the need user check is set
                 if self.need_user_check:
                     raise NotImplementedError("User check is not implemented yet.")
@@ -475,6 +472,7 @@ class OrchestrateFlow(PlanWorkflow):
             # Run the react flow
             target = await super().schedule(
                 target=target, 
+                blueprint=blueprint, 
                 sub_task_depth=1, 
                 max_error_retry=max_error_retry, 
                 max_idle_thinking=max_idle_thinking, 

@@ -4,7 +4,7 @@ from json_repair import repair_json
 from loguru import logger
 
 from myagents.core.messages import UserMessage, SystemMessage
-from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow
+from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent
 from myagents.core.workflows.react import BaseReActFlow
 from myagents.core.tasks import ToDoTaskView, BaseTreeTaskNode, DocumentTaskView
 from myagents.core.llms.config import BaseCompletionConfig
@@ -17,6 +17,14 @@ PLAN_LAYER_LIMIT = """
 对于这个任务，你最多可以拆解到 {detail_level} 层（层指的是层次遍历任务树的层数，如果用户要求的层数越高，则你需要越详细规划）。
 【注意】：如果你的规划超出了层数限制，超出这个层级的拆解将会被视为错误，并会被强制截断。
 【提示】：“问题1”表示第一层，“问题1.1”表示第二层，以此类推。
+"""
+
+
+BLUEPRINT_FORMAT = """
+## 任务总体规划蓝图
+{blueprint}
+
+【注意】：如果规划蓝图没有给出，则请根据任务目标和用户需求，自行规划。
 """
 
 
@@ -332,6 +340,7 @@ class PlanWorkflow(BaseReActFlow):
         sub_task_depth: int, 
         max_error_retry: int, 
         max_idle_thinking: int, 
+        blueprint: str = "", 
         completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -346,6 +355,8 @@ class PlanWorkflow(BaseReActFlow):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent.
+            blueprint (str):
+                The blueprint of the task.
             completion_config (CompletionConfig):
                 The completion config of the workflow. 
             **kwargs:
@@ -372,10 +383,8 @@ class PlanWorkflow(BaseReActFlow):
             # Update the system prompt to the history
             message = SystemMessage(content=system_prompt)
             await self.agent.prompt(message, target)
-            # Create a new messsage announcing the blueprint
-            blueprint = self.agent.env.context.get("blueprint")
             # Create a UserMessage for the blueprint
-            blueprint_message = UserMessage(content=f"## 任务总体规划蓝图\n\n{blueprint}")
+            blueprint_message = UserMessage(content=BLUEPRINT_FORMAT.format(blueprint=blueprint))
             # Update the blueprint message to the history
             await self.agent.prompt(blueprint_message, target)
             # Create a new message for the current task results
@@ -414,6 +423,10 @@ class PlanWorkflow(BaseReActFlow):
                 if current_error >= max_error_retry:
                     # Set the task status to error
                     target.to_error()
+                    # 更新记忆
+                    target = await self.extract_memory(target, **kwargs)
+                    # Log the error message
+                    logger.critical(f"错误次数限制已达上限: {current_error}/{max_error_retry}，进入错误状态。")
                     # Force the react loop to finish
                     break
             
@@ -456,6 +469,7 @@ class PlanWorkflow(BaseReActFlow):
         sub_task_depth: int, 
         max_error_retry: int, 
         max_idle_thinking: int, 
+        blueprint: str = "", 
         completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> TreeTaskNode:
@@ -470,6 +484,8 @@ class PlanWorkflow(BaseReActFlow):
                 The maximum number of times to retry the agent when the target is errored.
             max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent.
+            blueprint (str):
+                The blueprint of the task.
             completion_config (CompletionConfig):
                 The completion config of the workflow. 
             **kwargs:
@@ -492,6 +508,173 @@ class PlanWorkflow(BaseReActFlow):
             sub_task_depth=sub_task_depth, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
+            blueprint=blueprint, 
             completion_config=completion_config, 
             **kwargs,
         )
+
+
+class MemoryPlanWorkflow(PlanWorkflow):
+    """MemoryPlanWorkflow is a workflow for planning the task with memory.
+    """
+    agent: MemoryAgent
+        
+    def register_agent(self, agent: MemoryAgent) -> None:
+        """Register the agent.
+        """ 
+        assert isinstance(agent, MemoryAgent), "The agent must be a MemoryAgent."
+        self.agent = agent
+        
+    def get_memory_agent(self) -> MemoryAgent:
+        """Get the memory agent.
+        """
+        return self.agent
+    
+    async def extract_memory(
+        self, 
+        target: TreeTaskNode, 
+        **kwargs,
+    ) -> TreeTaskNode:
+        """Extract the memory from the target.
+        """
+        # Get the memory agent
+        memory_agent = self.get_memory_agent()
+        # Extract the memory from the target
+        return await memory_agent.extract_memory(target, **kwargs)
+        
+    async def schedule(
+        self, 
+        target: TreeTaskNode, 
+        sub_task_depth: int, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        blueprint: str = "", 
+        completion_config: CompletionConfig = None, 
+        **kwargs,
+    ) -> TreeTaskNode:
+        """Override the schedule method of the react workflow.
+        
+        Args:
+            target (TreeTaskNode):
+                The target to schedule.
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            max_error_retry (int):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int):
+                The maximum number of times to idle thinking the agent.
+            blueprint (str):
+                The blueprint of the task.
+            completion_config (CompletionConfig):
+                The completion config of the workflow. 
+            **kwargs:
+                The additional keyword arguments for scheduling the workflow.
+                
+        Returns:
+            TreeTaskNode:
+                The target after scheduling.
+                
+        Raises:
+            RuntimeError:
+                If the target is not in the valid statuses.
+        """
+        if not target.is_created():
+            # Log the error
+            logger.error(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
+            # Raise an error
+            raise RuntimeError(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
+            
+        # Check if the target has history
+        if len(target.get_history()) == 0:
+            # Get the system prompt from the workflow
+            system_prompt = self.prompts["system_prompt"]
+            # Update the system prompt to the history
+            message = SystemMessage(content=system_prompt)
+            await self.agent.prompt(message, target)
+            # Create a UserMessage for the blueprint
+            blueprint_message = UserMessage(content=BLUEPRINT_FORMAT.format(blueprint=blueprint))
+            # Update the blueprint message to the history
+            await self.agent.prompt(blueprint_message, target)
+            # Create a new message for the current task results
+            task_results = DocumentTaskView(task=target).format()
+            # Create a UserMessage for the task results
+            task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
+            # Update the task results message to the history
+            await self.agent.prompt(task_results_message, target)
+        
+        # This is used for no tool calling thinking limit.
+        current_thinking = 0
+        current_error = 0
+        
+        # Run the workflow
+        while target.is_created():
+        
+            # === Reason Stage ===
+            # Reason and act on the target
+            target, error_flag, tool_call_flag = await self.reason_act(
+                target=target, 
+                sub_task_depth=sub_task_depth, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+            
+            # Check if the error flag is set
+            if error_flag:
+                # Increment the error counter
+                current_error += 1
+                # Notify the error limit to Agent
+                message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                await self.agent.prompt(message, target)
+                # Log the error message
+                logger.info(f"Error Message: \n{message}")
+                # Check if the error counter is greater than the max error retry
+                if current_error >= max_error_retry:
+                    # Set the task status to error
+                    target.to_error()
+                    # 更新记忆
+                    target = await self.extract_memory(target, **kwargs)
+                    # Force the react loop to finish
+                    break
+            
+            # === Extract Memory ===
+            # Extract the memory from the target
+            target = await self.extract_memory(target, **kwargs)
+            
+            # === Reflect Stage ===
+            # Reflect on the target
+            target, finish_flag = await self.reflect(
+                target=target, 
+                sub_task_depth=sub_task_depth, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+            # Check if the target is finished
+            if finish_flag:
+                # Force the loop to break
+                break
+            
+            # Check if the tool call flag is not set
+            elif not tool_call_flag:
+                # Increment the idle thinking counter
+                current_thinking += 1
+                # Notify the idle thinking limit to Agent
+                message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                await self.agent.prompt(message, target)
+                # Log the idle thinking message
+                logger.info(f"Idle Thinking Message: \n{message}")
+                # Check if the idle thinking counter is greater than the max idle thinking
+                if current_thinking >= max_idle_thinking:
+                    # Set the task status to error
+                    target.to_error()
+                    # Log the error message
+                    logger.critical(f"连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。")
+                    # 更新记忆
+                    target = await self.extract_memory(target, **kwargs)
+                    # Force the loop to break
+                    break
+            
+            # === Extract Memory ===
+            # Extract the memory from the target
+            target = await self.extract_memory(target, **kwargs)
+            
+        return target

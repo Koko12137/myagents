@@ -8,10 +8,10 @@ from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, Me
 from myagents.core.workflows.react import BaseReActFlow
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.agents.memory import BaseMemoryOperation
-from myagents.prompts.workflows.memory import PROFILE, SYSTEM_PROMPT, REASON_ACT_PROMPT, REFLECT_PROMPT
+from myagents.prompts.workflows.memory import PROFILE
 
 
-class MemoryWorkflow(BaseReActFlow):
+class BaseMemoryWorkflow(BaseReActFlow):
     """MemoryWorkflow is a workflow for managing the memory of the agent.
     
     Attributes:
@@ -290,3 +290,22 @@ class MemoryWorkflow(BaseReActFlow):
             completion_config=completion_config, 
             **kwargs,
         )
+
+    async def extract_memory(
+        self, 
+        target: TreeTaskNode, 
+        max_error_retry: int = 3, 
+        max_idle_thinking: int = 2, 
+        **kwargs,
+    ) -> TreeTaskNode:
+        """从有状态实体中抽取记忆。"""
+        
+        # 运行记忆提取 workflow
+        target = await self.run(
+            target=target, 
+            max_error_retry=max_error_retry, 
+            max_idle_thinking=max_idle_thinking, 
+            **kwargs,
+        )
+        # 返回更新后的目标
+        return target
