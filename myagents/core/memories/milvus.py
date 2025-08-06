@@ -9,7 +9,7 @@ from pymilvus import (
     MilvusException,
 )
 
-from myagents.core.memories.schemas import BaseVectorMemoryItem, BaseMemoryOperation, MemoryOperationType, MemoryType
+from myagents.core.memories.schemas import BaseVectorMemoryItem, MemoryType
 
 
 class MilvusMemoryCollection:
@@ -30,7 +30,6 @@ class MilvusMemoryCollection:
             合法的记忆类型，包括:
                 MemoryType.SEMANTIC: 语义(事实、知识、信息、数据)记忆
                 MemoryType.EPISODE: 情节(事件、经历、经验)记忆
-                MemoryType.PROCEDURAL: 程序性(命令、需要做的、需要思考的)记忆
     """
     client: AsyncMilvusClient
     collection_name: str
@@ -40,7 +39,6 @@ class MilvusMemoryCollection:
     valid_memory_types: list[MemoryType] = [
         MemoryType.SEMANTIC, 
         MemoryType.EPISODE, 
-        MemoryType.PROCEDURAL, 
     ]
     
     def __init__(

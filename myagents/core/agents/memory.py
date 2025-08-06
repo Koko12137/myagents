@@ -1,10 +1,14 @@
 from typing import Union
 
-from myagents.core.interface import Stateful, VectorMemoryCollection, TableMemoryDB, EmbeddingLLM, MemoryWorkflow
+from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow
 from myagents.core.messages import AssistantMessage, ToolCallResult, SystemMessage, UserMessage
 from myagents.core.agents.base import BaseAgent
 from myagents.core.memories.schemas import (
-    SemanticMemoryItem, EpisodeMemoryItem, MemoryType, BaseMemoryOperation, MemoryOperationType, 
+    SemanticMemoryItem, 
+    EpisodeMemoryItem, 
+    MemoryType, 
+    BaseMemoryOperation, 
+    MemoryOperationType, 
 )
 
 
@@ -20,8 +24,6 @@ class BaseMemoryAgent(BaseAgent):
             嵌入语言模型
         vector_memory (VectorMemory):
             向量记忆，包含事实、知识、信息、数据等
-        trajectory_memory (TableMemory):
-            轨迹记忆，包含历史信息
     """
     # 替换 workflow 为 MemoryWorkflow
     workflow: MemoryWorkflow
@@ -31,8 +33,6 @@ class BaseMemoryAgent(BaseAgent):
     embedding_llm: EmbeddingLLM
     # 向量记忆
     vector_memory: VectorMemoryCollection
-    # 轨迹记忆
-    trajectory_memory: TableMemoryDB
     # 记忆提示词模板
     prompt_template: str
     
@@ -40,7 +40,6 @@ class BaseMemoryAgent(BaseAgent):
         self, 
         vector_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        # trajectory_memory: TableMemoryDB, # TODO: 暂时不使用轨迹记忆
         memory_workflow: MemoryWorkflow, 
         memory_prompt_template: str, 
         **kwargs,
@@ -48,7 +47,6 @@ class BaseMemoryAgent(BaseAgent):
         super().__init__(**kwargs)
         self.vector_memory = vector_memory
         self.embedding_llm = embedding_llm
-        # self.trajectory_memory = trajectory_memory # TODO: 暂时不使用轨迹记忆
         
         self.prompt_template = memory_prompt_template
         # 记忆提取 workflow
@@ -108,6 +106,8 @@ class BaseMemoryAgent(BaseAgent):
         """
         # 调用记忆提取 workflow
         target = await self.memory_workflow.extract_memory(target, **kwargs)
+        # 清空旧的历史上下文
+        target.reset()
         # 返回更新后的目标
         return target
     
@@ -195,25 +195,19 @@ class BaseMemoryAgent(BaseAgent):
         """
         # 观察
         observation = await super().observe(target=target, observe_format=observe_format, **kwargs)
-        # 丢掉不必要的历史信息
-        history = []
-        if isinstance(observation[0], SystemMessage):
-            history.append(observation[0])
-            
+        
+        # 转换为字符串
+        observation_str = "\n".join([message.content for message in observation])
         # 提取记忆
         memories = await self.search_memory(
-            observation[-1].content, 
-            target, 
-            memory_type=MemoryType.SEMANTIC_MEMORY, 
+            text=observation_str, 
+            limit=20, 
+            score_threshold=0.1, 
+            target=target, 
             **kwargs,
         )
         
         # 拼接记忆到 history 中
-        if isinstance(observation[-1], UserMessage):
-            history.append(observation[-1])
-            history[-1].content = history[-1].content + f"\n\n{memories}"
-        else:
-            memory_message = UserMessage(content=f"{memories}")
-            history.append(memory_message)
+        observation[-1].content = observation[-1].content + f"\n\n{memories}"
         # 返回历史信息
-        return history
+        return observation

@@ -8,8 +8,7 @@ from myagents.core.interface import LLM, Workflow, Environment, StepCounter, Vec
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
-from myagents.core.workflows import OrchestrateFlow
-from myagents.core.workflows.memory import BaseMemoryWorkflow
+from myagents.core.workflows import OrchestrateFlow, MemoryOrchestrateFlow, BaseMemoryWorkflow
 from myagents.prompts.workflows.orchestrate import (
     PROFILE, 
     PLAN_SYSTEM_PROMPT, 
@@ -246,7 +245,6 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
         step_counters: list[StepCounter], 
         vector_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        # trajectory_memory: TableMemoryDB, # TODO: 暂时不使用轨迹记忆
         mcp_client: Optional[MCPClient] = None, 
         need_user_check: bool = False, 
         plan_system_prompt: str = PLAN_SYSTEM_PROMPT, 
@@ -281,8 +279,6 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
                 The vector memory to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
-            trajectory_memory (TableMemoryDB, optional):
-                The trajectory memory to use for the agent.
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
             need_user_check (bool, optional, defaults to False):
@@ -332,7 +328,6 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             llm=llm, 
             name=name, 
             step_counters=step_counters, 
-            # trajectory_memory=trajectory_memory, # TODO: 暂时不使用轨迹记忆
             mcp_client=mcp_client, 
             need_user_check=need_user_check, 
             plan_system_prompt=plan_system_prompt, 
@@ -356,7 +351,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
         
         # Read the workflow profile
         # Initialize the workflow for the agent
-        self.workflow = OrchestrateFlow(
+        self.workflow = MemoryOrchestrateFlow(
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             need_user_check=need_user_check, 

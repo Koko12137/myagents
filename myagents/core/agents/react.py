@@ -461,7 +461,6 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         step_counters: list[StepCounter], 
         vector_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        # trajectory_memory: TableMemoryDB, # TODO: 暂时不使用轨迹记忆
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = EXEC_SYSTEM_PROMPT, 
         reason_act_prompt: str = EXEC_THINK_PROMPT, 
@@ -518,13 +517,13 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             }, 
             **kwargs,
         )
+        
         # Initialize the parent class
         super().__init__(
             llm=llm, 
             name=name, 
             mcp_client=mcp_client, 
             step_counters=step_counters, 
-            # trajectory_memory=trajectory_memory, # TODO: 暂时不使用轨迹记忆
             system_prompt=system_prompt, 
             reason_act_prompt=reason_act_prompt, 
             reflect_prompt=reflect_prompt, 

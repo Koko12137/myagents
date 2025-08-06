@@ -430,16 +430,6 @@ class MemoryReActFlow(BaseReActFlow):
     """MemoryReActFlow is a workflow for the memory ReAct workflow.
     """
     agent: MemoryAgent
-        
-    def register_agent(self, agent: MemoryAgent) -> None:
-        """Register the agent.
-        
-        Args:
-            agent (MemoryAgent):
-                The agent to register.
-        """
-        assert isinstance(agent, MemoryAgent), "The agent must be a MemoryAgent."
-        self.agent = agent
     
     def get_memory_agent(self) -> MemoryAgent:
         """Get the memory agent.
@@ -724,16 +714,6 @@ class MemoryTreeTaskReActFlow(TreeTaskReActFlow):
     """MemoryTreeTaskReActFlow is a workflow for the memory tree task ReAct workflow.
     """
     agent: MemoryAgent
-        
-    def register_agent(self, agent: MemoryAgent) -> None:
-        """Register the agent.
-        
-        Args:
-            agent (MemoryAgent):
-                The agent to register.
-        """
-        assert isinstance(agent, MemoryAgent), "The agent must be a MemoryAgent."
-        self.agent = agent
         
     def get_memory_agent(self) -> MemoryAgent:
         """Get the memory agent.

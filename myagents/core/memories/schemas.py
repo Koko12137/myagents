@@ -3,14 +3,13 @@ from typing import Union
 
 from pydantic import BaseModel, Field
 
-from myagents.prompts.memories import SEMANTIC_ITEM_FORMAT, EPISODE_ITEM_FORMAT, PROCEDURAL_ITEM_FORMAT
+from myagents.prompts.workflows.memory import SEMANTIC_ITEM_FORMAT, EPISODE_ITEM_FORMAT
 
 
 class MemoryType(Enum):
     """记忆类型枚举"""
     SEMANTIC = "semantic_memory"
     EPISODE = "episode_memory"
-    PROCEDURAL = "procedural_memory"
 
 
 class BaseVectorMemoryItem(BaseModel):
@@ -123,41 +122,6 @@ class EpisodeMemoryItem(BaseVectorMemoryItem):
             content=self.content, 
             positive_impact=self.positive_impact
         )
-
-class ProceduralMemoryItem(BaseVectorMemoryItem):
-    """程序性记忆数据结构
-    
-    属性：
-        memory_type (str): 记忆类型
-        memory_id (int): 记忆ID
-        env_id (int): 环境ID
-        agent_id (int): 代理ID
-        task_id (int): 任务ID
-        task_status: str
-        content (str): 记忆内容
-        embedding (List[float]): 记忆向量
-        what (str): 做什么
-        how (str): 怎么做
-        why (str): 为什么做
-        whynot (str): 为什么不做
-    """
-    what: str = Field(description="做什么")
-    how: str = Field(description="怎么做")
-    why: str = Field(description="为什么做", default="无原因")
-    whynot: str = Field(description="为什么不做", default="无原因")
-        
-    def get_what(self) -> str:
-        return self.what
-    
-    def format(self) -> Union[str, list[dict]]:
-        return PROCEDURAL_ITEM_FORMAT.format(
-            memory_id=self.memory_id, 
-            content=self.content, 
-            what=self.what, 
-            how=self.how, 
-            why=self.why, 
-            whynot=self.whynot
-        )
     
 class MemoryOperationType(Enum):
     """记忆操作类型枚举
@@ -179,10 +143,10 @@ class BaseMemoryOperation(BaseModel):
         memory (BaseVectorMemory): 操作的记忆
     """
     operation: MemoryOperationType = Field(description="操作类型")
-    memory: Union[SemanticMemoryItem, EpisodeMemoryItem, ProceduralMemoryItem] = Field(description="操作的记忆")
+    memory: Union[SemanticMemoryItem, EpisodeMemoryItem] = Field(description="操作的记忆")
     
     def get_operation(self) -> MemoryOperationType:
         return self.operation
     
-    def get_memory(self) -> Union[SemanticMemoryItem, EpisodeMemoryItem, ProceduralMemoryItem]:
+    def get_memory(self) -> Union[SemanticMemoryItem, EpisodeMemoryItem]:
         return self.memory

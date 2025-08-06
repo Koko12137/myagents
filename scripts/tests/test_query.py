@@ -24,7 +24,7 @@ async def test_async_query():
             os.environ[key] = value
     
     # Create a list of agents according to the config file
-    with open("configs/agents.json", "r") as f:
+    with open("configs/agents_memory.json", "r") as f:
         config = AutoAgentConfig.model_validate(json.load(f))
         
     # Create Factory

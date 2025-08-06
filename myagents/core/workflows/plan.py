@@ -519,12 +519,6 @@ class MemoryPlanWorkflow(PlanWorkflow):
     """
     agent: MemoryAgent
         
-    def register_agent(self, agent: MemoryAgent) -> None:
-        """Register the agent.
-        """ 
-        assert isinstance(agent, MemoryAgent), "The agent must be a MemoryAgent."
-        self.agent = agent
-        
     def get_memory_agent(self) -> MemoryAgent:
         """Get the memory agent.
         """

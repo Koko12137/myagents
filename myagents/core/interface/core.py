@@ -8,7 +8,7 @@ from fastmcp import Client as MCPClient
 
 from myagents.core.interface.base import Stateful, ToolsCaller, Scheduler
 from myagents.core.interface.llm import LLM, CompletionConfig
-from myagents.core.interface.memory import VectorMemoryItem, MemoryOperation, VectorMemoryCollection
+from myagents.core.interface.memory import MemoryOperation, VectorMemoryCollection
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
 
