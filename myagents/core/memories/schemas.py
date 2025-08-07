@@ -59,8 +59,8 @@ class BaseVectorMemoryItem(BaseModel):
     
     def to_dict(self) -> dict:
         return {
-            "memory_type": self.memory_type.value,
             "memory_id": self.memory_id,
+            "memory_type": self.memory_type.value,
             "env_id": self.env_id,
             "agent_id": self.agent_id,
             "task_id": self.task_id,

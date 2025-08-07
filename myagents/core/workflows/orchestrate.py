@@ -340,6 +340,7 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
                 await self.agent.prompt(message, target)
                 # Log the error message
                 logger.info(f"Error Message: \n{message}")
+                
                 # Check if the error counter is greater than the max error retry
                 if current_error >= max_error_retry:
                     # Set the task status to error

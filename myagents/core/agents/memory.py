@@ -51,6 +51,8 @@ class BaseMemoryAgent(BaseAgent):
         self.prompt_template = memory_prompt_template
         # 记忆提取 workflow
         self.memory_workflow = memory_workflow
+        # 注册 self 为 memory_workflow 的 agent
+        self.memory_workflow.register_agent(self)
         
     def get_memory_workflow(self) -> MemoryWorkflow:
         """获取记忆工作流
@@ -145,7 +147,7 @@ class BaseMemoryAgent(BaseAgent):
             agent_id=self.uid, 
             task_id=target.uid, 
             task_status=target.status.value, 
-            memory_type=MemoryType.SEMANTIC_MEMORY, 
+            memory_type=MemoryType.SEMANTIC, 
         )
         # 将 dict 转为 MemoryItem 列表
         semantic_memories = [SemanticMemoryItem(**memory[0]) for memory in semantic_memories]
@@ -160,7 +162,7 @@ class BaseMemoryAgent(BaseAgent):
             agent_id=self.uid, 
             task_id=target.uid, 
             task_status=target.status.value, 
-            memory_type=MemoryType.EPISODE_MEMORY, 
+            memory_type=MemoryType.EPISODE, 
         )
         # 将 dict 转为 MemoryItem 列表
         episode_memories = [EpisodeMemoryItem(**memory[0]) for memory in episode_memories]
@@ -208,6 +210,6 @@ class BaseMemoryAgent(BaseAgent):
         )
         
         # 拼接记忆到 history 中
-        observation[-1].content = observation[-1].content + f"\n\n{memories}"
+        await self.prompt(UserMessage(content=memories), target)
         # 返回历史信息
-        return observation
+        return target.get_history()

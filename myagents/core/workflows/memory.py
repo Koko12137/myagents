@@ -8,7 +8,8 @@ from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, Me
 from myagents.core.workflows.react import BaseReActFlow
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.agents.memory import BaseMemoryOperation
-from myagents.prompts.workflows.memory import PROFILE
+from myagents.core.tasks import BaseTreeTaskNode
+from myagents.prompts.workflows.memory import PROFILE, CREATE_MEMORY_EXTRACTION_TASK_PROMPT, MEMORY_KEY_RESULTS
 
 
 class BaseMemoryWorkflow(BaseReActFlow):
@@ -114,15 +115,15 @@ class BaseMemoryWorkflow(BaseReActFlow):
         # Extract episode and semantic memories
         memories = json.loads(repair_json(message.content))
         # 更新记忆
-        for memory_op in memories:
+        for memory_op in memories['todo']:
             # 获取 memory 的 operation
             operation = memory_op.pop("operation")
+            # 获取 memory
+            memory = memory_op.pop("memory")
             # 获取 memory 的 memory_type
-            memory_type = memory_op.pop("memory_type")
+            memory_type = memory["memory_type"]
             # 根据 memory_type 获取记忆类
             memory_class = self.agent.get_memory_classes()[memory_type.value]
-            # 解析 Memory 内容
-            memory = json.loads(memory_op.pop("memory"))
             # 获取当前的 env_id、agent_id、task_id、task_status
             env_id = self.env.uid
             agent_id = self.uid
@@ -149,6 +150,8 @@ class BaseMemoryWorkflow(BaseReActFlow):
             )
             # 更新记忆
             await self.agent.update_memory([memory_op])
+            
+        return target, False, True
         
     async def schedule(
         self, 
@@ -180,25 +183,15 @@ class BaseMemoryWorkflow(BaseReActFlow):
             RuntimeError:
                 If the target is not in the valid statuses.
         """
-        if not target.is_created():
-            # Log the error
-            logger.error(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
-            # Raise an error
-            raise RuntimeError(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
-            
         # Check if the target has history
         if len(target.get_history()) == 0:
             # Get the system prompt from the workflow
             system_prompt = self.prompts["system_prompt"]
             # Update the system prompt to the history
             await self.agent.prompt(SystemMessage(content=system_prompt), target)
-        
-        # This is used for no tool calling thinking limit.
-        current_thinking = 0
-        current_error = 0
-        
+
         # Run the workflow
-        while target.is_created():
+        while True:
             
             # === Reflect Stage ===
             # Reflect on the target
@@ -211,48 +204,18 @@ class BaseMemoryWorkflow(BaseReActFlow):
             if finish_flag:
                 # Force the loop to break
                 break
-            
-            # Check if the tool call flag is not set
-            elif not tool_call_flag:
-                # Increment the idle thinking counter
-                current_thinking += 1
-                # Notify the idle thinking limit to Agent
-                message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
-                await self.agent.prompt(message, target)
-                # Log the idle thinking message
-                logger.info(f"Idle Thinking Message: \n{message}")
-                # Check if the idle thinking counter is greater than the max idle thinking
-                if current_thinking >= max_idle_thinking:
-                    # Set the task status to error
-                    target.to_error()
-                    # Log the error message
-                    logger.critical(f"连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。")
-                    # Force the loop to break
-                    break
         
             # === Reason Stage ===
             # Reason and act on the target
-            target, error_flag, tool_call_flag = await self.reason_act(
+            target, _, tool_call_flag = await self.reason_act(
                 target=target, 
                 completion_config=completion_config, 
                 **kwargs,
             )
-            
-            # Check if the error flag is set
-            if error_flag:
-                # Increment the error counter
-                current_error += 1
-                # Notify the error limit to Agent
-                message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
-                await self.agent.prompt(message, target)
-                # Log the error message
-                logger.info(f"Error Message: \n{message}")
-                # Check if the error counter is greater than the max error retry
-                if current_error >= max_error_retry:
-                    # Set the task status to error
-                    target.to_error()
-                    # Force the react loop to finish
-                    break
+            # Check if the tool call flag is True
+            if tool_call_flag:
+                # Force the loop to break
+                break
             
         return target
 
@@ -300,9 +263,24 @@ class BaseMemoryWorkflow(BaseReActFlow):
     ) -> TreeTaskNode:
         """从有状态实体中抽取记忆。"""
         
+        # 将 target 的 history 转为 string
+        history = ""
+        for message in target.get_history():
+            history += f"{message.role}: {message.content}\n"
+        # 提取 Prompt
+        prompt = CREATE_MEMORY_EXTRACTION_TASK_PROMPT.format(history=history)
+        
+        # 创建一个新的任务节点
+        new_target = BaseTreeTaskNode(
+            name="Memory Extraction", 
+            objective=prompt,
+            key_results=MEMORY_KEY_RESULTS, 
+            sub_task_depth=0, 
+        )
+        
         # 运行记忆提取 workflow
-        target = await self.run(
-            target=target, 
+        new_target = await self.run(
+            target=new_target, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
             **kwargs,

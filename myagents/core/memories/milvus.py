@@ -96,6 +96,9 @@ class MilvusMemoryCollection:
         try:
             # 准备数据
             data = [memory.model_dump() for memory in memories]
+            # Drop the memory_id field
+            for memory in data:
+                memory.pop("memory_id")
             
             # 插入数据
             await self.client.insert(self.collection_name, data)
@@ -264,7 +267,7 @@ class MilvusManager:
         try:
             # 定义字段模式
             fields = [
-                FieldSchema(name="memory_id", dtype=DataType.INT64, is_primary=True),
+                FieldSchema(name="memory_id", dtype=DataType.INT64, is_primary=True, auto_id=True),
                 FieldSchema(name="memory_type", dtype=DataType.VARCHAR, max_length=256),
                 FieldSchema(name="env_id", dtype=DataType.INT64),
                 FieldSchema(name="agent_id", dtype=DataType.INT64),

@@ -59,69 +59,6 @@ SYSTEM_PROMPT = """
 2. **真假冲突**：相同内容但真假判断相反
 3. **信息过时**：历史记忆已被新信息替代或修正
 
-## 输出格式要求
-
-**重要：必须严格按照以下JSON格式输出，否则会报错！**
-
-```json
-{
-  "todo": [
-    {
-      "operation": "add|update|delete",
-      "memory": {
-        "memory_type": "episode_memory|semantic_memory",
-        "content": "记忆内容",
-        "positive_impact": "true|false|none",  // 仅事件记忆需要
-        "truth_value": "true|false"  // 仅语义记忆需要
-      }
-    }
-  ]
-}
-```
-
-## Few-Shot 示例
-
-### 事件记忆示例
-
-**历史记忆**：
-```json
-{"memory_id": 12345, "memory_type": "episode_memory", "content": "提交了项目报告", "positive_impact": "none"}
-{"memory_id": 12346, "memory_type": "episode_memory", "content": "项目报告获得领导表扬", "positive_impact": "true"}
-```
-
-**当前上下文**："提交的报告被退回修改，团队感到失望。项目最终按时完成，大家都很满意。"
-
-**提取结果**：
-```json
-{
-  "todo": [
-    {"operation": "update", "memory": {"memory_type": "episode_memory", "content": "提交的报告被退回修改", "positive_impact": "false"}},
-    {"operation": "update", "memory": {"memory_type": "episode_memory", "content": "项目按时完成，大家都很满意", "positive_impact": "true"}}
-  ]
-}
-```
-
-### 语义记忆示例
-
-**历史记忆**：
-```json
-{"memory_id": 12345, "memory_type": "semantic_memory", "content": "水的沸点是100℃", "truth_value": "true"}
-{"memory_id": 12346, "memory_type": "semantic_memory", "content": "地球是平的", "truth_value": "true"}
-```
-
-**当前上下文**："水的沸点实际上是95℃。地球是圆的。"
-
-**提取结果**：
-```json
-{
-  "todo": [
-    {"operation": "update", "memory": {"memory_type": "semantic_memory", "content": "水的沸点是95℃", "truth_value": "true"}},
-    {"operation": "update", "memory": {"memory_type": "semantic_memory", "content": "地球是圆的", "truth_value": "true"}},
-    {"operation": "delete", "memory_id": 12346}
-  ]
-}
-```
-
 ## 重要注意事项
 
 1. **事件记忆删除限制**：事件记忆不允许删除操作，任何删除尝试都将被记录用于强化学习
@@ -144,48 +81,141 @@ SYSTEM_PROMPT = """
 """
 
 REASON_ACT_PROMPT = """
-## 记忆提取任务
+## 记忆提取执行阶段
 
-请从以下上下文中提取记忆信息，并判断相应的操作类型。
+接下来你会观察到：
+1) 当前的任务状态
+2) 当前的记忆信息
 
-### 历史记忆
-{sim_memories}
+请根据系统提示中的记忆提取流程，执行阶段二和阶段三的操作：
+- 检查和完善记忆提取操作
+- 输出相应的记忆操作指令
 
-### 当前上下文
-{context}
+### 输出格式要求
 
-请分析当前上下文中的记忆信息，与历史记忆进行对比，确定需要执行的操作。
+**重要：必须严格按照以下JSON格式输出，否则会报错！**
 
-**要求**：
-1. 准确识别记忆类型（事件记忆 vs 语义记忆）
-2. 仔细检测冲突情况
-3. 严格按照JSON格式输出结果
-4. 注意事件记忆的删除限制
+```json
+{
+  "todo": [
+    {
+      "operation": "add|update|delete",
+      "memory": {
+        "memory_type": "episode_memory|semantic_memory",
+        "content": "记忆内容",
+        "positive_impact": "true|false|none",  // 仅事件记忆需要
+        "truth_value": "true|false"  // 仅语义记忆需要
+      }
+    }
+  ]
+}
+```
 
-请输出记忆操作结果：
+### 执行操作指导
+
+**阶段二：执行操作**
+当已有执行提取或管理历史时，需要检查和完善：
+- **错误识别**：检查记忆类型判断、操作类型选择是否正确
+- **遗漏检查**：确保完整覆盖所有关键信息
+- **冲突处理**：验证冲突解决方案的合理性
+- **格式验证**：确保JSON格式和字段完整性
+
+**阶段三：输出结果**
+根据分析结果输出相应的记忆操作指令：
+- 如果没有值得提取的记忆，输出空的todo列表
+- 如果有记忆需要处理，严格按照JSON格式输出操作指令
+
+### Few-Shot 示例
+
+**事件记忆示例**：
+
+历史记忆：
+```json
+{"memory_id": 12345, "memory_type": "episode_memory", "content": "提交了项目报告", "positive_impact": "none"}
+{"memory_id": 12346, "memory_type": "episode_memory", "content": "项目报告获得领导表扬", "positive_impact": "true"}
+```
+
+当前上下文："提交的报告被退回修改，团队感到失望。项目最终按时完成，大家都很满意。"
+
+提取结果：
+```json
+{
+  "todo": [
+    {"operation": "update", "memory": {"memory_type": "episode_memory", "content": "提交的报告被退回修改", "positive_impact": "false"}},
+    {"operation": "update", "memory": {"memory_type": "episode_memory", "content": "项目按时完成，大家都很满意", "positive_impact": "true"}}
+  ]
+}
+```
+
+**语义记忆示例**：
+
+历史记忆：
+```json
+{"memory_id": 12345, "memory_type": "semantic_memory", "content": "水的沸点是100℃", "truth_value": "true"}
+{"memory_id": 12346, "memory_type": "semantic_memory", "content": "地球是平的", "truth_value": "true"}
+```
+
+当前上下文："水的沸点实际上是95℃。地球是圆的。"
+
+提取结果：
+```json
+{
+  "todo": [
+    {"operation": "update", "memory": {"memory_type": "semantic_memory", "content": "水的沸点是95℃", "truth_value": "true"}},
+    {"operation": "update", "memory": {"memory_type": "semantic_memory", "content": "地球是圆的", "truth_value": "true"}},
+    {"operation": "delete", "memory_id": 12346}
+  ]
+}
+```
+
+参考系统提示中的操作规范和输出格式要求。
+
+<开始观察>
 """
 
 REFLECT_PROMPT = """
-## 记忆管理反思
+## 记忆提取反思阶段
 
-请对刚才的记忆提取和管理过程进行反思：
+请根据系统提示中的记忆提取流程，执行阶段一的反思分析：
+- 识别值得关注的记忆内容
+- 评估记忆的价值和重要性
+- 分析潜在的记忆提取需求
 
-### 反思要点
-1. **记忆类型识别**：是否正确区分了事件记忆和语义记忆？
-2. **冲突检测**：是否准确识别了与历史记忆的冲突？
-3. **操作选择**：是否选择了合适的操作类型？
-4. **格式规范**：输出格式是否符合要求？
-5. **特殊情况处理**：是否正确处理了事件记忆的删除限制？
+### 反思分析指导
 
-### 改进建议
-- 如果发现错误，请说明如何改进
-- 如果有遗漏，请补充说明
-- 如果有更好的处理方式，请提出建议
+**值得关注的记忆分析**：
+- 当前任务状态中是否包含重要的事件结果、情感反馈或客观事实？
+- 哪些信息对未来决策有指导意义？
+- 是否有值得记录的成功经验或失败教训？
+- 是否存在需要更新的历史记忆？
 
-请提供反思结果：
+**记忆价值评估**：
+- 识别当前任务中的关键信息点
+- 评估这些信息的长期价值
+- 判断是否需要创建新的记忆条目
+
+### 重要要求
+**如果没有完成记忆提取，不允许结束流程！**
+
+请确保：
+1. 仔细分析当前任务状态中的所有潜在记忆内容
+2. 识别所有值得记录的事件记忆和语义记忆
+3. 评估记忆的完整性和重要性
+4. 只有在确认没有遗漏任何重要记忆后才能结束反思阶段
+
+参考系统提示中的反思分析指导。
+
+## 格式要求
+<reflection>
+你的反思或者总结写在这里。
+</reflection>
+<finish_flag>
+True 或 False, 如果需要继续提取记忆，则设置为 False，否则设置为 True。
+</finish_flag>
+
+## 开始反思
+<开始反思>
 """
-
-# 记忆格式化模板
 
 # 单个事件记忆项的格式化模板
 EPISODE_ITEM_FORMAT = """
@@ -209,6 +239,7 @@ SEMANTIC_ITEM_FORMAT = """
 
 # 总体记忆组装模板
 MEMORY_FORMAT = """
+<历史记忆回顾>
 ## 历史记忆回顾
 【基于历史记忆指导当前决策】
 
@@ -240,4 +271,70 @@ MEMORY_FORMAT = """
 6. **避免错误信息**：注意识别和避免历史中的错误信息
 
 请基于以上历史记忆，为当前任务提供具体的执行建议和注意事项。
+</历史记忆回顾>
+"""
+
+# 创建记忆提取任务的提示词模板
+CREATE_MEMORY_EXTRACTION_TASK_PROMPT = """
+## 记忆提取任务创建
+
+你是一个专业的记忆提取任务创建助手。请根据以下历史信息，根据指令提取记忆。
+
+<历史信息>
+{history}
+</历史信息>
+"""
+
+# 提取记忆的关键产出提示词
+MEMORY_KEY_RESULTS = """
+## 记忆提取关键产出要求
+
+记忆提取任务的关键产出必须包含以下内容：
+
+### 1. JSON格式的操作指令
+必须严格按照以下JSON格式输出记忆操作指令：
+
+```json
+{
+  "todo": [
+    {
+      "operation": "add|update|delete",
+      "memory": {
+        "memory_type": "episode_memory|semantic_memory",
+        "content": "记忆内容描述",
+        "positive_impact": "true|false|none",  // 仅事件记忆需要
+        "truth_value": "true|false"  // 仅语义记忆需要
+      }
+    }
+  ]
+}
+```
+
+### 2. 记忆类型识别
+- **事件记忆**：包含事件结果、情感反馈、影响评估、状态反馈
+- **语义记忆**：包含陈述性信息、数据信息、属性信息、客观事实
+
+### 3. 操作类型判断
+- **add**：新记忆，历史中不存在相关内容
+- **update**：存在冲突，需要用新信息更新历史记忆
+- **delete**：历史记忆已被证明错误或过时（仅语义记忆允许删除）
+
+### 4. 冲突检测结果
+- 识别与现有记忆的冲突情况
+- 说明冲突的具体内容和处理方式
+- 验证操作类型的合理性
+
+### 5. 记忆内容质量要求
+- 内容描述清晰准确
+- 符合记忆类型定义
+- 包含必要的字段信息
+- 格式规范符合JSON标准
+
+### 6. 特殊规则遵守
+- 事件记忆不允许删除操作
+- 事件记忆必须包含positive_impact字段
+- 语义记忆必须包含truth_value字段
+- 严格按照JSON格式输出，避免格式错误
+
+记忆提取的核心目标是准确识别记忆类型，正确判断操作类型，并输出格式规范的JSON操作指令。
 """
