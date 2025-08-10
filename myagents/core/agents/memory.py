@@ -1,15 +1,15 @@
 from typing import Union
 
-from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow
+from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem
 from myagents.core.messages import AssistantMessage, ToolCallResult, SystemMessage, UserMessage
 from myagents.core.agents.base import BaseAgent
 from myagents.core.memories.schemas import (
-    SemanticMemoryItem, 
     EpisodeMemoryItem, 
     MemoryType, 
     BaseMemoryOperation, 
     MemoryOperationType, 
 )
+from myagents.core.workflows import EpisodeMemoryFlow, MemoryCompressWorkflow
 
 
 class BaseMemoryAgent(BaseAgent):
@@ -32,21 +32,55 @@ class BaseMemoryAgent(BaseAgent):
     # 嵌入语言模型
     embedding_llm: EmbeddingLLM
     # 向量记忆
-    vector_memory: VectorMemoryCollection
+    episode_memory: VectorMemoryCollection
     # 记忆提示词模板
     prompt_template: str
     
     def __init__(
         self, 
-        vector_memory: VectorMemoryCollection, 
+        episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        memory_workflow: MemoryWorkflow, 
+        # Memory Compress
+        memory_compress_system_prompt: str, 
+        memory_compress_reason_act_prompt: str, 
+        # Episode Memory
+        episode_memory_system_prompt: str, 
+        episode_memory_reason_act_prompt: str, 
+        episode_memory_reflect_prompt: str, 
+        # Memory Format Template
         memory_prompt_template: str, 
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.vector_memory = vector_memory
+        self.episode_memory = episode_memory
         self.embedding_llm = embedding_llm
+        
+        # 初始化 EpisodeMemoryWorkflow
+        episode_memory_workflow = EpisodeMemoryFlow(
+            prompts={
+                "system_prompt": episode_memory_system_prompt, 
+                "reason_act_prompt": episode_memory_reason_act_prompt, 
+                "reflect_prompt": episode_memory_reflect_prompt, 
+            }, 
+            observe_formats={
+                "reason_act_format": "document", 
+                "reflect_format": "document", 
+            }, 
+        )
+        
+        # 初始化 MemoryCompressWorkflow
+        memory_workflow = MemoryCompressWorkflow(
+            prompts={
+                "system_prompt": memory_compress_system_prompt, 
+                "reason_act_prompt": memory_compress_reason_act_prompt, 
+            }, 
+            observe_formats={
+                "reason_act_format": "document", 
+            }, 
+            sub_workflows={
+                "episode_memory_workflow": episode_memory_workflow, 
+            }, 
+        )
         
         self.prompt_template = memory_prompt_template
         # 记忆提取 workflow
@@ -63,14 +97,14 @@ class BaseMemoryAgent(BaseAgent):
         """
         return self.memory_workflow
     
-    def get_vector_memory(self) -> VectorMemoryCollection:
+    def get_episode_memory(self) -> VectorMemoryCollection:
         """获取向量记忆
         
         返回:
             VectorMemoryCollection:
                 向量记忆
         """
-        return self.vector_memory
+        return self.episode_memory
         
     async def embed(self, text: str, dimensions: int, **kwargs) -> list[float]:
         """嵌入文本
@@ -106,12 +140,29 @@ class BaseMemoryAgent(BaseAgent):
             Stateful:
                 更新后的有状态实体
         """
+        # 获取历史上下文
+        history = target.get_history()
+        # 转为字符串
+        history_str = "\n".join([f"{message.role}: {message.content}" for message in history])
+        
         # 调用记忆提取 workflow
-        target = await self.memory_workflow.extract_memory(target, **kwargs)
+        await self.memory_workflow.extract_memory(history_str, **kwargs)
         # 清空旧的历史上下文
         target.reset()
         # 返回更新后的目标
         return target
+        
+    def create_memory(self, memory_type: str, **kwargs) -> VectorMemoryItem:
+        """创建记忆
+        
+        参数:
+            memory_type (str):
+                记忆类型
+        """
+        if memory_type == MemoryType.EPISODE.value:
+            return EpisodeMemoryItem(**kwargs)
+        else:
+            raise ValueError(f"Invalid memory type: {memory_type}")
     
     async def update_memory(
         self, 
@@ -121,40 +172,36 @@ class BaseMemoryAgent(BaseAgent):
         """更新记忆。"""
         for memory_op in memories:
             if memory_op.operation == MemoryOperationType.ADD:
-                await self.vector_memory.add([memory_op.memory])
+                await self.episode_memory.add([memory_op.memory])
             elif memory_op.operation == MemoryOperationType.UPDATE:
-                await self.vector_memory.update([memory_op.memory])
+                await self.episode_memory.update([memory_op.memory])
             elif memory_op.operation == MemoryOperationType.DELETE:
-                await self.vector_memory.delete([memory_op.memory.memory_id])
+                await self.episode_memory.delete([memory_op.memory.memory_id])
         
     async def search_memory(
         self, 
         text: str, 
         limit: int, 
         score_threshold: float, 
-        target: Stateful, 
+        target: Stateful,  
         **kwargs,
     ) -> str:
-        """从记忆中搜索信息。"""
+        """从记忆中搜索信息。
+        
+        参数:
+            text (str):
+                文本
+            limit (int):
+                限制
+            score_threshold (float):
+                分数阈值
+            **kwargs:
+                其他参数
+        """
         # 把 text 转换为向量
-        embedding = await self.embedding_llm.embed(text, dimensions=self.vector_memory.get_dimension())
-        # 从向量记忆中搜索 semantic_memory
-        semantic_memories = await self.vector_memory.search(
-            query_embedding=embedding, 
-            top_k=limit, 
-            score_threshold=score_threshold, 
-            env_id=self.env.uid, 
-            agent_id=self.uid, 
-            task_id=target.uid, 
-            task_status=target.status.value, 
-            memory_type=MemoryType.SEMANTIC, 
-        )
-        # 将 dict 转为 MemoryItem 列表
-        semantic_memories = [SemanticMemoryItem(**memory[0]) for memory in semantic_memories]
-        # 格式化记忆
-        format_semantic_memories: str = "\n".join([memory.format() for memory in semantic_memories])
+        embedding = await self.embedding_llm.embed(text, dimensions=self.episode_memory.get_dimension())
         # 从向量记忆中搜索 episode_memory
-        episode_memories = await self.vector_memory.search(
+        episode_memories = await self.episode_memory.search(
             query_embedding=embedding, 
             top_k=limit, 
             score_threshold=score_threshold, 
@@ -162,7 +209,6 @@ class BaseMemoryAgent(BaseAgent):
             agent_id=self.uid, 
             task_id=target.uid, 
             task_status=target.status.value, 
-            memory_type=MemoryType.EPISODE, 
         )
         # 将 dict 转为 MemoryItem 列表
         episode_memories = [EpisodeMemoryItem(**memory[0]) for memory in episode_memories]
@@ -170,7 +216,6 @@ class BaseMemoryAgent(BaseAgent):
         format_episode_memories: str = "\n".join([memory.format() for memory in episode_memories])
         # 拼接记忆
         format_memories = self.prompt_template.format(
-            semantic_memories=format_semantic_memories, 
             episode_memories=format_episode_memories,
         )
         # 返回格式化后的记忆

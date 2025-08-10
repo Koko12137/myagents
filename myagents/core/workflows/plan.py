@@ -379,10 +379,11 @@ class PlanWorkflow(BaseReActFlow):
         # Check if the target has history
         if len(target.get_history()) == 0:
             # Get the system prompt from the workflow
+            if "system_prompt" not in self.prompts:
+                raise KeyError("system_prompt not found in workflow prompts")
             system_prompt = self.prompts["system_prompt"]
             # Update the system prompt to the history
-            message = SystemMessage(content=system_prompt)
-            await self.agent.prompt(message, target)
+            await self.agent.prompt(SystemMessage(content=system_prompt), target)
             # Create a UserMessage for the blueprint
             blueprint_message = UserMessage(content=BLUEPRINT_FORMAT.format(blueprint=blueprint))
             # Update the blueprint message to the history
@@ -423,8 +424,6 @@ class PlanWorkflow(BaseReActFlow):
                 if current_error >= max_error_retry:
                     # Set the task status to error
                     target.to_error()
-                    # 更新记忆
-                    target = await self.extract_memory(target, **kwargs)
                     # Log the error message
                     logger.critical(f"错误次数限制已达上限: {current_error}/{max_error_retry}，进入错误状态。")
                     # Force the react loop to finish
@@ -577,24 +576,6 @@ class MemoryPlanWorkflow(PlanWorkflow):
             logger.error(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
             # Raise an error
             raise RuntimeError(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
-            
-        # Check if the target has history
-        if len(target.get_history()) == 0:
-            # Get the system prompt from the workflow
-            system_prompt = self.prompts["system_prompt"]
-            # Update the system prompt to the history
-            message = SystemMessage(content=system_prompt)
-            await self.agent.prompt(message, target)
-            # Create a UserMessage for the blueprint
-            blueprint_message = UserMessage(content=BLUEPRINT_FORMAT.format(blueprint=blueprint))
-            # Update the blueprint message to the history
-            await self.agent.prompt(blueprint_message, target)
-            # Create a new message for the current task results
-            task_results = DocumentTaskView(task=target).format()
-            # Create a UserMessage for the task results
-            task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
-            # Update the task results message to the history
-            await self.agent.prompt(task_results_message, target)
         
         # This is used for no tool calling thinking limit.
         current_thinking = 0
@@ -602,6 +583,26 @@ class MemoryPlanWorkflow(PlanWorkflow):
         
         # Run the workflow
         while target.is_created():
+        
+            # === Prepare System Instruction ===
+            # Check if the target has history
+            if len(target.get_history()) == 0:
+                # Get the system prompt from the workflow
+                if "system_prompt" not in self.prompts:
+                    raise KeyError("system_prompt not found in workflow prompts")
+                system_prompt = self.prompts["system_prompt"]
+                # Update the system prompt to the history
+                await self.agent.prompt(SystemMessage(content=system_prompt), target)
+                # Create a UserMessage for the blueprint
+                blueprint_message = UserMessage(content=BLUEPRINT_FORMAT.format(blueprint=blueprint))
+                # Update the blueprint message to the history
+                await self.agent.prompt(blueprint_message, target)
+                # Create a new message for the current task results
+                task_results = DocumentTaskView(task=target).format()
+                # Create a UserMessage for the task results
+                task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
+                # Update the task results message to the history
+                await self.agent.prompt(task_results_message, target)
         
             # === Reason Stage ===
             # Reason and act on the target
@@ -625,14 +626,8 @@ class MemoryPlanWorkflow(PlanWorkflow):
                 if current_error >= max_error_retry:
                     # Set the task status to error
                     target.to_error()
-                    # 更新记忆
-                    target = await self.extract_memory(target, **kwargs)
                     # Force the react loop to finish
                     break
-            
-            # === Extract Memory ===
-            # Extract the memory from the target
-            target = await self.extract_memory(target, **kwargs)
             
             # === Reflect Stage ===
             # Reflect on the target
@@ -662,8 +657,6 @@ class MemoryPlanWorkflow(PlanWorkflow):
                     target.to_error()
                     # Log the error message
                     logger.critical(f"连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。")
-                    # 更新记忆
-                    target = await self.extract_memory(target, **kwargs)
                     # Force the loop to break
                     break
             

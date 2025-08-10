@@ -52,7 +52,7 @@ class BaseAgent(Agent):
             观察目标时的信息格式。
     """
     # Basic information
-    uid: int
+    uid: str
     name: str
     agent_type: AgentType
     profile: str
@@ -110,7 +110,7 @@ class BaseAgent(Agent):
         super().__init__(**kwargs)
         
         # Initialize the basic information
-        self.uid = uuid4().int
+        self.uid = uuid4().hex
         self.name = name
         self.agent_type = agent_type
         self.profile = profile
@@ -159,7 +159,7 @@ class BaseAgent(Agent):
             # Update the tool call result to the target
             target.update(prompt)
         else:
-            raise ValueError(f"The type of the prompt is not valid. Expected SystemMessage, UserMessage, or ToolCallResult, but got {type(prompt)}.")
+            raise ValueError(f"The type of the prompt is not valid. Expected SystemMessage, UserMessage, AssistantMessage, or ToolCallResult, but got {type(prompt)}.")
     
     async def observe(
         self, 
@@ -231,6 +231,7 @@ class BaseAgent(Agent):
             except MaxStepsError as e:
                 errors.append(e)
             except Exception as e:
+                logger.error(f"Unexpected error in step counter: {e}")
                 raise e
         
         if len(errors) > 0:
@@ -342,20 +343,26 @@ class BaseAgent(Agent):
         # Get the lock of the agent
         await self.lock.acquire()
         
-        # Call for running the workflow
-        target = await self.workflow.run(
-            target=target, 
-            max_error_retry=max_error_retry, 
-            max_idle_thinking=max_idle_thinking, 
-            completion_config=completion_config, 
-            **kwargs,
-        )
-        
-        # Release the lock of the agent
-        self.lock.release()
+        try:
+            # Call for running the workflow
+            target = await self.workflow.run(
+                target=target, 
+                max_error_retry=max_error_retry, 
+                max_idle_thinking=max_idle_thinking, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+        finally:
+            # Release the lock of the agent
+            self.lock.release()
         
         # Observe the target    
-        # BUG: 这里没有判断任务执行后的状态，如果任务执行后是error，应该返回error message
+        # Check if the target is in error state
+        if target.is_error():
+            error_message = AssistantMessage(content="## 任务执行失败\n\n任务执行过程中发生错误，请检查任务配置和输入。")
+            logger.error(f"{str(self)}: Task execution failed")
+            return error_message
+            
         observe = await target.observe(self.observe_formats["agent_format"])
         # Create a new assistant message
         message = AssistantMessage(content=f"## 任务执行结果\n\n{observe}")

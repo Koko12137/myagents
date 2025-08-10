@@ -239,7 +239,7 @@ class AutoAgent:
             # 构建嵌入语言模型
             embedding_llm = self.__build_llm(config.embedding_llm)
             # 构建向量记忆数据库
-            vector_memory = await self.__connect_memory_collection(config.memory_config)
+            episode_memory = await self.__connect_memory_collection(config.memory_config)
             
             # 构建代理
             return AGENT(
@@ -247,7 +247,7 @@ class AutoAgent:
                 llm=llm, 
                 step_counters=step_counters, 
                 mcp_client=mcp_client, 
-                vector_memory=vector_memory, 
+                episode_memory=episode_memory, 
                 embedding_llm=embedding_llm, 
             )
         

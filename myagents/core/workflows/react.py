@@ -489,18 +489,24 @@ class MemoryReActFlow(BaseReActFlow):
             # Raise an error
             raise RuntimeError(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
         
-        # Get the system prompt from the workflow
-        system_prompt = self.prompts["system_prompt"]
-        # Update the system prompt to the history
-        message = SystemMessage(content=system_prompt)
-        await self.agent.prompt(message, target)
-        
-        # Initialize the error and idle thinking counter
+        # This is used for no tool calling thinking limit.
         current_thinking = 0
         current_error = 0
         
         # Run the workflow
         while target.is_running():
+            
+            # === Prepare System Instruction ===
+            # Get the system prompt from the workflow
+            if len(target.get_history()) == 0:
+                # Get the system prompt from the workflow
+                if "system_prompt" not in self.prompts:
+                    raise KeyError("system_prompt not found in workflow prompts")
+                exec_system = self.prompts["system_prompt"]
+                # Append the system prompt to the history
+                message = SystemMessage(content=exec_system)
+                # Update the system message to the history
+                await self.agent.prompt(message, target)
         
             # === Reason Stage ===
             # Reason and act on the target
@@ -523,15 +529,9 @@ class MemoryReActFlow(BaseReActFlow):
                 if current_error >= max_error_retry:
                     # Set the task status to error
                     target.to_error()
-                    # 更新记忆
-                    target = await self.extract_memory(target, **kwargs)
                     # Force the react loop to finish
                     break
                 
-            # === Extract Memory ===
-            # Extract the memory from the target
-            target = await self.extract_memory(target, **kwargs)
-            
             # === Reflect Stage ===
             # Reflect on the target
             target, finish_flag = await self.reflect(
@@ -559,8 +559,6 @@ class MemoryReActFlow(BaseReActFlow):
                     target.to_error()
                     # Log the error message
                     logger.critical(f"连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。")
-                    # 更新记忆
-                    target = await self.extract_memory(target, **kwargs)
                     # Force the loop to break
                     break
             
@@ -616,6 +614,8 @@ class TreeTaskReActFlow(BaseReActFlow):
         if len(target.get_history()) == 0:
             # === Prepare System Instruction ===
             # Get the prompts from the agent
+            if "system_prompt" not in self.prompts:
+                raise KeyError("system_prompt not found in workflow prompts")
             exec_system = self.prompts["system_prompt"]
             # Append the system prompt to the history
             message = SystemMessage(content=exec_system)
@@ -655,7 +655,10 @@ class TreeTaskReActFlow(BaseReActFlow):
                     # Set the task status to error
                     target.to_error()
                     # Record the error as answer
-                    target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
+                    if len(target.get_history()) > 0:
+                        target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
+                    else:
+                        target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}"
                     # Force the react loop to finish
                     break
             
@@ -774,28 +777,31 @@ class MemoryTreeTaskReActFlow(TreeTaskReActFlow):
             # Raise an error
             raise RuntimeError(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
         
-        # Check if the target has history
-        if len(target.get_history()) == 0:
-            # === Prepare System Instruction ===
-            # Get the prompts from the agent
-            exec_system = self.prompts["system_prompt"]
-            # Append the system prompt to the history
-            message = SystemMessage(content=exec_system)
-            # Update the system message to the history
-            await self.agent.prompt(message, target)
-            
-            # Get the task from the context
-            task = self.agent.env.context.get("task")
-            # Create a UserMessage for the task results
-            task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=task).format()}")
-            # Update the task message to the history
-            await self.agent.prompt(task_message, target)
-        
         # This is used for no tool calling thinking limit.
         current_thinking = 0
         current_error = 0
         
         while target.is_running():
+            
+            # Check if the target has history
+            if len(target.get_history()) == 0:
+                # === Prepare System Instruction ===
+                # Get the prompts from the agent
+                if "system_prompt" not in self.prompts:
+                    raise KeyError("system_prompt not found in workflow prompts")
+                exec_system = self.prompts["system_prompt"]
+                # Append the system prompt to the history
+                message = SystemMessage(content=exec_system)
+                # Update the system message to the history
+                await self.agent.prompt(message, target)
+                
+                # Get the task from the context
+                task = self.agent.env.context.get("task")
+                # Create a UserMessage for the task results
+                task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=task).format()}")
+                # Update the task message to the history
+                await self.agent.prompt(task_message, target)
+            
             # === Reason and Act ===
             target, error_flag, tool_call_flag = await self.reason_act(
                 target=target, 
@@ -817,15 +823,12 @@ class MemoryTreeTaskReActFlow(TreeTaskReActFlow):
                     # Set the task status to error
                     target.to_error()
                     # Record the error as answer
-                    target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
-                    # 更新记忆
-                    target = await self.extract_memory(target, **kwargs)
+                    if len(target.get_history()) > 0:
+                        target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
+                    else:
+                        target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}"
                     # Force the react loop to finish
                     break
-            
-            # === Extract Memory ===
-            # Extract the memory from the target
-            target = await self.extract_memory(target, **kwargs)
             
             # Check if the tool call flag is not set
             if not tool_call_flag:
@@ -868,8 +871,6 @@ class MemoryTreeTaskReActFlow(TreeTaskReActFlow):
                     target.to_error()
                     # Record the error as answer
                     target.results += f"\n连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。"
-                    # 更新记忆
-                    target = await self.extract_memory(target, **kwargs)
                     # Force the loop to break
                     break
             

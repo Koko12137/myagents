@@ -8,7 +8,7 @@ from fastmcp import Client as MCPClient
 
 from myagents.core.interface.base import Stateful, ToolsCaller, Scheduler
 from myagents.core.interface.llm import LLM, CompletionConfig
-from myagents.core.interface.memory import MemoryOperation, VectorMemoryCollection
+from myagents.core.interface.memory import MemoryOperation, VectorMemoryCollection, VectorMemoryItem
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
 
@@ -96,7 +96,7 @@ class Agent(Protocol):
     """在环境中运行的代理，根据工作流处理任务
     
     属性:
-        uid (int):
+        uid (str):
             代理的唯一标识符
         name (str):
             代理的名称
@@ -124,7 +124,7 @@ class Agent(Protocol):
             目标观察的格式
     """
     # 基本信息
-    uid: int
+    uid: str
     name: str
     agent_type: Enum
     profile: str
@@ -306,7 +306,7 @@ class MemoryAgent(Agent):
         pass
     
     @abstractmethod
-    def get_vector_memory(self) -> VectorMemoryCollection:
+    def get_episode_memory(self) -> VectorMemoryCollection:
         """获取向量记忆
         
         返回:
@@ -372,6 +372,22 @@ class MemoryAgent(Agent):
         返回:
             str:
                 从记忆中搜索的信息
+        """
+        pass
+    
+    @abstractmethod
+    def create_memory(self, memory_type: str, **kwargs) -> VectorMemoryItem:
+        """创建记忆
+        
+        参数:
+            memory_type (str):
+                记忆类型
+            **kwargs:
+                额外参数
+                
+        返回:
+            VectorMemoryItem:
+                向量记忆
         """
         pass
     
@@ -524,20 +540,19 @@ class MemoryWorkflow(Workflow):
     @abstractmethod
     async def extract_memory(
         self, 
-        target: Stateful, 
+        text: str, 
         **kwargs, 
-    ) -> Stateful:
-        """从有状态实体中提取记忆，并更新状态和记忆
+    ) -> None:
+        """从文本中提取记忆
         
         参数:
-            target (Stateful):
-                有状态实体
+            text (str):
+                文本
             **kwargs:
                 额外参数
                 
         返回:
-            Stateful:
-                更新后的有状态实体
+            None
         """
         pass
 
@@ -565,7 +580,7 @@ class Environment(Stateful, ToolsCaller, Scheduler):
     工具可用于修改环境。
     
     属性:
-        uid (int):
+        uid (str):
             环境的唯一标识符
         name (str):
             环境的名称
@@ -582,7 +597,7 @@ class Environment(Stateful, ToolsCaller, Scheduler):
         agent_type_semaphore (dict[Enum, Semaphore]):
             代理类型的信号量。键是代理类型，值是信号量
     """
-    uid: int
+    uid: str
     name: str
     profile: str
     prompts: dict[str, str]

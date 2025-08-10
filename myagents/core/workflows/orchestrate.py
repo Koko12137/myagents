@@ -147,8 +147,11 @@ class BlueprintWorkflow(BaseReActFlow):
                     # Set the task status to error
                     target.to_error()
                     # Record the error as answer
-                    target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
-                    # Force the react loop to finish
+                    if len(target.get_history()) > 0:
+                        target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
+                    else:
+                        target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}"
+                    # Force the loop to break
                     break
             
             # === Reflect Stage ===
@@ -301,18 +304,25 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
             # Raise an error
             raise RuntimeError(f"Blueprint workflow requires the target status to be created, but the target status is {target.get_status().value}.")
         
-        # Get the system prompt from the workflow
-        system_prompt = self.prompts["system_prompt"].format(profile=self.profile)
-        # Update the system prompt to the history
-        message = SystemMessage(content=system_prompt)
-        await self.agent.prompt(message, target)
-        
         # Error and idle thinking control
         current_thinking = 0
         current_error = 0
+        # continue flag
+        should_continue = True
         
         # Run the workflow
-        while target.is_created():
+        while target.is_created() and should_continue:
+        
+            # === Prepare System Instruction ===
+            # Check if the target has history
+            if len(target.get_history()) == 0:
+                # Get the system prompt from the workflow
+                if "system_prompt" not in self.prompts:
+                    raise KeyError("system_prompt not found in workflow prompts")
+                system_prompt = self.prompts["system_prompt"]
+                # Update the system prompt to the history
+                message = SystemMessage(content=system_prompt)
+                await self.agent.prompt(message, target)
         
             # === Reason Stage ===
             # Reason and act on the target
@@ -346,15 +356,12 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
                     # Set the task status to error
                     target.to_error()
                     # Record the error as answer
-                    target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
-                    # 提取记忆
-                    target = await self.extract_memory(target=target, **kwargs)
+                    if len(target.get_history()) > 0:
+                        target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}，错误原因: {target.get_history()[-1].content}"
+                    else:
+                        target.results += f"\n\n错误次数限制已达上限: {current_error}/{max_error_retry}"
                     # Force the react loop to finish
                     break
-            
-            # === Extract Memory ===
-            # Extract the memory from the target
-            target = await self.extract_memory(target=target, **kwargs)
             
             # === Reflect Stage ===
             # Reflect on the target
@@ -365,8 +372,8 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
             )
             # Check if the target is finished
             if finish_flag and blueprint != "":
-                # Force the loop to break
-                break
+                # Stop the loop
+                should_continue = False
             
             # Check if the tool call flag is not set
             elif not tool_call_flag:
@@ -388,18 +395,12 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
                     target.results += f"模型的连续 {max_idle_thinking} 次思考中没有找到规划蓝图，进入错误状态。"
                     # Log the error message
                     logger.critical(f"模型的连续 {max_idle_thinking} 次思考中没有找到规划蓝图，任务执行失败。")
-                    # 提取记忆
-                    target = await self.extract_memory(target=target, **kwargs)
-                    # Force the loop to break
-                    break
-            
-            # === Reflect Stage ===
-            # Reflect on the target
-            target, finish_flag = await self.reflect(
-                target=target, 
-                completion_config=completion_config, 
-                **kwargs,
-            )
+                    # Stop the loop
+                    should_continue = False
+                
+            # === Extract Memory ===
+            # Extract the memory from the target
+            target = await self.extract_memory(target=target, **kwargs)
             
         # === Update Context ===
         # Log the blueprint

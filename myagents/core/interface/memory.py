@@ -45,11 +45,11 @@ class VectorMemoryItem(Protocol):
         pass
     
     @abstractmethod
-    def get_content(self) -> str:
-        """获取向量记忆项的内容。向量记忆项的内容是向量数据库中存储的内容。
+    def get_metadata(self) -> dict:
+        """获取向量记忆项的元数据。向量记忆项的元数据是向量数据库中存储的元数据。
         
         返回:
-            str: 向量记忆项的内容
+            dict: 向量记忆项的元数据
         """
         pass
     

@@ -8,7 +8,7 @@ from myagents.core.interface import LLM, Workflow, Environment, StepCounter, Vec
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
-from myagents.core.workflows import OrchestrateFlow, MemoryOrchestrateFlow, BaseMemoryWorkflow
+from myagents.core.workflows import OrchestrateFlow, MemoryOrchestrateFlow, MemoryCompressWorkflow
 from myagents.prompts.workflows.orchestrate import (
     PROFILE, 
     PLAN_SYSTEM_PROMPT, 
@@ -18,12 +18,16 @@ from myagents.prompts.workflows.orchestrate import (
     EXEC_THINK_PROMPT, 
     EXEC_REFLECT_PROMPT, 
 )
-from myagents.prompts.workflows.memory import (
-    SYSTEM_PROMPT as MEMORY_SYSTEM_PROMPT, 
-    REASON_ACT_PROMPT as MEMORY_REASON_ACT_PROMPT, 
-    REFLECT_PROMPT as MEMORY_REFLECT_PROMPT, 
-    MEMORY_FORMAT as MEMORY_PROMPT_TEMPLATE, 
+from myagents.prompts.memories.compress import (
+    SYSTEM_PROMPT as MEMORY_COMPRESS_SYSTEM_PROMPT, 
+    REASON_ACT_PROMPT as MEMORY_COMPRESS_REASON_ACT_PROMPT, 
 )
+from myagents.prompts.memories.episode import (
+    SYSTEM_PROMPT as MEMORY_EPISODE_SYSTEM_PROMPT, 
+    REASON_ACT_PROMPT as MEMORY_EPISODE_REASON_ACT_PROMPT, 
+    REFLECT_PROMPT as MEMORY_EPISODE_REFLECT_PROMPT, 
+)
+from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE
 
 
 AGENT_PROFILE = """
@@ -243,7 +247,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
         name: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
-        vector_memory: VectorMemoryCollection, 
+        episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
         mcp_client: Optional[MCPClient] = None, 
         need_user_check: bool = False, 
@@ -258,10 +262,14 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
         exec_reason_act_format: str = "json", 
         exec_reflect_format: str = "json", 
         agent_format: str = "todo", 
-        # Memory
-        memory_system_prompt: str = MEMORY_SYSTEM_PROMPT, 
-        memory_reason_act_prompt: str = MEMORY_REASON_ACT_PROMPT, 
-        memory_reflect_prompt: str = MEMORY_REFLECT_PROMPT, 
+        # Memory Compress
+        memory_compress_system_prompt: str = MEMORY_COMPRESS_SYSTEM_PROMPT, 
+        memory_compress_reason_act_prompt: str = MEMORY_COMPRESS_REASON_ACT_PROMPT, 
+        # Episode Memory
+        episode_memory_system_prompt: str = MEMORY_EPISODE_SYSTEM_PROMPT, 
+        episode_memory_reason_act_prompt: str = MEMORY_EPISODE_REASON_ACT_PROMPT, 
+        episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
+        # Memory Format Template
         memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
         **kwargs, 
     ) -> None: 
@@ -275,7 +283,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
-            vector_memory (VectorMemoryDB):
+            episode_memory (VectorMemoryDB):
                 The vector memory to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
@@ -308,21 +316,6 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # 初始化 MemoryWorkflow
-        memory_workflow = BaseMemoryWorkflow(
-            prompts={
-                "system_prompt": memory_system_prompt, 
-                "reason_act_prompt": memory_reason_act_prompt, 
-                "reflect_prompt": memory_reflect_prompt, 
-                "prompt_template": memory_prompt_template, 
-            }, 
-            observe_formats={
-                "reason_act_format": "document", 
-                "reflect_format": "document", 
-            }, 
-            **kwargs,
-        )
-        
         # Initialize the parent class
         super().__init__(
             llm=llm, 
@@ -342,9 +335,16 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             exec_reflect_format=exec_reflect_format, 
             agent_format=agent_format, 
             # Memory
-            vector_memory=vector_memory, 
+            episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
-            memory_workflow=memory_workflow, 
+            # Memory Compress
+            memory_compress_system_prompt=memory_compress_system_prompt, 
+            memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
+            # Episode Memory
+            episode_memory_system_prompt=episode_memory_system_prompt, 
+            episode_memory_reason_act_prompt=episode_memory_reason_act_prompt, 
+            episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
+            # Memory Format Template
             memory_prompt_template=memory_prompt_template, 
             **kwargs,
         )

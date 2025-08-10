@@ -1,7 +1,7 @@
 from enum import Enum
 
 from .base import BaseWorkflow
-from .memory import BaseMemoryWorkflow
+from .memory import MemoryCompressWorkflow, EpisodeMemoryFlow
 from .react import BaseReActFlow, TreeTaskReActFlow, MemoryReActFlow, MemoryTreeTaskReActFlow
 from .plan import PlanWorkflow, MemoryPlanWorkflow
 from .plan_and_exec import PlanAndExecFlow, MemoryPlanAndExecFlow
@@ -27,7 +27,7 @@ class WorkflowType(Enum):
 __all__ = [
     "WorkflowType",
     "BaseWorkflow", 
-    "BaseMemoryWorkflow", 
+    "MemoryCompressWorkflow", "EpisodeMemoryFlow", 
     "BaseReActFlow", "TreeTaskReActFlow", "MemoryReActFlow", "MemoryTreeTaskReActFlow", 
     "PlanWorkflow", "MemoryPlanWorkflow", 
     "PlanAndExecFlow", "MemoryPlanAndExecFlow", 

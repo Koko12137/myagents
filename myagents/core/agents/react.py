@@ -9,18 +9,21 @@ from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
 from myagents.core.workflows import BaseReActFlow, TreeTaskReActFlow
-from myagents.core.workflows.memory import BaseMemoryWorkflow
 from myagents.prompts.workflows.react import PROFILE, SYSTEM_PROMPT, THINK_PROMPT, REFLECT_PROMPT
 from myagents.prompts.workflows.plan_and_exec import (
     EXEC_SYSTEM_PROMPT, 
     EXEC_THINK_PROMPT, 
 )
-from myagents.prompts.workflows.memory import (
-    SYSTEM_PROMPT as MEMORY_SYSTEM_PROMPT, 
-    REASON_ACT_PROMPT as MEMORY_REASON_ACT_PROMPT, 
-    REFLECT_PROMPT as MEMORY_REFLECT_PROMPT, 
-    MEMORY_FORMAT as MEMORY_PROMPT_TEMPLATE, 
+from myagents.prompts.memories.compress import (
+    SYSTEM_PROMPT as MEMORY_COMPRESS_SYSTEM_PROMPT, 
+    REASON_ACT_PROMPT as MEMORY_COMPRESS_REASON_ACT_PROMPT, 
 )
+from myagents.prompts.memories.episode import (
+    SYSTEM_PROMPT as MEMORY_EPISODE_SYSTEM_PROMPT, 
+    REASON_ACT_PROMPT as MEMORY_EPISODE_REASON_ACT_PROMPT, 
+    REFLECT_PROMPT as MEMORY_EPISODE_REFLECT_PROMPT, 
+)
+from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE
 
 
 AGENT_PROFILE = """
@@ -164,10 +167,6 @@ class ReActAgent(BaseAgent):
     
 class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
     """MemoryReActAgent is the agent that is used to react to the environment with memory.
-    
-    Attributes:
-        uid (str):
-            The unique identifier of the agent.
     """
     
     def __init__(
@@ -175,9 +174,8 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         name: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
-        vector_memory: VectorMemoryCollection, 
+        episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        # trajectory_memory: TableMemoryDB, # TODO: 暂时不使用轨迹记忆
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = SYSTEM_PROMPT, 
         reason_act_prompt: str = THINK_PROMPT, 
@@ -185,10 +183,14 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         reason_act_format: str = "document", 
         reflect_format: str = "todo", 
         agent_format: str = "todo", 
-        # Memory
-        memory_system_prompt: str = MEMORY_SYSTEM_PROMPT, 
-        memory_reason_act_prompt: str = MEMORY_REASON_ACT_PROMPT, 
-        memory_reflect_prompt: str = MEMORY_REFLECT_PROMPT, 
+        # Memory Compress
+        memory_compress_system_prompt: str = MEMORY_COMPRESS_SYSTEM_PROMPT, 
+        memory_compress_reason_act_prompt: str = MEMORY_COMPRESS_REASON_ACT_PROMPT, 
+        # Episode Memory
+        episode_memory_system_prompt: str = MEMORY_EPISODE_SYSTEM_PROMPT, 
+        episode_memory_reason_act_prompt: str = MEMORY_EPISODE_REASON_ACT_PROMPT, 
+        episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
+        # Memory Format Template
         memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
         **kwargs, 
     ) -> None: 
@@ -216,25 +218,9 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
                 The observation format of the reflect stage.
             agent_format (str):
                 The observation format of the agent.
-            *args:
-                The arguments to be passed to the parent class.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # 初始化 MemoryWorkflow
-        memory_workflow = BaseMemoryWorkflow(
-            prompts={
-                "system_prompt": memory_system_prompt, 
-                "reason_act_prompt": memory_reason_act_prompt, 
-                "reflect_prompt": memory_reflect_prompt, 
-                "prompt_template": memory_prompt_template, 
-            }, 
-            observe_formats={
-                "reason_act_format": "document", 
-                "reflect_format": "document", 
-            }, 
-            **kwargs,
-        )
         # Initialize the parent class
         super().__init__(
             llm=llm, 
@@ -249,9 +235,16 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             reflect_format=reflect_format, 
             agent_format=agent_format, 
             # Memory
-            vector_memory=vector_memory, 
+            episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
-            memory_workflow=memory_workflow, 
+            # Memory Compress
+            memory_compress_system_prompt=memory_compress_system_prompt, 
+            memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
+            # Episode Memory
+            episode_memory_system_prompt=episode_memory_system_prompt, 
+            episode_memory_reason_act_prompt=episode_memory_reason_act_prompt, 
+            episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
+            # Memory Format Template
             memory_prompt_template=memory_prompt_template, 
             **kwargs,
         )
@@ -459,7 +452,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         name: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
-        vector_memory: VectorMemoryCollection, 
+        episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = EXEC_SYSTEM_PROMPT, 
@@ -468,9 +461,14 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         reason_act_format: str = "document", 
         reflect_format: str = "todo", 
         agent_format: str = "todo", 
-        memory_system_prompt: str = MEMORY_SYSTEM_PROMPT, 
-        memory_reason_act_prompt: str = MEMORY_REASON_ACT_PROMPT, 
-        memory_reflect_prompt: str = MEMORY_REFLECT_PROMPT, 
+        # Memory Compress
+        memory_compress_system_prompt: str = MEMORY_COMPRESS_SYSTEM_PROMPT, 
+        memory_compress_reason_act_prompt: str = MEMORY_COMPRESS_REASON_ACT_PROMPT, 
+        # Episode Memory
+        episode_memory_system_prompt: str = MEMORY_EPISODE_SYSTEM_PROMPT, 
+        episode_memory_reason_act_prompt: str = MEMORY_EPISODE_REASON_ACT_PROMPT, 
+        episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
+        # Memory Format Template
         memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
         **kwargs, 
     ) -> None:        
@@ -503,21 +501,6 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # 初始化 MemoryWorkflow
-        memory_workflow = BaseMemoryWorkflow(
-            prompts={
-                "system_prompt": memory_system_prompt, 
-                "reason_act_prompt": memory_reason_act_prompt, 
-                "reflect_prompt": memory_reflect_prompt, 
-                "prompt_template": memory_prompt_template, 
-            }, 
-            observe_formats={
-                "reason_act_format": "document", 
-                "reflect_format": "document", 
-            }, 
-            **kwargs,
-        )
-        
         # Initialize the parent class
         super().__init__(
             llm=llm, 
@@ -531,9 +514,16 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             reflect_format=reflect_format, 
             agent_format=agent_format, 
             # Memory
-            vector_memory=vector_memory, 
+            episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
-            memory_workflow=memory_workflow, 
+            # Memory Compress
+            memory_compress_system_prompt=memory_compress_system_prompt, 
+            memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
+            # Episode Memory
+            episode_memory_system_prompt=episode_memory_system_prompt, 
+            episode_memory_reason_act_prompt=episode_memory_reason_act_prompt, 
+            episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
+            # Memory Format Template
             memory_prompt_template=memory_prompt_template, 
             **kwargs,
         )

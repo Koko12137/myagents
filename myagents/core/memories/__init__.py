@@ -1,7 +1,7 @@
-from .milvus import MilvusManager, MilvusMemoryCollection
+from .milvus import MilvusManager, MilvusEpisodeMemoryCollection
 
 
 __all__ = [
     "MilvusManager", 
-    "MilvusMemoryCollection", 
+    "MilvusEpisodeMemoryCollection", 
 ]
