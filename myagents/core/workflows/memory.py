@@ -1,5 +1,5 @@
 import json
-import time
+import traceback
 
 from json_repair import repair_json
 from loguru import logger
@@ -130,6 +130,10 @@ class EpisodeMemoryFlow(BaseReActFlow):
         try:
             # 提取情节和语义记忆
             memory = json.loads(repair_json(message.content))['memory']
+            # 检测 is_error 是否为 str 类型
+            if isinstance(memory["is_error"], str):
+                memory["is_error"] = True if memory["is_error"].lower() == "true" else False
+            
             # 设定记忆的操作类型为添加
             operation = MemoryOperationType.ADD
             # 获取当前的env_id、agent_id、task_id、task_status
@@ -151,12 +155,11 @@ class EpisodeMemoryFlow(BaseReActFlow):
                 "keywords": memory.pop("keywords"),
                 "is_error": memory["is_error"],
             }
-            memory["created_at"] = time.time_ns()
             # 更新记忆
             memory_op = BaseMemoryOperation(
                 operation=operation,
                 memory=self.agent.create_memory(memory_type="episode", **memory),
-                )
+            )
             # 更新记忆
             await self.agent.update_memory([memory_op])
             # 设置工具调用标志
@@ -164,7 +167,7 @@ class EpisodeMemoryFlow(BaseReActFlow):
             
             # === 更新历史 ===
             op_info = memory_op.model_dump()
-            op_info.pop("embedding")
+            op_info["memory"].pop("embedding")
             # 新建 UserMessage 声明记忆更新成功
             message = UserMessage(content=f"记忆更新成功: {op_info}")
             # 更新记忆
@@ -176,7 +179,7 @@ class EpisodeMemoryFlow(BaseReActFlow):
             # 设置错误标志
             error_flag = True
             # 记录错误
-            logger.error(f"提取记忆失败: {e}")
+            logger.error(f"提取记忆失败: {e}", traceback.format_exc())
             # 新建 UserMessage 声明记忆更新失败
             message = UserMessage(content=f"记忆更新失败: {e}")
             # 更新记忆

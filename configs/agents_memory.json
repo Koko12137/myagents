@@ -1,6 +1,6 @@
 {
     "debug": false, 
-    "save_dir": "stdout", 
+    "save_dir": "logs", 
     "environment": {
         "type": "ComplexQuery", 
         "step_counters": [
@@ -19,7 +19,7 @@
                 "llm": {
                     "provider": "openai",
                     "base_url": "http://192.168.152.85:65189/v1",
-                    "model": "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
+                    "model": "Qwen/Qwen3-14B-AWQ",
                     "temperature": 0.8, 
                     "api_key_field": "LOCAL_KEY", 
                     "extra_body": {
@@ -32,7 +32,7 @@
                 "llm": {
                     "provider": "openai",
                     "base_url": "http://192.168.152.85:65189/v1",
-                    "model": "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
+                    "model": "Qwen/Qwen3-14B-AWQ",
                     "temperature": 0.8, 
                     "api_key_field": "LOCAL_KEY", 
                     "extra_body": {

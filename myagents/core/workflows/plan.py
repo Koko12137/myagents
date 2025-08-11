@@ -1,4 +1,5 @@
 import json
+import traceback
 
 from json_repair import repair_json
 from loguru import logger
@@ -159,7 +160,6 @@ class PlanWorkflow(BaseReActFlow):
                 key_results=key_outputs, 
                 sub_task_depth=parent.sub_task_depth - 1, 
                 parent=parent, 
-                prev=prev, 
             )
             # Add the new task to the parent task
             parent.sub_tasks[name] = new_task
@@ -185,6 +185,8 @@ class PlanWorkflow(BaseReActFlow):
 
             # Link the dependency
             new_task.prev = prev
+            if prev is not None:
+                prev.next = new_task
 
             if new_task.sub_task_depth == 0 and new_task.prev is None:
                 # Set the task status to running
@@ -213,12 +215,20 @@ class PlanWorkflow(BaseReActFlow):
                     if prev.prev is not None and not prev.prev.is_running():
                         prev.to_created()
                         
-            # Update the next task of the parent
-            parent.next = prev
+            # Update the next task of the prev
+            if prev is not None:
+                prev.next = parent
+            parent.prev = prev
             # Format the task to ToDoTaskView
             view = ToDoTaskView(task=parent).format()
             # Return the user message
             return UserMessage(content=f"【成功】：任务创建成功。任务ToDo视图：\n{view}"), False
+        
+        except AttributeError as e:
+            # Log the error
+            logger.error(f"Error creating task: {e}", traceback.format_exc())
+            # Raise an error
+            raise e
         
         except Exception as e:
             # Log the error

@@ -400,6 +400,8 @@ class ComplexQuery(PlanAndExecEnv):
                 AgentType.TREE_REACT, 
                 target=self, 
                 completion_config=completion_config,
+                max_error_retry=3,
+                max_idle_thinking=2,
             )
             # Set the status to finished
             self.to_finished()

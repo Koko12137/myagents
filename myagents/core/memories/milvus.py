@@ -1,4 +1,6 @@
 from typing import Any, Optional
+import time
+import uuid
 
 from loguru import logger
 from pymilvus import (
@@ -38,9 +40,6 @@ class MilvusEpisodeMemoryCollection:
     valid_memory_types: list[MemoryType] = [
         MemoryType.EPISODE, 
     ]
-    # Fake ID 和 Raw ID 的映射
-    memory_id_map: dict[int, MemoryIDMap] = {}
-    current_fake_id: int = 0
     
     def __init__(
         self, 
@@ -68,10 +67,6 @@ class MilvusEpisodeMemoryCollection:
         self.index_type = index_type
         self.metric_type = metric_type
         
-        # Fake ID 和 Raw ID 的映射
-        self.memory_id_map = {}
-        self.current_fake_id = 0
-        
     def get_dimension(self) -> int:
         """获取向量记忆项的维度。向量记忆项的维度是向量数据库中存储的维度。
         
@@ -96,52 +91,22 @@ class MilvusEpisodeMemoryCollection:
         """
         return self.metric_type
     
-    def get_memory_id_map(self) -> dict[int, MemoryIDMap]:
-        """获取 Fake ID 和 Raw ID 的映射"""
-        return self.memory_id_map
-    
-    def get_current_fake_id(self, increase: bool = True) -> int:
-        """获取当前的 Fake ID"""
-        fake_id = self.current_fake_id
-        if increase:
-            self.current_fake_id += 1
-        return fake_id
-    
     async def add(self, memories: list[EpisodeMemoryItem]) -> None:
         """插入向量记忆"""
         # 准备数据
         data = [memory.model_dump() for memory in memories]
         # Drop the memory_id field
         for memory in data:
-            memory.pop("memory_id", None)
+            memory.pop("id", None)
+            # 检查是否存在 memory_id，不存在则添加
+            if "memory_id" not in memory:
+                memory["memory_id"] = uuid.uuid4().hex
+            # 检查是否存在 created_at，不存在则添加
+            if "created_at" not in memory:
+                memory["created_at"] = int(time.time())
         
         # 插入数据
         await self.client.insert(self.collection_name, data)
-        # BUG: 使用同样的向量进行搜索时，COSINE相似度不为1，需要修改获取自动ID的方法
-        # 获取更新后的 memories
-        updated_memories: list[tuple[dict, float]] = []
-        for memory in memories:
-            updated_memories.append(await self.search(
-                env_id=memory.env_id,
-                agent_id=memory.agent_id,
-                task_id=memory.task_id,
-                task_status=memory.task_status,
-                query_embedding=memory.embedding,
-                top_k=1,
-                score_threshold=0.5,
-            ))
-        
-        raw_ids = [memory[0].get("memory_id") for memory in updated_memories]
-        # 将 memory_id 改为 fake_id
-        for memory in memories:
-            memory.memory_id = self.get_current_fake_id(increase=True)
-        # 更新映射
-        for memory, raw_id in zip(memories, raw_ids):
-            self.memory_id_map[memory.memory_id] = MemoryIDMap(
-                fake_id=memory.memory_id, 
-                raw_id=raw_id, 
-                memory=memory,
-            )
         
         logger.info(f"成功插入向量记忆: {len(memories)}")
     
@@ -170,7 +135,7 @@ class MilvusEpisodeMemoryCollection:
                 anns_field="embedding",
                 limit=top_k,
                 output_fields=[
-                    "memory_id", "env_id", "agent_id", "task_id", "task_status", "embedding", "metadata", "is_error", 
+                    "id", "env_id", "agent_id", "task_id", "memory_id", "task_status", "embedding", "metadata", "is_error", "created_at",
                 ],
                 filter=expr,
             )
@@ -182,25 +147,16 @@ class MilvusEpisodeMemoryCollection:
                     if hit.score >= score_threshold:
                         # 合法性检查
                         memory = EpisodeMemoryItem(
-                            memory_id=hit.get("memory_id"),
+                            id=hit.get("id"),
                             env_id=hit.get("env_id"),
                             agent_id=hit.get("agent_id"),
                             task_id=hit.get("task_id"),
+                            memory_id=hit.get("memory_id"),
                             task_status=hit.get("task_status"),
                             embedding=hit.get("embedding"),
                             metadata=hit.get("metadata"),
                             is_error=hit.get("is_error"),
-                        )
-                        # 新建 fake_id，并记录 raw_id
-                        fake_id = self.get_current_fake_id(increase=True)
-                        raw_id = hit.get("memory_id")
-                        # 把 memory_id 改为 fake_id
-                        memory.memory_id = fake_id
-                        # 添加到映射
-                        self.memory_id_map[fake_id] = MemoryIDMap(
-                            fake_id=fake_id,
-                            raw_id=raw_id,
-                            memory=memory,
+                            created_at=hit.get("created_at"),
                         )
                         # 添加到记忆列表
                         memories.append((memory.model_dump(), hit.score))
@@ -211,53 +167,31 @@ class MilvusEpisodeMemoryCollection:
             logger.error(f"搜索向量记忆失败: {e}")
             return []
     
-    async def update(self, memories: list[EpisodeMemoryItem], is_fake_id: bool = True) -> bool:
-        """更新向量记忆"""
-        try:
-            # 获取 fake_id
-            if is_fake_id:
-                fake_ids = [memory.memory_id for memory in memories]
-            else:
-                fake_ids = [self.memory_id_map[memory.memory_id].fake_id for memory in memories]
+    # async def update(self, memories: list[EpisodeMemoryItem]) -> bool:
+    #     """更新向量记忆"""
+    #     try:
+    #         # 更新记录
+    #         await self.client.upsert(self.collection_name, [memory.model_dump() for memory in memories])
             
-            # 获取 raw_id
-            raw_ids = [self.memory_id_map[fake_id].raw_id for fake_id in fake_ids]
-            # 将 memory_id 改为 raw_id
-            for memory, raw_id in zip(memories, raw_ids):
-                memory.memory_id = raw_id
-            # 更新记录
-            await self.client.upsert(self.collection_name, [memory.model_dump() for memory in memories])
+    #         logger.info(f"成功更新向量记忆: {len(memories)}")
+    #         return True
             
-            # 将 memory_id 改为 fake_id, 并更新映射中的 memory
-            for memory, fake_id in zip(memories, fake_ids):
-                memory.memory_id = fake_id
-                # 更新映射中的 memory
-                self.memory_id_map[fake_id].memory = memory
-            
-            logger.info(f"成功更新向量记忆: {len(memories)}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"更新向量记忆失败: {e}")
-            return False
+    #     except Exception as e:
+    #         logger.error(f"更新向量记忆失败: {e}")
+    #         return False
     
-    async def delete(self, memory_ids: list[int]) -> bool:
-        """删除向量记忆"""
-        try:
-            # 获取 raw_id
-            raw_ids = [self.memory_id_map[memory_id].raw_id for memory_id in memory_ids]
-            # 删除映射
-            for memory_id in memory_ids:
-                del self.memory_id_map[memory_id]
-            # 删除记忆
-            await self.client.delete(self.collection_name, f'memory_id in {raw_ids}')
+    # async def delete(self, memory_ids: list[int]) -> bool:
+    #     """删除向量记忆"""
+    #     try:
+    #         # 删除记忆
+    #         await self.client.delete(self.collection_name, f'memory_id in {memory_ids}')
             
-            logger.info(f"成功删除向量记忆: {len(memory_ids)}")
-            return True
+    #         logger.info(f"成功删除向量记忆: {len(memory_ids)}")
+    #         return True
             
-        except Exception as e:
-            logger.error(f"删除向量记忆失败: {e}")
-            return False
+    #     except Exception as e:
+    #         logger.error(f"删除向量记忆失败: {e}")
+    #         return False
     
     async def get_collection_stats(self) -> dict[str, Any]:
         """获取集合统计信息"""
@@ -333,10 +267,11 @@ class MilvusManager:
         try:
             # 定义字段模式
             fields = [
-                FieldSchema(name="memory_id", dtype=DataType.INT64, is_primary=True, auto_id=True),
+                FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
                 FieldSchema(name="env_id", dtype=DataType.VARCHAR, max_length=256),
                 FieldSchema(name="agent_id", dtype=DataType.VARCHAR, max_length=256),
                 FieldSchema(name="task_id", dtype=DataType.VARCHAR, max_length=256),
+                FieldSchema(name="memory_id", dtype=DataType.VARCHAR, max_length=256),
                 FieldSchema(name="task_status", dtype=DataType.VARCHAR, max_length=256),
                 FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dimension),
                 FieldSchema(name="metadata", dtype=DataType.JSON),

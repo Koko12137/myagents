@@ -5,7 +5,11 @@ MEMORY_PROMPT_TEMPLATE = """
 【基于历史记忆指导当前决策】
 
 ### 事件记忆
+====== [事件记忆] ======
+
 {episode_memories}
+
+====== [事件记忆] ======
 
 ### 记忆使用指导
 1. **借鉴成功模式**：从积极影响的事件中提取有效方法
@@ -24,12 +28,10 @@ EPISODE_ITEM_FORMAT = """
 **事件记忆 {memory_id}**：
 {abstract}
 
-**关键词**：
-{keywords}
+**关键词**：{keywords}
+
+**是否为错误经验**：{is_error}
 
 **原始内容**：
 {content}
-
-**是否为错误经验**：
-{is_error}
 """

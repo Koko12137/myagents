@@ -319,7 +319,7 @@ class DocumentTaskView(TaskView):
                 raise ValueError(f"The status {self.task.status} is not supported.")
         
         # Add the question and answer of the current task
-        answer = f"# {self.task.name}: {self.task.objective}\n\n{self.task.key_results}\n\n{answer}"
+        answer = f"# {self.task.objective}\n\n{self.task.key_results}\n\n{answer}"
         
         if layer > 0 and self.task.sub_task_depth > 0:
             sub_answers = [] 

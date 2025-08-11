@@ -262,6 +262,7 @@ class PlanAndExecEnv(BaseEnvironment):
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
                     completion_config=completion_config, 
+                    **kwargs,
                 )
                 
             # Check if the sub-task is running, if True, then act the sub-task
@@ -274,6 +275,7 @@ class PlanAndExecEnv(BaseEnvironment):
                     max_error_retry=max_error_retry, 
                     max_idle_thinking=max_idle_thinking, 
                     completion_config=completion_config, 
+                    **kwargs,
                 )
 
             # Check if the sub-task is failed, if True, then retry the sub-task

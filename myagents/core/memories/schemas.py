@@ -22,18 +22,19 @@ class BaseVectorMemoryItem(BaseModel):
         metadata (dict): 记忆元数据
         embedding (List[float]): 记忆向量
     """
-    memory_id: int = Field(description="记忆ID", default=None)
+    id: int = Field(description="ID", default=None)
     
     env_id: str = Field(description="环境ID")
     agent_id: str = Field(description="代理ID")
     task_id: str = Field(description="任务ID")
+    memory_id: str = Field(description="记忆ID")
     task_status: str = Field(description="任务状态")
     metadata: dict = Field(description="记忆元数据")
     embedding: list[float] = Field(description="记忆向量")
     created_at: int = Field(description="创建时间")
     
-    def get_memory_id(self) -> int:
-        return self.memory_id
+    def get_id(self) -> int:
+        return self.id
     
     def get_env_id(self) -> str:
         return self.env_id
@@ -43,6 +44,9 @@ class BaseVectorMemoryItem(BaseModel):
     
     def get_task_id(self) -> str:
         return self.task_id
+    
+    def get_memory_id(self) -> str:
+        return self.memory_id
     
     def get_task_status(self) -> str:
         return self.task_status

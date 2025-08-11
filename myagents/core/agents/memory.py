@@ -1,3 +1,5 @@
+import uuid
+import time
 from typing import Union
 
 from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem
@@ -159,6 +161,13 @@ class BaseMemoryAgent(BaseAgent):
             memory_type (str):
                 记忆类型
         """
+        # 检查是否存在 memory_id
+        if "memory_id" not in kwargs:
+            kwargs["memory_id"] = uuid.uuid4().hex
+        # 检查是否存在 created_at
+        if "created_at" not in kwargs:
+            kwargs["created_at"] = int(time.time())
+        
         if memory_type == MemoryType.EPISODE.value:
             return EpisodeMemoryItem(**kwargs)
         else:
