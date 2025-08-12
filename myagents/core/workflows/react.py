@@ -1,10 +1,11 @@
-from typing import Callable
+import re
 
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.interface import Agent, Workflow, Stateful, Context, TreeTaskNode, CompletionConfig, MemoryAgent
 from myagents.core.messages import SystemMessage, UserMessage, StopReason, ToolCallResult, ToolCallRequest
+from myagents.core.messages.message import AssistantMessage
 from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.tasks import DocumentTaskView
 from myagents.core.llms.config import BaseCompletionConfig
@@ -112,15 +113,29 @@ class BaseReActFlow(BaseWorkflow):
             target: TreeTaskNode = self.context.get("target")
             # Get the tool call
             tool_call: ToolCallRequest = self.context.get("tool_call")
-            # Get status update function
-            status_update_func: Callable[[TreeTaskNode], None] = self.context.get("status_update_func", lambda target: target.to_finished())
-            # Set the task status to finished
-            status_update_func(target)
+            # Get the message
+            message: AssistantMessage = self.context.get("message")
+            
+            # 检测并处理 finish_flag
+            finish_flag_content = extract_by_label(message.content, "finish_flag", "finish_workflow", "finish")
+            
+            if finish_flag_content:
+                # 如果存在 finish_flag，检查值是否为 True
+                if finish_flag_content.strip() == "True":
+                    # 已经是 True，无需修改
+                    pass
+                else:
+                    # 不是 True，强制修改为 True
+                    message.content = re.sub(r"<finish_flag>.*?</finish_flag>", "<finish_flag>True</finish_flag>", message.content)
+            else:
+                # 如果不存在 finish_flag，添加它
+                message.content += "\n<finish_flag>True</finish_flag>"
+            
             # Create a new tool call result
             result = ToolCallResult(
                 tool_call_id=tool_call.id, 
                 is_error=False, 
-                content=f"任务已设置为 {target.get_status().value} 状态。",
+                content=f"已设置<finish_flag>True</finish_flag>，工作流即将结束。",
             )
             return result
 
@@ -241,6 +256,8 @@ class BaseReActFlow(BaseWorkflow):
             )
             # Check if the target is finished
             if finish_flag:
+                # Set the task status to finished
+                target.to_finished()
                 # Force the loop to break
                 break
             
@@ -403,6 +420,7 @@ class BaseReActFlow(BaseWorkflow):
                 result = await self.agent.act(
                     tool_call=tool_call, 
                     target=target, 
+                    message=message,
                     **kwargs, 
                 )
                 # Log the tool call result
@@ -414,9 +432,6 @@ class BaseReActFlow(BaseWorkflow):
         # Check if the finish flag is set
         finish_flag = extract_by_label(message.content, "finish", "finish_flag", "finish_workflow")
         if finish_flag == "True" or finish_flag == "true":
-            # Set the finish flag to True
-            finish_flag = True
-        elif target.is_finished():
             # Set the finish flag to True
             finish_flag = True
         else:
@@ -541,6 +556,8 @@ class MemoryReActFlow(BaseReActFlow):
             )
             # Check if the target is finished
             if finish_flag:
+                # Set the task status to finished
+                target.to_finished()
                 # Force the loop to break
                 break
             
@@ -687,6 +704,8 @@ class TreeTaskReActFlow(BaseReActFlow):
             if finish_flag:
                 # Set the task status to finished
                 target.to_finished()
+                # Force the loop to break
+                break
             
             # Check if the tool call flag is not set
             elif not tool_call_flag and not target.results:
@@ -855,6 +874,8 @@ class MemoryTreeTaskReActFlow(TreeTaskReActFlow):
             if finish_flag:
                 # Set the task status to finished
                 target.to_finished()
+                # Force the loop to break
+                break
             
             # Check if the tool call flag is not set
             elif not tool_call_flag and not target.results:

@@ -7,7 +7,7 @@ from fastmcp.tools import Tool as FastMcpTool
 from fastmcp import Client as MCPClient
 
 from myagents.core.interface.base import Stateful, ToolsCaller, Scheduler
-from myagents.core.interface.llm import LLM, CompletionConfig
+from myagents.core.interface.llm import LLM, CompletionConfig, EmbeddingLLM
 from myagents.core.interface.memory import MemoryOperation, VectorMemoryCollection, VectorMemoryItem
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
@@ -296,6 +296,26 @@ class MemoryAgent(Agent):
     """
     
     @abstractmethod
+    def get_embedding_llm(self) -> EmbeddingLLM:
+        """获取智能体的嵌入模型
+        
+        返回:
+            LLM:
+                智能体的嵌入模型
+        """
+        pass
+    
+    @abstractmethod
+    def get_extraction_llm(self) -> LLM:
+        """获取智能体的记忆提取模型
+        
+        返回:
+            LLM:
+                智能体的记忆提取模型
+        """
+        pass
+    
+    @abstractmethod
     def get_memory_workflow(self) -> 'MemoryWorkflow':
         """获取记忆工作流
         
@@ -306,12 +326,16 @@ class MemoryAgent(Agent):
         pass
     
     @abstractmethod
-    def get_episode_memory(self) -> VectorMemoryCollection:
-        """获取向量记忆
+    def get_memory_collection(self, memory_type: str) -> VectorMemoryCollection:
+        """获取向量记忆集合
+        
+        参数:
+            memory_type (str):
+                记忆类型
         
         返回:
             VectorMemoryCollection:
-                向量记忆
+                向量记忆集合
         """
         pass
     
@@ -331,6 +355,30 @@ class MemoryAgent(Agent):
             list[float]:
                 嵌入向量
         """
+        pass
+    
+    @abstractmethod
+    async def think_extract(
+        self, 
+        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
+        completion_config: CompletionConfig, 
+        **kwargs,
+    ) -> AssistantMessage:
+        """思考记忆提取。
+        
+        参数:
+            observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
+                观察到的消息
+            completion_config (CompletionConfig):
+                对话补全配置
+            **kwargs:
+                额外参数
+                
+        返回:
+            AssistantMessage:
+                思考记忆提取的完成消息
+        """
+        pass
     
     @abstractmethod
     async def extract_memory(

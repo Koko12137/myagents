@@ -8,7 +8,7 @@ from myagents.core.interface import LLM, Workflow, Environment, StepCounter, Vec
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
-from myagents.core.workflows import BaseReActFlow, TreeTaskReActFlow
+from myagents.core.workflows import BaseReActFlow, TreeTaskReActFlow, MemoryReActFlow, MemoryTreeTaskReActFlow
 from myagents.prompts.workflows.react import PROFILE, SYSTEM_PROMPT, THINK_PROMPT, REFLECT_PROMPT
 from myagents.prompts.workflows.plan_and_exec import (
     EXEC_SYSTEM_PROMPT, 
@@ -176,6 +176,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
+        extraction_llm: LLM, 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = SYSTEM_PROMPT, 
         reason_act_prompt: str = THINK_PROMPT, 
@@ -202,6 +203,12 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
                 The name of the agent.
             llm (LLM):
                 The LLM to use for the agent.
+            episode_memory (VectorMemoryCollection):
+                The episode memory to use for the agent.
+            embedding_llm (EmbeddingLLM):
+                The embedding LLM to use for the agent.
+            extraction_llm (LLM):
+                The extraction LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
@@ -237,6 +244,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             # Memory
             episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
+            extraction_llm=extraction_llm, 
             # Memory Compress
             memory_compress_system_prompt=memory_compress_system_prompt, 
             memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
@@ -250,7 +258,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         )
         
         # Initialize the workflow for the agent
-        self.workflow = BaseReActFlow(
+        self.workflow = MemoryReActFlow(
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,
@@ -454,6 +462,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
+        extraction_llm: LLM, 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = EXEC_SYSTEM_PROMPT, 
         reason_act_prompt: str = EXEC_THINK_PROMPT, 
@@ -482,6 +491,12 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
+            episode_memory (VectorMemoryCollection):
+                The episode memory to use for the agent.
+            embedding_llm (EmbeddingLLM):
+                The embedding LLM to use for the agent.
+            extraction_llm (LLM):
+                The extraction LLM to use for the agent.
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
             system_prompt (str):
@@ -516,6 +531,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             # Memory
             episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
+            extraction_llm=extraction_llm, 
             # Memory Compress
             memory_compress_system_prompt=memory_compress_system_prompt, 
             memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
@@ -529,7 +545,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         )
         
         # Initialize the workflow for the agent
-        self.workflow = TreeTaskReActFlow(
+        self.workflow = MemoryTreeTaskReActFlow(
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,

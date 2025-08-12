@@ -266,7 +266,14 @@ class BaseAgent(Agent):
                 result = await self.workflow.call_tool(tool_call, **kwargs)
                 return result
             else:
-                raise ValueError(f"Tool {tool_call.name} is not registered to the agent or environment.")
+                # 记录错误
+                logger.error(f"Tool {tool_call.name} is not registered to the agent or environment.")
+                # 返回错误
+                return ToolCallResult(
+                    tool_call_id=tool_call.id,
+                    content=f"Tool {tool_call.name} is not registered to the agent or environment.",
+                    is_error=True,
+                )
         
         # Get the tool call id and the tool call arguments
         tool_call_id = tool_call.id

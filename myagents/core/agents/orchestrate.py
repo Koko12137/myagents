@@ -249,6 +249,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
+        extraction_llm: LLM, 
         mcp_client: Optional[MCPClient] = None, 
         need_user_check: bool = False, 
         plan_system_prompt: str = PLAN_SYSTEM_PROMPT, 
@@ -287,6 +288,8 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
                 The vector memory to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
+            extraction_llm (LLM):
+                The extraction LLM to use for the agent.
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
             need_user_check (bool, optional, defaults to False):
@@ -337,6 +340,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             # Memory
             episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
+            extraction_llm=extraction_llm, 
             # Memory Compress
             memory_compress_system_prompt=memory_compress_system_prompt, 
             memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 

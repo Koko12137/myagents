@@ -2,9 +2,12 @@ import uuid
 import time
 from typing import Union
 
-from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem
+from loguru import logger
+
+from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem, LLM
 from myagents.core.messages import AssistantMessage, ToolCallResult, SystemMessage, UserMessage
-from myagents.core.agents.base import BaseAgent
+from myagents.core.agents.base import BaseAgent, MaxStepsError
+from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.memories.schemas import (
     EpisodeMemoryItem, 
     MemoryType, 
@@ -42,6 +45,7 @@ class BaseMemoryAgent(BaseAgent):
         self, 
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
+        extraction_llm: LLM,
         # Memory Compress
         memory_compress_system_prompt: str, 
         memory_compress_reason_act_prompt: str, 
@@ -56,6 +60,7 @@ class BaseMemoryAgent(BaseAgent):
         super().__init__(**kwargs)
         self.episode_memory = episode_memory
         self.embedding_llm = embedding_llm
+        self.extraction_llm = extraction_llm
         
         # 初始化 EpisodeMemoryWorkflow
         episode_memory_workflow = EpisodeMemoryFlow(
@@ -99,14 +104,39 @@ class BaseMemoryAgent(BaseAgent):
         """
         return self.memory_workflow
     
-    def get_episode_memory(self) -> VectorMemoryCollection:
-        """获取向量记忆
+    def get_extraction_llm(self) -> LLM:
+        """获取记忆提取语言模型
         
         返回:
-            VectorMemoryCollection:
-                向量记忆
+            LLM:
+                记忆提取语言模型
         """
-        return self.episode_memory
+        return self.extraction_llm
+    
+    def get_embedding_llm(self) -> EmbeddingLLM:
+        """获取嵌入语言模型
+        
+        返回:
+            EmbeddingLLM:
+                嵌入语言模型
+        """
+        return self.embedding_llm
+    
+    def get_memory_collection(self, memory_type: str) -> VectorMemoryCollection:
+        """获取向量记忆
+        
+        参数:
+            memory_type (str):
+                记忆类型
+                
+        返回:
+            VectorMemoryCollection:
+                向量记忆集合
+        """
+        if memory_type == MemoryType.EPISODE.value:
+            return self.episode_memory
+        else:
+            raise ValueError(f"Invalid memory type: {memory_type}")
         
     async def embed(self, text: str, dimensions: int, **kwargs) -> list[float]:
         """嵌入文本
@@ -257,8 +287,8 @@ class BaseMemoryAgent(BaseAgent):
         # 提取记忆
         memories = await self.search_memory(
             text=observation_str, 
-            limit=20, 
-            score_threshold=0.1, 
+            limit=3, 
+            score_threshold=0.2, 
             target=target, 
             **kwargs,
         )
@@ -267,3 +297,50 @@ class BaseMemoryAgent(BaseAgent):
         await self.prompt(UserMessage(content=memories), target)
         # 返回历史信息
         return target.get_history()
+
+    async def think_extract(
+        self, 
+        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
+        completion_config: BaseCompletionConfig, 
+        **kwargs, 
+    ) -> AssistantMessage:
+        """对环境进行思考，并提取记忆。
+        
+        参数：
+            observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
+                从环境中观察到的消息。
+            completion_config (BaseCompletionConfig):
+                智能体的对话补全配置。
+            **kwargs:
+                其他思考参数。
+        返回：
+            AssistantMessage:
+                LLM 生成的记忆提取回复。
+        """
+        # Check if the limit of the step counters is reached
+        for step_counter in self.step_counters.values():
+            await step_counter.check_limit()
+        
+        # Call for completion from the LLM
+        message = await self.extraction_llm.completion(
+            observe, 
+            completion_config=completion_config, 
+            **kwargs,
+        )
+        
+        errors = []
+        # Increase the current step
+        for step_counter in self.step_counters.values():
+            try:
+                await step_counter.step(message.usage)
+            except MaxStepsError as e:
+                errors.append(e)
+            except Exception as e:
+                logger.error(f"Unexpected error in step counter: {e}")
+                raise e
+        
+        if len(errors) > 0:
+            raise errors[0] from errors[0]
+        
+        # Return the response
+        return message

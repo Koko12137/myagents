@@ -7,7 +7,6 @@ from loguru import logger
 from myagents.core.messages import UserMessage, SystemMessage
 from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent, MemoryWorkflow
 from myagents.core.workflows.base import BaseWorkflow
-from myagents.core.workflows.react import BaseReActFlow
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.memories.schemas import BaseMemoryOperation, MemoryOperationType
 from myagents.core.tasks import BaseTreeTaskNode
@@ -15,7 +14,7 @@ from myagents.prompts.memories.compress import PROFILE
 from myagents.prompts.memories.episode import PROFILE as EPISODE_PROFILE
 
 
-class EpisodeMemoryFlow(BaseReActFlow):
+class EpisodeMemoryFlow(BaseWorkflow):
     """提取事件记忆(Episode Memory)工作流
     """
     
@@ -63,6 +62,11 @@ class EpisodeMemoryFlow(BaseReActFlow):
             sub_workflows=sub_workflows, 
             **kwargs, 
         )
+        
+    def post_init(self) -> None:
+        """初始化工作流
+        """
+        pass
         
     def get_memory_agent(self) -> MemoryAgent:
         """获取当前工作流的记忆智能体
@@ -117,7 +121,7 @@ class EpisodeMemoryFlow(BaseReActFlow):
         # 记录观察结果
         logger.info(f"观察结果: \n{observe[-1].content}")
         # 思考目标
-        message = await self.agent.think(observe=observe, completion_config=completion_config)
+        message = await self.agent.think_extract(observe=observe, completion_config=completion_config)
         # 将消息更新到目标
         await self.agent.prompt(message, target)
         # 记录助手消息
@@ -144,7 +148,7 @@ class EpisodeMemoryFlow(BaseReActFlow):
             # 获取嵌入向量
             embedding = await self.agent.embed(
                 f"Abstract: {memory['abstract']}\nKeywords: {memory['keywords']}", 
-                dimensions=self.agent.get_episode_memory().get_dimension(),
+                dimensions=self.agent.get_memory_collection(memory_type="episode").get_dimension(),
             )
             # 更新记忆的嵌入向量
             memory["embedding"] = embedding
@@ -162,8 +166,6 @@ class EpisodeMemoryFlow(BaseReActFlow):
             )
             # 更新记忆
             await self.agent.update_memory([memory_op])
-            # 设置工具调用标志
-            tool_call_flag = True
             
             # === 更新历史 ===
             op_info = memory_op.model_dump()
@@ -174,6 +176,9 @@ class EpisodeMemoryFlow(BaseReActFlow):
             await self.agent.prompt(message, target)
             # 记录用户消息
             logger.info(f"用户消息: \n{message.content}")
+            
+            # 设置工具调用标志
+            tool_call_flag = True
                 
         except Exception as e:
             # 设置错误标志
@@ -229,13 +234,14 @@ class EpisodeMemoryFlow(BaseReActFlow):
             # 将系统提示词更新到历史记录
             await self.agent.prompt(SystemMessage(content=system_prompt), target)
         
-        # 初始化错误和空闲思考计数器
+        # 初始化空闲思考计数器
         current_thinking = 0
+        # 初始化错误计数器
         current_error = 0
 
         # 运行工作流
         while True:
-        
+            
             # === 推理阶段 ===
             # 对目标进行推理和行动
             target, error_flag, tool_call_flag = await self.reason_act(
@@ -243,6 +249,11 @@ class EpisodeMemoryFlow(BaseReActFlow):
                 completion_config=completion_config, 
                 **kwargs,
             )
+            
+            # === 检查是否设置了工具调用标志 ===
+            if tool_call_flag and not error_flag:
+                # 强制react循环结束
+                break
             
             # 检查是否设置了错误标志
             if error_flag:
@@ -265,19 +276,7 @@ class EpisodeMemoryFlow(BaseReActFlow):
                     # 强制react循环结束
                     break
             
-            # === 反思阶段 ===
-            # 反思目标
-            target, finish_flag = await super().reflect(
-                target=target, 
-                completion_config=completion_config, 
-                **kwargs,
-            )
-            # 检查目标是否完成
-            if finish_flag:
-                # 强制跳出循环
-                break
-            
-            # 检查工具调用标志是否为True
+            # 检查工具调用标志是否为 True
             elif not tool_call_flag:
                 # 增加空闲思考计数器
                 current_thinking += 1

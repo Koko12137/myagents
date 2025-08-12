@@ -175,7 +175,7 @@ class BlueprintWorkflow(BaseReActFlow):
                     content=f"没有在<orchestration>标签中找到规划蓝图。请将你的规划放到<orchestration>标签中。你已经思考了 {current_thinking} 次，" \
                         f"在最多思考 {max_idle_thinking} 次后，任务会直接失败。下一步你必须给出规划蓝图，否则你将会被惩罚。",
                 )
-                await self.agent.prompt(message)
+                await self.agent.prompt(message, target)
                 # Log the idle thinking message
                 logger.warning(f"模型回复中没有找到规划蓝图，提醒模型重新思考。")
                 # Check if the idle thinking counter is greater than the max idle thinking
@@ -384,7 +384,7 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
                     content=f"没有在<orchestration>标签中找到规划蓝图。请将你的规划放到<orchestration>标签中。你已经思考了 {current_thinking} 次，" \
                         f"在最多思考 {max_idle_thinking} 次后，任务会直接失败。下一步你必须给出规划蓝图，否则你将会被惩罚。",
                 )
-                await self.agent.prompt(message)
+                await self.agent.prompt(message, target)
                 # Log the idle thinking message
                 logger.warning(f"模型回复中没有找到规划蓝图，提醒模型重新思考。")
                 # Check if the idle thinking counter is greater than the max idle thinking
