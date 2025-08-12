@@ -1,11 +1,11 @@
 import json
-from collections.abc import Callable
+import traceback
 
 from json_repair import repair_json
 from loguru import logger
 
 from myagents.core.messages import UserMessage, SystemMessage
-from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow
+from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent
 from myagents.core.workflows.react import BaseReActFlow
 from myagents.core.tasks import ToDoTaskView, BaseTreeTaskNode, DocumentTaskView
 from myagents.core.llms.config import BaseCompletionConfig
@@ -18,6 +18,14 @@ PLAN_LAYER_LIMIT = """
 对于这个任务，你最多可以拆解到 {detail_level} 层（层指的是层次遍历任务树的层数，如果用户要求的层数越高，则你需要越详细规划）。
 【注意】：如果你的规划超出了层数限制，超出这个层级的拆解将会被视为错误，并会被强制截断。
 【提示】：“问题1”表示第一层，“问题1.1”表示第二层，以此类推。
+"""
+
+
+BLUEPRINT_FORMAT = """
+## 任务总体规划蓝图
+{blueprint}
+
+【注意】：如果规划蓝图没有给出，则请根据任务目标和用户需求，自行规划。
 """
 
 
@@ -109,19 +117,21 @@ class PlanWorkflow(BaseReActFlow):
     def create_task(
         self, 
         parent: TreeTaskNode, 
+        prev: TreeTaskNode, 
         orchestrate_json: str, 
-        sub_task_depth: int = -1, 
+        sub_task_depth: int, 
     ) -> tuple[UserMessage, bool]:
         """Create a new task based on the orchestration blueprint.
         
         Args:
             parent (TreeTaskNode):
                 The parent task to create the new task.
+            prev (TreeTaskNode):
+                The previous task of the new task.
             orchestrate_json (str):
                 The orchestration blueprint to create the new task.
             sub_task_depth (int):
-                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
+                The depth of the sub-task. 
                 
         Returns:
             UserMessage:
@@ -130,42 +140,59 @@ class PlanWorkflow(BaseReActFlow):
                 The error flag. 
         """
         def dfs_create_task(
+            name: str,
             parent: TreeTaskNode, 
+            prev: TreeTaskNode, 
             orchestration: dict[str, dict], 
             sub_task_depth: int, 
-        ) -> None:
-            # Traverse the orchestration
-            for uid, value in orchestration.items():
-                # Convert the value to string
-                key_outputs = ""
-                for output in value['关键产出']:
-                    key_outputs += f"{output}; "
-                
-                # Create a new task
-                new_task = BaseTreeTaskNode(
-                    uid=uid, 
-                    objective=normalize_string(value['目标描述']), 
-                    key_results=key_outputs, 
-                    sub_task_depth=sub_task_depth - 1,
-                )
-                
-                # Link the new task to the parent task
-                new_task.parent = parent
-                # Add the new task to the parent task
-                parent.sub_tasks[uid] = new_task
-                
-                # Try to get the sub-task from the parent task
-                sub_tasks = value.get('子任务', {})
-                if len(sub_tasks) > 0 and sub_task_depth > 0:
+        ) -> TreeTaskNode:
+            sub_task_depth = sub_task_depth - 1
+            
+            # Convert the orchestration to string
+            key_outputs = ""
+            for output in orchestration['关键产出']:
+                key_outputs += f"{output}; "
+            
+            # Create a new task
+            new_task = BaseTreeTaskNode(
+                name=name, 
+                objective=normalize_string(orchestration['目标描述']), 
+                key_results=key_outputs, 
+                sub_task_depth=parent.sub_task_depth - 1, 
+                parent=parent, 
+            )
+            # Add the new task to the parent task
+            parent.sub_tasks[name] = new_task
+            
+            # Get the sub-tasks
+            sub_tasks: dict[str, dict] = orchestration.get('子任务', {})
+            # Check the sub-task depth
+            if len(sub_tasks) > 0 and sub_task_depth > 0:
+                # Traverse and create all sub-tasks
+                for name, sub_task in sub_tasks.items():
                     # Create the sub-tasks
-                    dfs_create_task(
+                    prev = dfs_create_task(
+                        name=name, 
                         parent=new_task, 
-                        orchestration=sub_tasks, 
-                        sub_task_depth=sub_task_depth - 1, 
+                        prev=prev, 
+                        orchestration=sub_task, 
+                        sub_task_depth=sub_task_depth, 
                     )
-                elif sub_task_depth == 0:
-                    # Set the task status to running
-                    new_task.to_running()
+                    # Check status
+                    if prev.is_running():
+                        if prev.prev is not None and not prev.prev.is_running():
+                            prev.to_created()
+
+            # Link the dependency
+            new_task.prev = prev
+            if prev is not None:
+                prev.next = new_task
+
+            if new_task.sub_task_depth == 0 and new_task.prev is None:
+                # Set the task status to running
+                new_task.to_running()
+                
+            return new_task
         
         try:
             # Repair the json
@@ -173,21 +200,35 @@ class PlanWorkflow(BaseReActFlow):
             # Parse the orchestration
             orchestration: dict[str, dict[str, str]] = json.loads(orchestrate_json)
             
-            # Check if the sub-task depth is -1
-            if sub_task_depth == -1:
-                # Get the sub-task depth from the parent
-                sub_task_depth = parent.sub_task_depth - 1
-            
-            # Create the task
-            dfs_create_task(
-                parent=parent, 
-                orchestration=orchestration, 
-                sub_task_depth=sub_task_depth, 
-            )
+            # Traverse all the sub-tasks
+            for name, sub_task in orchestration.items():
+                # Create the sub-tasks
+                prev = dfs_create_task(
+                    name=name, 
+                    parent=parent, 
+                    prev=prev, 
+                    orchestration=sub_task, 
+                    sub_task_depth=sub_task_depth, 
+                )
+                # Check status
+                if prev.is_running():
+                    if prev.prev is not None and not prev.prev.is_running():
+                        prev.to_created()
+                        
+            # Update the next task of the prev
+            if prev is not None:
+                prev.next = parent
+            parent.prev = prev
             # Format the task to ToDoTaskView
             view = ToDoTaskView(task=parent).format()
             # Return the user message
             return UserMessage(content=f"【成功】：任务创建成功。任务ToDo视图：\n{view}"), False
+        
+        except AttributeError as e:
+            # Log the error
+            logger.error(f"Error creating task: {e}", traceback.format_exc())
+            # Raise an error
+            raise e
         
         except Exception as e:
             # Log the error
@@ -198,7 +239,7 @@ class PlanWorkflow(BaseReActFlow):
     async def reason_act(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int = -1, 
+        sub_task_depth: int, 
         completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> tuple[TreeTaskNode, bool, bool]:
@@ -207,10 +248,9 @@ class PlanWorkflow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to reason and act on. 
-            sub_task_depth (int, optional, defaults to -1):
-                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
-            completion_config (CompletionConfig, optional, defaults to None):
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            completion_config (CompletionConfig):
                 The completion config of the workflow. 
             **kwargs:
                 The additional keyword arguments for running the agent.
@@ -226,32 +266,24 @@ class PlanWorkflow(BaseReActFlow):
         else:
             # Update the format_json to True
             completion_config.update(format_json=True)
-            
-        # Check if the sub-task depth is -1
-        if sub_task_depth == -1:
-            # Get the sub-task depth from the parent
-            sub_task_depth = target.sub_task_depth
         
         # Initialize the error and tool call flag
         error_flag = False
-        tool_call_flag = False
         
         # === Thinking ===
         reason_act_prompt = self.prompts["reason_act_prompt"]
         # Append layer limit to the reason act prompt
         reason_act_prompt = f"{reason_act_prompt}\n\n{PLAN_LAYER_LIMIT.format(detail_level=sub_task_depth)}"
+        # Prompt the agent
+        await self.agent.prompt(UserMessage(content=reason_act_prompt), target)
         # Observe the target
-        observe = await self.agent.observe(
-            target, 
-            prompt=reason_act_prompt, 
-            observe_format=self.observe_formats["reason_act_format"]
-        )
+        observe = await self.agent.observe(target, observe_format=self.observe_formats["reason_act_format"])
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Think about the target
         message = await self.agent.think(observe=observe, completion_config=completion_config)
         # Update the message to the target
-        target.update(message)
+        await self.agent.prompt(message, target)
         # Log the assistant message
         if logger.level == "DEBUG":
             logger.debug(f"{str(self.agent)}: \n{message}")
@@ -262,20 +294,21 @@ class PlanWorkflow(BaseReActFlow):
         # Create new tasks based on the orchestration json
         message, error_flag = self.create_task(
             parent=target, 
+            prev=target.prev, 
             orchestrate_json=message.content, 
             sub_task_depth=sub_task_depth, 
         )
         # Log the message
         logger.info(f"Create Task Message: \n{message.content}")
         # Update the target with the user message
-        target.update(message)
+        await self.agent.prompt(message, target)
         # Return the target, error flag and tool call flag
-        return target, error_flag, tool_call_flag
+        return target, error_flag, True
     
     async def reflect(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int = -1, 
+        sub_task_depth: int, 
         completion_config: CompletionConfig = None, 
         **kwargs,
     ) -> tuple[TreeTaskNode, bool]:
@@ -284,10 +317,9 @@ class PlanWorkflow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to reflect on.
-            sub_task_depth (int, optional, defaults to -1):
-                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
-            completion_config (CompletionConfig, optional, defaults to None):
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            completion_config (CompletionConfig):
                 The completion config of the workflow. 
             **kwargs: 
                 The additional keyword arguments for running the agent.
@@ -296,14 +328,14 @@ class PlanWorkflow(BaseReActFlow):
             tuple[TreeTaskNode, bool]:
                 The target and the finish flag.
         """
-        if sub_task_depth == -1:
-            # Get the sub-task depth from the target
-            sub_task_depth = target.sub_task_depth
+        if completion_config is not None:
+            # Cancel the json format
+            completion_config.update(format_json=False)
         
         # Create a new message for layer limit announcement
         layer_limit_message = UserMessage(content=f"## 拆解层次限制\n\n【注意】：你最多只能拆解 {sub_task_depth} 层子任务。")
         # Update the layer limit message to the target
-        target.update(layer_limit_message)
+        await self.agent.prompt(layer_limit_message, target)
         
         # Call the parent reflect method
         return await super().reflect(
@@ -311,15 +343,143 @@ class PlanWorkflow(BaseReActFlow):
             completion_config=completion_config, 
             **kwargs,
         )
+        
+    async def schedule(
+        self, 
+        target: TreeTaskNode, 
+        sub_task_depth: int, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        blueprint: str = "", 
+        completion_config: CompletionConfig = None, 
+        **kwargs,
+    ) -> TreeTaskNode:
+        """Override the schedule method of the react workflow.
+        
+        Args:
+            target (TreeTaskNode):
+                The target to schedule.
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            max_error_retry (int):
+                The maximum number of times to retry the agent when the target is errored.
+            max_idle_thinking (int):
+                The maximum number of times to idle thinking the agent.
+            blueprint (str):
+                The blueprint of the task.
+            completion_config (CompletionConfig):
+                The completion config of the workflow. 
+            **kwargs:
+                The additional keyword arguments for scheduling the workflow.
+                
+        Returns:
+            TreeTaskNode:
+                The target after scheduling.
+                
+        Raises:
+            RuntimeError:
+                If the target is not in the valid statuses.
+        """
+        if not target.is_created():
+            # Log the error
+            logger.error(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
+            # Raise an error
+            raise RuntimeError(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
+            
+        # Check if the target has history
+        if len(target.get_history()) == 0:
+            # Get the system prompt from the workflow
+            if "system_prompt" not in self.prompts:
+                raise KeyError("system_prompt not found in workflow prompts")
+            system_prompt = self.prompts["system_prompt"]
+            # Update the system prompt to the history
+            await self.agent.prompt(SystemMessage(content=system_prompt), target)
+            # Create a UserMessage for the blueprint
+            blueprint_message = UserMessage(content=BLUEPRINT_FORMAT.format(blueprint=blueprint))
+            # Update the blueprint message to the history
+            await self.agent.prompt(blueprint_message, target)
+            # Create a new message for the current task results
+            task_results = DocumentTaskView(task=target).format()
+            # Create a UserMessage for the task results
+            task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
+            # Update the task results message to the history
+            await self.agent.prompt(task_results_message, target)
+        
+        # This is used for no tool calling thinking limit.
+        current_thinking = 0
+        current_error = 0
+        
+        # Run the workflow
+        while target.is_created():
+        
+            # === Reason Stage ===
+            # Reason and act on the target
+            target, error_flag, tool_call_flag = await self.reason_act(
+                target=target, 
+                sub_task_depth=sub_task_depth, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+            
+            # Check if the error flag is set
+            if error_flag:
+                # Increment the error counter
+                current_error += 1
+                # Notify the error limit to Agent
+                message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                await self.agent.prompt(message, target)
+                # Log the error message
+                logger.info(f"Error Message: \n{message}")
+                # Check if the error counter is greater than the max error retry
+                if current_error >= max_error_retry:
+                    # Set the task status to error
+                    target.to_error()
+                    # Log the error message
+                    logger.critical(f"错误次数限制已达上限: {current_error}/{max_error_retry}，进入错误状态。")
+                    # Force the react loop to finish
+                    break
+            
+            # === Reflect Stage ===
+            # Reflect on the target
+            target, finish_flag = await self.reflect(
+                target=target, 
+                sub_task_depth=sub_task_depth, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+            # Check if the target is finished
+            if finish_flag:
+                # Force the loop to break
+                break
+            
+            # Check if the tool call flag is not set
+            elif not tool_call_flag:
+                # Increment the idle thinking counter
+                current_thinking += 1
+                # Notify the idle thinking limit to Agent
+                message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                await self.agent.prompt(message, target)
+                # Log the idle thinking message
+                logger.info(f"Idle Thinking Message: \n{message}")
+                # Check if the idle thinking counter is greater than the max idle thinking
+                if current_thinking >= max_idle_thinking:
+                    # Set the task status to error
+                    target.to_error()
+                    # Log the error message
+                    logger.critical(f"连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。")
+                    # Force the loop to break
+                    break
+            
+        return target
 
     async def run(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int = -1, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
+        sub_task_depth: int, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        blueprint: str = "", 
         completion_config: CompletionConfig = None, 
-        running_checker: Callable[[TreeTaskNode], bool] = None, 
         **kwargs,
     ) -> TreeTaskNode:
         """Run the workflow.
@@ -327,17 +487,16 @@ class PlanWorkflow(BaseReActFlow):
         Args:
             target (TreeTaskNode):
                 The target to run the workflow on.
-            sub_task_depth (int, optional, defaults to -1):
-                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
-            max_error_retry (int, optional, defaults to 3):
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional, defaults to 1):
+            max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent.
-            completion_config (CompletionConfig, optional, defaults to None):
+            blueprint (str):
+                The blueprint of the task.
+            completion_config (CompletionConfig):
                 The completion config of the workflow. 
-            running_checker (Callable[[TreeTaskNode], bool], optional, defaults to None):
-                The checker to check if the workflow should be running.
             **kwargs:
                 The additional keyword arguments for running the workflow.
                 
@@ -345,82 +504,174 @@ class PlanWorkflow(BaseReActFlow):
             TreeTaskNode:
                 The target after running the workflow.
         """
-        # Check if the running checker is provided
-        if running_checker is None:
-            # Set the running checker to the default running checker
-            running_checker = lambda target: target.is_created()
-            
+        # Check if the sub-task depth is greater than or equal to 1
+        if not target.sub_task_depth >= 1:
+            # Log the error
+            logger.error(f"目标的子任务深度小于 1，无法继续规划。")
+            # This target can not be planned
+            return target
+        
         # Run the workflow
-        return await super().run(
+        return await self.schedule(
             target=target, 
             sub_task_depth=sub_task_depth, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
+            blueprint=blueprint, 
             completion_config=completion_config, 
-            running_checker=running_checker, 
             **kwargs,
         )
 
-    async def reason_act_reflect(
+
+class MemoryPlanWorkflow(PlanWorkflow):
+    """MemoryPlanWorkflow is a workflow for planning the task with memory.
+    """
+    agent: MemoryAgent
+        
+    def get_memory_agent(self) -> MemoryAgent:
+        """Get the memory agent.
+        """
+        return self.agent
+    
+    async def extract_memory(
         self, 
         target: TreeTaskNode, 
-        sub_task_depth: int = -1, 
-        max_error_retry: int = 3, 
-        max_idle_thinking: int = 1, 
-        completion_config: CompletionConfig = None, 
-        running_checker: Callable[[TreeTaskNode], bool] = None, 
         **kwargs,
     ) -> TreeTaskNode:
-        """Reason and act on the target.
+        """Extract the memory from the target.
+        """
+        # Get the memory agent
+        memory_agent = self.get_memory_agent()
+        # Extract the memory from the target
+        return await memory_agent.extract_memory(target, **kwargs)
+        
+    async def schedule(
+        self, 
+        target: TreeTaskNode, 
+        sub_task_depth: int, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        blueprint: str = "", 
+        completion_config: CompletionConfig = None, 
+        **kwargs,
+    ) -> TreeTaskNode:
+        """Override the schedule method of the react workflow.
         
         Args:
             target (TreeTaskNode):
-                The target to reason and act on. 
-            sub_task_depth (int, optional, defaults to -1):
-                The depth of the sub-task. If the sub-task depth is -1, then the sub-task depth will be 
-                inferred from the target.
-            max_error_retry (int, optional, defaults to 3):
+                The target to schedule.
+            sub_task_depth (int):
+                The depth of the sub-task. 
+            max_error_retry (int):
                 The maximum number of times to retry the agent when the target is errored.
-            max_idle_thinking (int, optional, defaults to 1):
+            max_idle_thinking (int):
                 The maximum number of times to idle thinking the agent.
-            completion_config (CompletionConfig, optional, defaults to None):
+            blueprint (str):
+                The blueprint of the task.
+            completion_config (CompletionConfig):
                 The completion config of the workflow. 
-            running_checker (Callable[[TreeTaskNode], bool], optional, defaults to None):
-                The checker to check if the workflow should be running.
             **kwargs:
-                The additional keyword arguments for running the workflow.
+                The additional keyword arguments for scheduling the workflow.
                 
         Returns:
             TreeTaskNode:
-                The target after running the workflow.
+                The target after scheduling.
+                
+        Raises:
+            RuntimeError:
+                If the target is not in the valid statuses.
         """
-        # Check if the target has history
-        if len(target.get_history()) == 0:
-            # Get the system prompt from the workflow
-            system_prompt = self.prompts["system_prompt"]
-            # Update the system prompt to the history
-            message = SystemMessage(content=system_prompt)
-            target.update(message)
-            # Create a new messsage announcing the blueprint
-            blueprint = self.agent.env.context.get("blueprint")
-            # Create a UserMessage for the blueprint
-            blueprint_message = UserMessage(content=f"## 任务总体规划蓝图\n\n{blueprint}")
-            # Update the blueprint message to the history
-            target.update(blueprint_message)
-            # Create a new message for the current task results
-            task_results = DocumentTaskView(task=target).format()
-            # Create a UserMessage for the task results
-            task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
-            # Update the task results message to the history
-            target.update(task_results_message)
+        if not target.is_created():
+            # Log the error
+            logger.error(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
+            # Raise an error
+            raise RuntimeError(f"Plan workflow requires the target status to be created, but the target status is {target.get_status().value}.")
+        
+        # This is used for no tool calling thinking limit.
+        current_thinking = 0
+        current_error = 0
         
         # Run the workflow
-        return await super().reason_act_reflect(
-            target=target, 
-            sub_task_depth=sub_task_depth, 
-            max_error_retry=max_error_retry, 
-            max_idle_thinking=max_idle_thinking, 
-            completion_config=completion_config, 
-            running_checker=running_checker, 
-            **kwargs,
-        )
+        while target.is_created():
+        
+            # === Prepare System Instruction ===
+            # Check if the target has history
+            if len(target.get_history()) == 0:
+                # Get the system prompt from the workflow
+                if "system_prompt" not in self.prompts:
+                    raise KeyError("system_prompt not found in workflow prompts")
+                system_prompt = self.prompts["system_prompt"]
+                # Update the system prompt to the history
+                await self.agent.prompt(SystemMessage(content=system_prompt), target)
+                # Create a UserMessage for the blueprint
+                blueprint_message = UserMessage(content=BLUEPRINT_FORMAT.format(blueprint=blueprint))
+                # Update the blueprint message to the history
+                await self.agent.prompt(blueprint_message, target)
+                # Create a new message for the current task results
+                task_results = DocumentTaskView(task=target).format()
+                # Create a UserMessage for the task results
+                task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
+                # Update the task results message to the history
+                await self.agent.prompt(task_results_message, target)
+        
+            # === Reason Stage ===
+            # Reason and act on the target
+            target, error_flag, tool_call_flag = await self.reason_act(
+                target=target, 
+                sub_task_depth=sub_task_depth, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+            
+            # Check if the error flag is set
+            if error_flag:
+                # Increment the error counter
+                current_error += 1
+                # Notify the error limit to Agent
+                message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                await self.agent.prompt(message, target)
+                # Log the error message
+                logger.info(f"Error Message: \n{message}")
+                # Check if the error counter is greater than the max error retry
+                if current_error >= max_error_retry:
+                    # Set the task status to error
+                    target.to_error()
+                    # Force the react loop to finish
+                    break
+            
+            # === Reflect Stage ===
+            # Reflect on the target
+            target, finish_flag = await self.reflect(
+                target=target, 
+                sub_task_depth=sub_task_depth, 
+                completion_config=completion_config, 
+                **kwargs,
+            )
+            # Check if the target is finished
+            if finish_flag:
+                # Force the loop to break
+                break
+            
+            # Check if the tool call flag is not set
+            elif not tool_call_flag:
+                # Increment the idle thinking counter
+                current_thinking += 1
+                # Notify the idle thinking limit to Agent
+                message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
+                await self.agent.prompt(message, target)
+                # Log the idle thinking message
+                logger.info(f"Idle Thinking Message: \n{message}")
+                # Check if the idle thinking counter is greater than the max idle thinking
+                if current_thinking >= max_idle_thinking:
+                    # Set the task status to error
+                    target.to_error()
+                    # Log the error message
+                    logger.critical(f"连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。")
+                    # Force the loop to break
+                    break
+            
+            # === Extract Memory ===
+            # Extract the memory from the target
+            target = await self.extract_memory(target, **kwargs)
+            
+        return target

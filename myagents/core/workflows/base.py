@@ -1,3 +1,4 @@
+from fastmcp.settings import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.interface import Agent, Workflow

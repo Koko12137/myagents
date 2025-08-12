@@ -1,21 +1,21 @@
 from enum import Enum
 
 from myagents.core.envs.base import BaseEnvironment
-from myagents.core.envs.query import Query
+from myagents.core.envs.complex_query import ComplexQuery
 from myagents.core.envs.orchestrate import Orchestrate
 
 
 class EnvironmentType(Enum):
-    """EnvironmentType is the type of the environment.
+    """环境的类型
     
-    Attributes:
-        QUERY (EnvironmentType):
-            The type of the Query environment.
+    属性:
+        COMPLEX_QUERY (EnvironmentType):
+            复杂询问环境的类型
         ORCHESTRATE (EnvironmentType):
-            The type of the Orchestrate environment.
+            编排环境的类型
     """
-    QUERY = "Query"
+    COMPLEX_QUERY = "ComplexQuery"
     ORCHESTRATE = "Orchestrate"
 
 
-__all__ = ["BaseEnvironment", "Query", "Orchestrate", "EnvironmentType"]
+__all__ = ["BaseEnvironment", "ComplexQuery", "Orchestrate", "EnvironmentType"]

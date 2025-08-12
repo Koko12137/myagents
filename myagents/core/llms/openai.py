@@ -157,3 +157,29 @@ class OpenAiLLM(LLM):
             stop_reason=stop_reason, 
             usage=usage, 
         )
+
+    async def embed(
+        self, 
+        text: str, 
+        dimensions: int = 1024, 
+        **kwargs,
+    ) -> list[float]:
+        """Embedding the text.
+        
+        Args:
+            text (str): 
+                The text to embed. 
+            dimensions (int, defaults to 1024):
+                The dimensions of the embedding.
+            **kwargs:
+                The additional keyword arguments.
+                
+        Returns:
+            list[float]: 
+                The embedding of the text.
+        """
+        response = await self.client.embeddings.create(
+            model=self.model, 
+            input=text, 
+        )
+        return response.data[0].embedding[:dimensions]

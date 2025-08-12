@@ -2,19 +2,22 @@ from enum import Enum
 
 
 class AgentType(Enum):
-    """The type of the agent.
+    """代理的类型
     
-    Attributes:
+    属性:
         PROXY (str):
-            The proxy agent. This agent is a proxy for user.
+            代理代理。这个代理是用户的代理。
         REACT (str):
-            The reason and act agent. This agent works on a basic reason and act workflow. 
+            推理和行动代理。这个代理在基本的推理和行动工作流上工作。
+        TREE_REACT (str):
+            树形推理和行动代理。这个代理在树形推理和行动工作流上工作。
         ORCHESTRATE (str):
-            The orchestrator agent. This agent works on an objective and key outputs orchestration workflow. 
+            编排代理。这个代理在编排工作流上工作。
         PLAN_AND_EXECUTE (str):
-            The plan and executor agent. This agent works on a plan and executor workflow. 
+            计划和执行代理。这个代理在计划和执行工作流上工作。
     """
     PROXY = "ProxyAgent"
     REACT = "ReActAgent"
+    TREE_REACT = "TreeReActAgent"
     ORCHESTRATE = "OrchestrateAgent"
     PLAN_AND_EXECUTE = "PlanAndExecuteAgent"

@@ -1,5 +1,5 @@
-from abc import abstractmethod
 from enum import Enum
+from uuid import uuid4
 from typing import Union
 
 from myagents.core.interface import Stateful
@@ -10,11 +10,16 @@ class StateMixin(Stateful):
     """StateMixin is a mixin class for stateful entity management.
     
     Attributes:
+        uid (str):
+            The unique identifier of the stateful entity.
+        status_class (Enum):
+            The status class of the stateful entity.
         status (Enum):
             The status of the stateful entity.
         history (dict[str, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]):
             The history of the stateful entity.
     """
+    uid: str
     status_class: Enum
     status: Enum
     history: dict[str, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]
@@ -31,7 +36,8 @@ class StateMixin(Stateful):
                 The keyword arguments to be passed to the parent class.
         """
         super().__init__(*args, **kwargs)
-        
+        # Initialize the uid
+        self.uid = uuid4().hex
         # Initialize the status class
         self.status_class = status_class
         # Initialize the history
@@ -65,7 +71,7 @@ class StateMixin(Stateful):
             if len(self.history[self.status]) > 0:
                 last_message = self.history[self.status][-1]
                 if last_message.role == MessageRole.USER:
-                    last_message.content = f"{last_message.content}\n{message.content}"
+                    last_message.content = f"{last_message.content}\n=====[Message Block]=====\n{message.content}"
                 else:
                     self.history[self.status].append(message)
             else:

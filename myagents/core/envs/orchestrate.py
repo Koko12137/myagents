@@ -15,7 +15,7 @@ from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
 from myagents.prompts.envs.query import (
     NAME, 
     PROFILE, 
-    QUERY_ORCHESTRATION_PROMPT, 
+    QUERY_ORCHESTRATE_PROMPT, 
 )
 
 
@@ -78,7 +78,7 @@ class Orchestrate(BaseEnvironment):
     def __init__(
         self, 
         profile: str = PROFILE, 
-        orchestration_prompt: str = QUERY_ORCHESTRATION_PROMPT, 
+        orchestration_prompt: str = QUERY_ORCHESTRATE_PROMPT, 
         **kwargs,
     ) -> None:
         """Initialize the Orchestrate environment.
@@ -107,6 +107,16 @@ class Orchestrate(BaseEnvironment):
         self.answers = OrderedDict()
         # Post initialize
         self.post_init()
+        
+    def __str__(self) -> str:
+        """Get the string representation of the environment.
+        """
+        return f"Orchestrate(name={self.name}, profile={self.profile}, status={self.status})"
+    
+    def __repr__(self) -> str:
+        """Get the string representation of the environment.
+        """
+        return self.__str__()
         
     def post_init(self) -> None:
         """Post initialize the Orchestrate environment.
@@ -171,13 +181,13 @@ class Orchestrate(BaseEnvironment):
         
         # Create a new Task
         task = BaseTreeTaskNode(
-            uid=f"任务{len(self.tasks) + 1}",
+            name=f"任务{len(self.tasks) + 1}",
             objective=question, 
             key_results=description, 
             sub_task_depth=sub_task_depth,
         )
         # Set the task as the sub-task
-        self.tasks[task.uid] = task
+        self.tasks[task.name] = task
         # Log the task
         logger.info(f"任务创建: \n{task.objective}")
         
@@ -247,14 +257,14 @@ class Orchestrate(BaseEnvironment):
                 # Delete all the sub-tasks that are not finished
                 for sub_task in sub_tasks:
                     # Log the deletion
-                    logger.info(f"删除子任务: {sub_task.uid}: {sub_task.objective}")
+                    logger.info(f"删除子任务: {sub_task.name}: {sub_task.objective}")
                     # Delete the sub-task
-                    del target.sub_tasks[sub_task.uid]
+                    del target.sub_tasks[sub_task.name]
                 
                 # Rollback the target to created status
                 target.to_created()
                 # Log the rollback
-                logger.info(f"回滚到创建状态: {target.uid}: {target.objective}")
+                logger.info(f"回滚到创建状态: {target.name}: {target.objective}")
                 # Rollback the self to created status
                 self.to_created()
                 # Log the rollback

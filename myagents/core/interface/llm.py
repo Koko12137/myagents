@@ -7,91 +7,91 @@ from myagents.core.messages import ToolCallResult, AssistantMessage, UserMessage
 
 @runtime_checkable
 class Queue(Protocol):
-    """Queue is a protocol for the queue.
+    """队列的协议
     
-    Attributes:
+    属性:
         queue (Queue):
-            The queue.
+            队列
     """
 
     @abstractmethod
     async def put(self, *args, **kwargs) -> None:
-        """Put an item into the queue.
+        """将项目放入队列
         
-        Args:
+        参数:
             *args:
-                The additional arguments to pass to the put method.
+                传递给put方法的额外参数
             **kwargs:
-                The additional keyword arguments to pass to the put method.
+                传递给put方法的额外关键字参数
         """
         pass
     
     @abstractmethod
     async def get(self, *args, **kwargs) -> Any:
-        """Get an item from the queue.
+        """从队列获取项目
         
-        Args:
+        参数:
             *args:
-                The additional arguments to pass to the get method.
+                传递给get方法的额外参数
             **kwargs:
-                The additional keyword arguments to pass to the get method.
+                传递给get方法的额外关键字参数
         """
         pass
 
 
 class Provider(Enum):
-    """The provider of the LLM.
+    """语言模型的提供商
     
-    - OPENAI (str): The OpenAI provider.
+    - OPENAI (str): OpenAI 提供商
     """
     OPENAI = "openai"
     
 
 @runtime_checkable
 class CompletionConfig(Protocol):
-    """CompletionConfig is a protocol for the LLM config.
+    """语言模型配置的协议
     
-    Attributes:
+    属性:
         provider (Provider):
-            The provider of the LLM.
+            语言模型的提供商
     """
 
     @abstractmethod
     def to_dict(self, provider: Provider) -> dict:
-        """Convert the completion config to a dictionary.
+        """将完成配置转换为字典
         
-        Args:
+        参数:
             provider (Provider):
-                The provider of the LLM.
+                语言模型的提供商
                 
-        Returns:
+        返回:
             dict:
-                The completion config as a dictionary.
+                作为字典的完成配置
         """
         pass
     
     @abstractmethod
     def update(self, **kwargs) -> None:
-        """Update the completion config.
+        """更新完成配置
         
-        Args:
+        参数:
             **kwargs:
-                The additional keyword arguments to update the completion config.
+                更新完成配置的额外关键字参数
         """
         pass
 
 
 @runtime_checkable
 class LLM(Protocol):
-    """LLM is a protocol for Language Model.
+    """语言模型的协议
     
-    Attributes:
-        provider (Provider) :
-            The provider of the LLM.
-        model (str) :
-            The model of the LLM. 
-        base_url (str) :
-            The base URL of the LLM. 
+    属性:
+        provider (Provider):
+            语言模型的提供商
+        model (str):
+            语言模型的模型
+        base_url (str):
+            语言模型的基础URL
     """
     provider: Provider
     model: str
@@ -103,44 +103,43 @@ class LLM(Protocol):
         messages: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
         completion_config: CompletionConfig, 
     ) -> AssistantMessage:
-        """Completion the messages.
+        """补全消息
         
-        Args:
-            messages (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]) :
-                The messages to complete. 
-            completion_config (CompletionConfig) :
-                The completion config. 
+        参数:
+            messages (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]):
+                要补全的消息
+            completion_config (CompletionConfig):
+                补全消息配置
 
-        Returns:
+        返回:
             AssistantMessage:
-                The completed message named AssistantMessage from the LLM.
+                来自语言模型的名为AssistantMessage的完成消息
         """
         pass
 
     
-class StreamLLM(LLM):
-    """StreamLLM is a LLM that is used to stream the LLM calls.
+class EmbeddingLLM(LLM):
+    """EmbeddingLLM 是用于嵌入文本的语言模型
     
-    Attributes:
-        provider (Provider) :
-            The provider of the LLM.
-        model (str) :
-            The model of the LLM. 
-        base_url (str) :
-            The base URL of the LLM. 
+    属性:
+        provider (Provider):
+            语言模型的提供商
+        model (str):
+            语言模型的模型
+        base_url (str):
+            语言模型的基础URL
     """
-    provider: Provider
-    model: str
-    base_url: str
     
     @abstractmethod
-    async def stream(self, *args, **kwargs) -> AsyncGenerator[str, None]:
-        """Stream the LLM calls.
+    async def embed(self, text: str, **kwargs) -> list[float]:
+        """嵌入文本并返回嵌入向量
         
-        Args:
-            *args:
-                The additional arguments to pass to the stream method.
-            **kwargs:
-                The additional keyword arguments to pass to the stream method.
+        参数:
+            text (str):
+                要嵌入的文本
+                
+        返回:
+            list[float]:
+                文本的嵌入向量
         """
         pass

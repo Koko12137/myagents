@@ -1,11 +1,13 @@
 import re
 import json
+from uuid import uuid4
 from collections import OrderedDict
 from typing import Union
 
 from myagents.core.interface import TaskStatus, TaskView, TreeTaskNode
 from myagents.core.messages.message import AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult
 from myagents.core.state_mixin import StateMixin
+
 
 
 class BaseTreeTaskNode(TreeTaskNode, StateMixin):
@@ -17,16 +19,23 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]):
             The history of the status of the task. The key is the status of the task, and it indicates the state of the task. 
             The value is a list of the history messages. 
-        uid (str): 
-            The unique identifier of the task. Do not specify this field. It will be automatically generated.
+        
+        uid (int): 
+            The unique identifier of the task. 
+        name (str): 
+            The unique identifier of the task. 
         objective (str): 
             The objective of the task.
         key_results (str):
             The key results of the task and the verification method for the results.
-        results (str, optional):
+        results (str):
             The results of the task. If the task is not finished, the results is None.
+        next (TreeTaskNode):
+            The next task of the current task. If the task does not have a next task, the next is None.
+        prev (TreeTaskNode):
+            The previous task of the current task. If the task does not have a previous task, the prev is None.
         
-        parent (TreeTaskNode, optional):
+        parent (TreeTaskNode):
             The parent task of the current task. If the task does not have a parent task, the parent is None.
         sub_tasks (OrderedDict[str, TreeTaskNode]):
             The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
@@ -36,46 +45,55 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
     status: TaskStatus
     history: dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]
 
-    uid: str
+    uid: int
+    name: str
     objective: str
     key_results: str
     results: str 
+    next: TreeTaskNode
+    prev: TreeTaskNode
+    
     parent: TreeTaskNode
     sub_tasks: OrderedDict[str, TreeTaskNode]
     sub_task_depth: int
     
     def __init__(
         self, 
-        uid: str, 
+        name: str, 
         objective: str, 
         key_results: str, 
         sub_task_depth: int, 
         parent: TreeTaskNode = None, 
+        prev: TreeTaskNode = None, 
         **kwargs
     ) -> None:
         """
         Initialize the TreeTaskNode.
         
         Args:
-            uid (str):
-                The unique identifier of the task.
+            name (str):
+                The name of the task.
             objective (str):
                 The objective of the task.
             key_results (str):
                 The key results of the task and the verification method for the results.
             sub_task_depth (int):
                 The max number of layers of sub-objective layers that can be split from the objective.
-            parent (TreeTaskNode, optional):
+            parent (TreeTaskNode):
                 The parent task of the current task. If the task does not have a parent task, the parent is None.
         """
         super().__init__(status_class=TaskStatus, **kwargs)
-        self.uid = uid
+        
+        self.name = name
         assert isinstance(objective, str), "The objective must be a string."
         self.objective = objective
         assert isinstance(key_results, str), "The key results must be a string."
         self.key_results = key_results
         # Initialize the results
         self.results = ""
+        # Initialize the next and prev
+        self.next = None
+        self.prev = prev
         
         assert parent is None or isinstance(parent, TreeTaskNode), "The parent must be a TreeTaskNode."
         self.parent = parent
@@ -99,10 +117,10 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         Args:
             format (str):
                 The format of the observation. The format can be:
-                 - "todo": The task will be formatted to a todo markdown string.
-                 - "document": The task will be formatted to a document string.
-                 - "json": The task will be formatted to a json string.
-                 - "answer": The task will be formatted to a answer string.
+                    "todo": The task will be formatted to a todo markdown string.
+                    "document": The task will be formatted to a document string.
+                    "json": The task will be formatted to a json string.
+                    "answer": The task will be formatted to a answer string.
             **kwargs:
                 The additional keyword arguments for the observation.
                 
@@ -131,7 +149,7 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
                 sub_task.to_cancelled()
         
         # Check if sub task depth is 0
-        if self.sub_task_depth == 0:
+        if self.sub_task_depth == 0 and self.prev is None:
             self.to_running()
     
     def is_created(self) -> bool:
@@ -155,14 +173,10 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         """
         self.status = TaskStatus.FINISHED
         
-        # Check if the parent task is created and all the sub-tasks are finished
-        if (
-            self.parent and 
-            self.parent.is_created() and 
-            all(sub_task.is_finished() for sub_task in self.parent.sub_tasks.values())
-        ):
-            # Convert the parent task to running
-            self.parent.to_running()
+        # Check if the next task is created
+        if self.next and self.next.is_created():
+            # Convert the next task to running
+            self.next.to_running()
     
     def is_finished(self) -> bool:
         """Check if the task status is finished.
@@ -231,7 +245,7 @@ class ToDoTaskView(TaskView):
             The template of the task view.
     """
     task: TreeTaskNode
-    template: str = """{status_value} {uid} \n\t - 目标: {objective}\n\t - 关键结果: {key_results}"""
+    template: str = """{status_value} {name} \n\t - 目标: {objective}\n\t - 关键结果: {key_results}"""
     
     def __init__(self, task: TreeTaskNode) -> None:
         self.task = task
@@ -271,7 +285,7 @@ class ToDoTaskView(TaskView):
     def _format_markdown(self) -> str:
         return self.template.format(
             status_value=self.task.status.value,
-            uid=self.task.uid,
+            name=self.task.name,
             objective=self.task.objective, 
             key_results=self.task.key_results, 
         )
@@ -290,9 +304,22 @@ class DocumentTaskView(TaskView):
         self.task = task
         
     def format(self, layer: int = 3) -> str:
-        answer = self.task.results if self.task.results else "[[placeholder]] 任务未完成。"
+        match self.task.status:
+            case TaskStatus.CREATED:
+                answer = f"[[placeholder]] 任务未完成。"
+            case TaskStatus.RUNNING:
+                answer = f"[[placeholder]] 任务正在执行。"
+            case TaskStatus.FINISHED:
+                answer = self.task.results
+            case TaskStatus.ERROR:
+                answer = f"[[placeholder]] 任务执行失败。"
+            case TaskStatus.CANCELED:
+                answer = f"[[placeholder]] 任务已被取消，将被删除。"
+            case _:
+                raise ValueError(f"The status {self.task.status} is not supported.")
+        
         # Add the question and answer of the current task
-        answer = f"# {self.task.uid}: {self.task.objective}\n\n{self.task.key_results}\n\n{answer}"
+        answer = f"# {self.task.objective}\n\n{self.task.key_results}\n\n{answer}"
         
         if layer > 0 and self.task.sub_task_depth > 0:
             sub_answers = [] 
@@ -317,11 +344,11 @@ class JsonTaskView(TaskView):
     of the task, and the value is a dictionary of the task. Example:
     ```json
     {
-        "uid": {
+        "name": {
             "objective": "The objective of the task.",
             "key_results": "The key results of the task and the verification method for the results.",
             "sub_tasks": {
-                "sub_task_uid": {
+                "sub_task_name": {
                     "objective": "The objective of the sub-task.",
                     "key_results": "The key results of the sub-task and the verification method for the results.",
                     "sub_tasks": {}
@@ -348,11 +375,11 @@ class JsonTaskView(TaskView):
     def _format_dict(self, task: TreeTaskNode) -> dict:
         """Recursively format the task and its sub-tasks to a dictionary."""
         return {
-            task.uid: {
+            task.name: {
                 "objective": task.objective,
                 "key_results": task.key_results,
                 "sub_tasks": {
-                    sub_task.uid: self._format_dict(sub_task)[sub_task.uid]
+                    sub_task.name: self._format_dict(sub_task)[sub_task.name]
                     for sub_task in getattr(task, 'sub_tasks', {}).values()
                 }
             }

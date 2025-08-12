@@ -4,20 +4,40 @@ from typing import Optional
 from fastmcp.client import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Workflow, Environment, StepCounter
+from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM
 from myagents.core.agents.base import BaseAgent
+from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
-from myagents.core.workflows import PlanAndExecFlow
+from myagents.core.workflows import PlanAndExecFlow, MemoryPlanAndExecFlow
 from myagents.prompts.workflows.plan_and_exec import (
     PROFILE, 
-    PLAN_SYSTEM_PROMPT, 
-    PLAN_THINK_PROMPT, 
-    PLAN_REFLECT_PROMPT, 
     EXEC_SYSTEM_PROMPT, 
     EXEC_THINK_PROMPT, 
     ERROR_PROMPT, 
 )
+from myagents.prompts.workflows.orchestrate import (
+    PLAN_SYSTEM_PROMPT as ORCH_PLAN_SYSTEM_PROMPT, 
+    PLAN_THINK_PROMPT as ORCH_PLAN_THINK_PROMPT, 
+    PLAN_REFLECT_PROMPT as ORCH_PLAN_REFLECT_PROMPT, 
+    EXEC_SYSTEM_PROMPT as ORCH_EXEC_SYSTEM_PROMPT, 
+    EXEC_THINK_PROMPT as ORCH_EXEC_THINK_PROMPT, 
+    EXEC_REFLECT_PROMPT as ORCH_EXEC_REFLECT_PROMPT, 
+)
 from myagents.prompts.workflows.react import REFLECT_PROMPT
+from myagents.prompts.workflows.plan_and_exec import (
+    EXEC_SYSTEM_PROMPT, 
+    EXEC_THINK_PROMPT, 
+)
+from myagents.prompts.memories.compress import (
+    SYSTEM_PROMPT as MEMORY_COMPRESS_SYSTEM_PROMPT, 
+    REASON_ACT_PROMPT as MEMORY_COMPRESS_REASON_ACT_PROMPT, 
+)
+from myagents.prompts.memories.episode import (
+    SYSTEM_PROMPT as MEMORY_EPISODE_SYSTEM_PROMPT, 
+    REASON_ACT_PROMPT as MEMORY_EPISODE_REASON_ACT_PROMPT, 
+    REFLECT_PROMPT as MEMORY_EPISODE_REFLECT_PROMPT, 
+)
+from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE
 
 
 AGENT_PROFILE = """
@@ -32,7 +52,7 @@ class PlanAndExecAgent(BaseAgent):
     """PlanAndExecAgent is the agent that is used to plan and execute the environment.
     
     Attributes:
-        uid (str):
+        uid (int):
             The unique identifier of the agent.
         name (str):
             The name of the agent.
@@ -59,7 +79,7 @@ class PlanAndExecAgent(BaseAgent):
             The format of the observation the target. 
     """
     # Basic information
-    uid: str
+    uid: int
     name: str
     agent_type: AgentType
     profile: str
@@ -85,15 +105,20 @@ class PlanAndExecAgent(BaseAgent):
         llm: LLM, 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
-        plan_system_prompt: str = PLAN_SYSTEM_PROMPT, 
-        plan_think_prompt: str = PLAN_THINK_PROMPT, 
-        plan_reflect_prompt: str = PLAN_REFLECT_PROMPT, 
+        orch_plan_system_prompt: str = ORCH_PLAN_SYSTEM_PROMPT, 
+        orch_plan_think_prompt: str = ORCH_PLAN_THINK_PROMPT, 
+        orch_plan_reflect_prompt: str = ORCH_PLAN_REFLECT_PROMPT, 
+        orch_exec_system_prompt: str = ORCH_EXEC_SYSTEM_PROMPT, 
+        orch_exec_think_prompt: str = ORCH_EXEC_THINK_PROMPT, 
+        orch_exec_reflect_prompt: str = ORCH_EXEC_REFLECT_PROMPT, 
         exec_system_prompt: str = EXEC_SYSTEM_PROMPT, 
         exec_think_prompt: str = EXEC_THINK_PROMPT, 
         exec_reflect_prompt: str = REFLECT_PROMPT, 
         error_prompt: str = ERROR_PROMPT, 
-        plan_think_format: str = "todo", 
-        plan_reflect_format: str = "todo", 
+        orch_plan_think_format: str = "todo", 
+        orch_plan_reflect_format: str = "todo", 
+        orch_exec_think_format: str = "todo", 
+        orch_exec_reflect_format: str = "json", 
         exec_think_format: str = "todo", 
         exec_reflect_format: str = "document", 
         agent_format: str = "todo", 
@@ -146,17 +171,22 @@ class PlanAndExecAgent(BaseAgent):
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             prompts={
-                "plan_system_prompt": plan_system_prompt, 
-                "plan_reason_act_prompt": plan_think_prompt, 
-                "plan_reflect_prompt": plan_reflect_prompt, 
+                "orch_plan_system_prompt": orch_plan_system_prompt, 
+                "orch_plan_reason_act_prompt": orch_plan_think_prompt, 
+                "orch_plan_reflect_prompt": orch_plan_reflect_prompt, 
+                "orch_exec_system_prompt": orch_exec_system_prompt, 
+                "orch_exec_reason_act_prompt": orch_exec_think_prompt, 
+                "orch_exec_reflect_prompt": orch_exec_reflect_prompt, 
                 "exec_system_prompt": exec_system_prompt, 
                 "exec_reason_act_prompt": exec_think_prompt, 
                 "exec_reflect_prompt": exec_reflect_prompt, 
                 "error_prompt": error_prompt, 
             }, 
             observe_formats={
-                "plan_reason_act_format": plan_think_format, 
-                "plan_reflect_format": plan_reflect_format, 
+                "orch_plan_reason_act_format": orch_plan_think_format, 
+                "orch_plan_reflect_format": orch_plan_reflect_format, 
+                "orch_exec_reason_act_format": orch_exec_think_format, 
+                "orch_exec_reflect_format": orch_exec_reflect_format, 
                 "exec_reason_act_format": exec_think_format, 
                 "exec_reflect_format": exec_reflect_format, 
                 "agent_format": agent_format, 
@@ -176,6 +206,202 @@ class PlanAndExecAgent(BaseAgent):
 
     def __str__(self) -> str:
         return f"PlanAndExecAgent({self.name})"
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+
+
+class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
+    """MemoryPlanAndExecAgent is the agent that is used to plan and execute the environment with memory.
+    
+    Attributes:
+        uid (int):
+            The unique identifier of the agent.
+        name (str):
+            The name of the agent.
+        agent_type (AgentType):
+            The type of the agent.
+        profile (str):
+            The profile of the agent.
+        llm (LLM):tee
+            The LLM to use for the agent. 
+        mcp_client (MCPClient):
+            The MCP client to use for the agent.
+        workflow (Workflow):
+            The workflow to that the agent is running on.
+        env (Environment):
+            The environment to that the agent is running on.
+        step_counters (dict[str, StepCounter]):
+            The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
+        lock (Lock):
+            The synchronization lock of the agent. The agent can only work on one task at a time. 
+            If the agent is running concurrently, the global context may not be working properly.
+        prompts (dict[str, str]):
+            The prompts for running the workflow. 
+        observe_formats (dict[str, str]):
+            The format of the observation the target. 
+    """
+    # Basic information
+    uid: int
+    name: str
+    agent_type: AgentType
+    profile: str
+    # LLM and MCP client
+    llm: LLM
+    mcp_client: MCPClient
+    # Tools
+    tools: dict[str, FastMcpTool]
+    # Workflow and environment
+    workflow: Workflow
+    env: Environment
+    # Step counters for the agent
+    step_counters: dict[str, StepCounter]
+    # Concurrency limit
+    lock: Lock
+    # Prompts and observe format
+    prompts: dict[str, str]
+    observe_formats: dict[str, str]
+    
+    def __init__(
+        self, 
+        name: str, 
+        llm: LLM, 
+        embedding_llm: EmbeddingLLM, 
+        extraction_llm: LLM, 
+        step_counters: list[StepCounter], 
+        episode_memory: VectorMemoryCollection, 
+        mcp_client: Optional[MCPClient] = None, 
+        orch_plan_system_prompt: str = ORCH_PLAN_SYSTEM_PROMPT, 
+        orch_plan_think_prompt: str = ORCH_PLAN_THINK_PROMPT, 
+        orch_plan_reflect_prompt: str = ORCH_PLAN_REFLECT_PROMPT, 
+        orch_exec_system_prompt: str = ORCH_EXEC_SYSTEM_PROMPT, 
+        orch_exec_think_prompt: str = ORCH_EXEC_THINK_PROMPT, 
+        orch_exec_reflect_prompt: str = ORCH_EXEC_REFLECT_PROMPT, 
+        exec_system_prompt: str = EXEC_SYSTEM_PROMPT, 
+        exec_think_prompt: str = EXEC_THINK_PROMPT, 
+        exec_reflect_prompt: str = REFLECT_PROMPT, 
+        error_prompt: str = ERROR_PROMPT, 
+        orch_plan_think_format: str = "todo", 
+        orch_plan_reflect_format: str = "todo", 
+        orch_exec_think_format: str = "todo", 
+        orch_exec_reflect_format: str = "json", 
+        exec_think_format: str = "todo", 
+        exec_reflect_format: str = "document", 
+        agent_format: str = "todo", 
+        # Memory Compress
+        memory_compress_system_prompt: str = MEMORY_COMPRESS_SYSTEM_PROMPT, 
+        memory_compress_reason_act_prompt: str = MEMORY_COMPRESS_REASON_ACT_PROMPT, 
+        # Episode Memory
+        episode_memory_system_prompt: str = MEMORY_EPISODE_SYSTEM_PROMPT, 
+        episode_memory_reason_act_prompt: str = MEMORY_EPISODE_REASON_ACT_PROMPT, 
+        episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
+        # Memory Format Template
+        memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
+        **kwargs, 
+    ) -> None: 
+        """
+        Initialize the MemoryPlanAndExecAgent.
+        
+        Args:
+            name (str):
+                The name of the agent.
+            llm (LLM):
+                The LLM to use for the agent.
+            embedding_llm (EmbeddingLLM):
+                The embedding LLM to use for the agent.
+            extraction_llm (LLM):
+                The extraction LLM to use for the agent.
+            step_counters (list[StepCounter]):
+                The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
+            mcp_client (MCPClient, optional):
+                The MCP client to use for the agent.
+            episode_memory (VectorMemoryDB):
+                The vector memory to use for the agent.
+            plan_system_prompt (str, optional):
+                The system prompt of the plan stage.
+            plan_think_prompt (str, optional):
+                The think prompt of the plan stage.
+            plan_reflect_prompt (str, optional):
+                The reflect prompt of the plan stage. 
+            exec_system_prompt (str, optional):
+                The system prompt of the exec stage.
+            exec_think_prompt (str, optional):
+                The think prompt of the exec stage.
+            exec_reflect_prompt (str, optional):
+                The reflect prompt of the exec stage.
+            error_prompt (str, optional):
+                The error prompt of the workflow.
+            plan_think_format (str, optional):
+                The observation format of the plan think stage.
+            plan_reflect_format (str, optional):
+                The observation format of the plan reflect stage.
+            exec_think_format (str, optional):
+                The observation format of the exec think stage.
+            exec_reflect_format (str, optional):
+                The observation format of the exec reflect stage.
+            agent_format (str, optional):
+                The observation format of the agent.
+            memory_system_prompt (str, optional):
+                The system prompt of the memory.
+            memory_reason_act_prompt (str, optional):
+                The reason act prompt of the memory.
+            memory_reflect_prompt (str, optional):
+                The reflect prompt of the memory.
+            memory_prompt_template (str, optional):
+                The prompt template of the memory.
+            **kwargs:
+                The keyword arguments to be passed to the parent class.
+        """
+        super().__init__(
+            llm=llm, 
+            name=name, 
+            mcp_client=mcp_client, 
+            step_counters=step_counters, 
+            extraction_llm=extraction_llm, 
+            orch_plan_system_prompt=orch_plan_system_prompt, 
+            orch_plan_think_prompt=orch_plan_think_prompt, 
+            orch_plan_reflect_prompt=orch_plan_reflect_prompt, 
+            orch_exec_system_prompt=orch_exec_system_prompt, 
+            orch_exec_think_prompt=orch_exec_think_prompt, 
+            orch_exec_reflect_prompt=orch_exec_reflect_prompt, 
+            exec_system_prompt=exec_system_prompt, 
+            exec_think_prompt=exec_think_prompt, 
+            exec_reflect_prompt=exec_reflect_prompt, 
+            error_prompt=error_prompt, 
+            orch_plan_think_format=orch_plan_think_format, 
+            orch_plan_reflect_format=orch_plan_reflect_format, 
+            orch_exec_think_format=orch_exec_think_format, 
+            orch_exec_reflect_format=orch_exec_reflect_format, 
+            exec_think_format=exec_think_format, 
+            exec_reflect_format=exec_reflect_format, 
+            agent_format=agent_format, 
+            # Memory
+            episode_memory=episode_memory, 
+            embedding_llm=embedding_llm, 
+            # Memory Compress
+            memory_compress_system_prompt=memory_compress_system_prompt, 
+            memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
+            # Episode Memory
+            episode_memory_system_prompt=episode_memory_system_prompt, 
+            episode_memory_reason_act_prompt=episode_memory_reason_act_prompt, 
+            episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
+            # Memory Format Template
+            memory_prompt_template=memory_prompt_template, 
+            **kwargs,
+        )
+        
+        # Read the workflow profile
+        # Initialize the workflow for the agent
+        self.workflow = MemoryPlanAndExecFlow(
+            prompts=self.prompts, 
+            observe_formats=self.observe_formats, 
+            **kwargs,
+        )
+        # Register the agent to the workflow
+        self.workflow.register_agent(self)
+
+    def __str__(self) -> str:
+        return f"MemoryPlanAndExecAgent({self.name})"
     
     def __repr__(self) -> str:
         return self.__str__()

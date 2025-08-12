@@ -3,8 +3,7 @@ import os
 
 from datasets import load_from_disk
 
-from myagents.core.envs.query import OutputType
-from myagents.core.envs.query import Query
+from myagents.core.envs.complex_query import ComplexQuery, OutputType
 from myagents.core.factory import AutoAgent, AutoAgentConfig
 
 
@@ -25,19 +24,19 @@ async def test_async_query():
             os.environ[key] = value
     
     # Create a list of agents according to the config file
-    with open("configs/agents.json", "r") as f:
+    with open("configs/agents_memory.json", "r") as f:
         config = AutoAgentConfig.model_validate(json.load(f))
-    
+        
     # Create Factory
     factory = AutoAgent()
     # Build ReActFlow
-    query: Query = factory.auto_build(config=config)
+    query: ComplexQuery = await factory.auto_build(config=config)
     
     # Run the query
     answer = await query.run(
         question="请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A,B,C,D中的一个", 
         description=data[0]["question"],
-        sub_task_depth=1,
+        sub_task_depth=2,
         output_type=OutputType.SELECTION,
     )
     print("-" * 60)

@@ -1,515 +1,717 @@
 from abc import abstractmethod
+from asyncio import Semaphore, Lock
 from enum import Enum
-from typing import Protocol, runtime_checkable, Union, Optional, Any, Callable, Awaitable, OrderedDict
+from typing import Any, Union, Protocol, runtime_checkable
 
-from mcp import Tool as MCPTool
 from fastmcp.tools import Tool as FastMcpTool
+from fastmcp import Client as MCPClient
 
-from myagents.core.messages.message import AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult
-
-
-@runtime_checkable
-class Context(Protocol):
-    """Context records the runtime information for global context. It is used to pass the information between 
-    tool calling and the workflow. It can also be a general variable container for the life cycle of the workflow.  
-    One context contains key-value pairs that set by the workflow, and the context visibility can be controlled 
-    by layer of the context. 
-    
-    Attributes:
-        prev (Context):
-            The previous context.
-        next (Context):
-            The next context.
-        key_values (dict[str, Any]):
-            The key values of the context.
-    """
-    prev: Optional['Context']
-    next: Optional['Context']
-    key_values: dict[str, Any]
-    
-    @abstractmethod
-    def append(self, key: str, value: Any) -> None:
-        """Append a key-value pair to the context.
-        
-        Args:
-            key (str):
-                The key of the value.
-            value (Any):
-                The value of the key.
-        """
-        pass
-    
-    @abstractmethod
-    def update(self, key: str, value: Any) -> None:
-        """Update the value of the key.
-        
-        Args:
-            key (str):
-                The key of the value.
-            value (Any):
-                The value of the key.
-        """
-        pass
-    
-    @abstractmethod
-    def get(self, key: str) -> Any:
-        """Get the value of the key.
-        
-        Args:
-            key (str):
-                The key of the value.
-
-        Returns:
-            Any:
-                The value of the key.
-                
-        Raises:
-            KeyError:
-                If the key is not found.
-        """
-        pass
-    
-    @abstractmethod
-    def pop(self, key: str) -> Any:
-        """Pop the value of the key.
-        
-        Args:
-            key (str):
-                The key of the value.
-                
-        Returns:
-            Any:
-                The value of the key.
-                
-        Raises:
-            KeyError:
-                If the key is not found.
-        """
-        pass
-    
-    @abstractmethod
-    def create_next(self, **kwargs) -> 'Context':
-        """Create the next context.
-        
-        Args:
-            **kwargs:
-                The keyword arguments to create the next context.
-                
-        Returns:
-            Context:
-                The next context.
-        """
-        pass
-    
-    @abstractmethod
-    def done(self) -> 'Context':
-        """Done the context and return the previous context.
-        
-        Returns:
-            Context:
-                The previous context.
-        """
-        pass
+from myagents.core.interface.base import Stateful, ToolsCaller, Scheduler
+from myagents.core.interface.llm import LLM, CompletionConfig, EmbeddingLLM
+from myagents.core.interface.memory import MemoryOperation, VectorMemoryCollection, VectorMemoryItem
+from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
 
-@runtime_checkable
-class Status(Protocol):
-    """Status is a protocol for the class that maintaining several statuses, and it can be observed
-    according to the current status and the format of the observation.
+class StepCounter(Protocol):
+    """步骤计数器的协议。限制可以是最大自动步骤或最大余额成本。最好为所有代理使用相同的步骤计数器。
     
-    Attributes:
-        CREATED (Union[str, int]): The created status.
-        RUNNING (Union[str, int]): The running status.
-        FINISHED (Union[str, int]): The finished status.
-        ERROR (Union[str, int]): The error status.
-        CANCELLED (Union[str, int]): The cancelled status.
-    """
-    CREATED: Union[str, int]
-    RUNNING: Union[str, int]
-    FINISHED: Union[str, int]
-    ERROR: Union[str, int]
-    CANCELLED: Union[str, int]
-
-
-@runtime_checkable
-class Stateful(Protocol):
-    """Stateful is a protocol for the class that maintaining several statuses, and it can be observed
-    according to the current status and the format of the observation.
-    
-    Attributes:
-        status (Status):
-            The status of the stateful entity.
-        history (dict[Status, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]):
-            The history of the stateful entity.
-    """
-    status: Status
-    history: dict[Status, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]]
-    
-    @abstractmethod
-    async def observe(self, format: str, **kwargs) -> str:
-        """Observe the state of the stateful entity according to the current status and the 
-        format of the observation.
-        
-        Args:
-            format (str):
-                The format of the observation.
-            **kwargs:
-                The additional keyword arguments for the observation.
-                
-        Returns:
-            str:
-                The observation of the stateful entity.
-        """
-        pass
-
-    @abstractmethod
-    def update(
-        self, 
-        message: Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult],
-    ) -> None:
-        """Update the history of the stateful entity according to the current status.
-        
-        Args:
-            message (Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]):
-                The message to be updated.
-        """
-        pass
-    
-    @abstractmethod
-    def get_history(self) -> list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]:
-        """Get the history of the stateful entity according to the current status.
-        
-        Returns:
-            list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]:
-                The history of the stateful entity according to the current status.
-        """
-        pass
-    
-    @abstractmethod
-    def reset(self) -> None:
-        """Reset the history for all the statuses and set the current status to created.
-        """
-        pass
-    
-    @abstractmethod
-    def get_status(self) -> Enum:
-        """Get the current status of the stateful entity. 
-        
-        Returns:
-            Enum:
-                The current status of the stateful entity.
-        """
-        pass
-    
-    @abstractmethod
-    def to_created(self) -> None:
-        """Set the current status of the stateful entity to created.
-        """
-        pass
-    
-    @abstractmethod
-    def is_created(self) -> bool:
-        """Check if the current status of the stateful entity is created.
-        """
-        pass
-    
-    @abstractmethod
-    def to_running(self) -> None:
-        """Set the current status of the stateful entity to running.
-        """
-        pass
-    
-    @abstractmethod
-    def is_running(self) -> bool:
-        """Check if the current status of the stateful entity is running.
-        """
-        pass
-    
-    @abstractmethod
-    def to_finished(self) -> None:
-        """Set the current status of the stateful entity to finished.
-        """
-        pass
-    
-    @abstractmethod
-    def is_finished(self) -> bool:
-        """Check if the current status of the stateful entity is finished.
-        """
-        pass
-    
-    @abstractmethod
-    def to_error(self) -> None:
-        """Set the current status of the stateful entity to error.
-        """
-        pass
-    
-    @abstractmethod
-    def is_error(self) -> bool:
-        """Check if the current status of the stateful entity is error.
-        """
-        pass
-    
-    @abstractmethod
-    def to_cancelled(self) -> None:
-        """Set the current status of the stateful entity to cancelled.
-        """
-        pass
-    
-    @abstractmethod
-    def is_cancelled(self) -> bool:
-        """Check if the current status of the stateful entity is cancelled.
-        """
-        pass
-
-
-@runtime_checkable
-class ToolsCaller(Protocol):
-    """ToolsCaller is a protocol for the tools caller. It is used to call the tools.
-    
-    Attributes:
-        tools (dict[str, Union[FastMcpTool, MCPTool]]):
-            The tools of the caller.
-        context (Context):
-            The context of the caller.
-    """
-    # Tools and global context container
-    tools: dict[str, Union[FastMcpTool, MCPTool]]
-    context: Context
-    
-    @abstractmethod
-    def post_init(self) -> None:
-        """Post init the tools caller.
-        
-        Example:
-        ```python
-        async def post_init(self) -> None:
-            # Register a tool to the caller in the post init method. 
-            @self.register_tool("tool_name")
-            async def tool_function(self, *args, **kwargs) -> ToolCallResult:
-                pass
-        ```
-        """
-        pass
-
-    @abstractmethod
-    def add_tool(
-        self, 
-        name: str, 
-        tool: Union[Awaitable[ToolCallResult], Callable[..., ToolCallResult]], 
-        tags: list[str] = [], 
-        replace: bool = True,
-    ) -> None:
-        """Add a tool to the caller.
-        
-        Args:
-            name (str):
-                The name of the tool.
-            tool (Union[Awaitable[ToolCallResult], Callable[..., ToolCallResult]]):
-                The tool to add. This tool should return the tool call result. 
-            tags (list[str], optional):
-                The tags of the tool.
-            replace (bool, optional, defaults to True):
-                Whether to replace the tool if it is already registered.
-                
-        Returns:
-            Union[Awaitable[ToolCallResult], Callable[..., ToolCallResult]]:
-                The tool to register.
-        """
-        pass
-    
-    @abstractmethod
-    def register_tool(
-        self, 
-        name: str, 
-        tags: list[str] = [], 
-        replace: bool = True,
-    ) -> Union[Awaitable[ToolCallResult], Callable[..., ToolCallResult]]:
-        """Register a tool to the caller.
-        
-        Args:
-            name (str):
-                The name of the tool.
-            tags (list[str], optional):
-                The tags of the tool.
-            replace (bool, optional, defaults to True):
-                Whether to replace the tool if it is already registered.
-                
-        Returns:
-            Union[Awaitable[ToolCallResult], Callable[..., ToolCallResult]]:
-                The tool to register.
-        """
-        pass
-
-    @abstractmethod
-    async def call_tool(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
-        """Call a tool.
-        
-        Args:
-            tool_call (ToolCallRequest):
-                The tool call request.
-            **kwargs:
-                The additional keyword arguments for calling the tool.
-                
-        Returns:
-            ToolCallResult:
-                The tool call result.
-        """
-        pass
-
-
-class TaskStatus(Enum):
-    """Task status indicates the status of the task. This is not the final status of the task, but the 
-    status of the task in the current work flow. If the answer is still None, the task is not done. 
-    
-    Attributes:
-        CREATED (str):
-            `[[ CREATED ]]` This needs to be orchestrated by the workflow. 
-        PLANNING (str):
-            `[[ PLANNING ]]` This Task is creating sub-tasks. If the planning is finished, the task will be set to `- [c]` checking status.
-        RUNNING (str):
-            `[[ RUNNING ]]` This Task is running the sub-tasks. If the running is finished, the task will be set to `[[ FINISHED ]]` finished status. 
-            If there is any error during the running, the task will be set to `[[ ERROR ]]` error status directly. 
-        FINISHED (str):
-            `[[ FINISHED ]]` This means the task is finished. But the answer may be None. So it needs double check. 
-        ERROR (str):
-            `[[ ERROR ]]` This Task is error but could be recovered. If the error is not recovered, the task will be set to `- [k]` cancelled status.
-        CANCELED (str):
-            `[[ CANCELED ]]` This Task is cancelled and could not be recovered. This will cause an system error. 
-    """
-    CREATED     = "[ CREATED ]"
-    RUNNING     = "[ RUNNING ]"
-    FINISHED    = "[ FINISHED ]"
-    ERROR       = "[ ERROR ]"
-    CANCELED    = "[ CANCELED ]"
-
-
-class Task(Stateful):
-    """Task is the protocol for all the tasks. It is a general task that can be used for the workflow.
-    
-    Attributes:
-        status (TaskStatus):
-            The status of the current task.
-        history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
-            The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
-            The value is a list of the history messages. 
-            
+    属性:
         uid (str):
-            The unique identifier of the task. Do not specify this field. It will be automatically generated.
-        objective (str):
-            The objective of the task.
-        key_results (str):
-            The key results of the task and the verification method for the results.
-        results (str):
-            The results of the task. If the task is not finished, the results is None.
+            步骤计数器的唯一名称
+        limit (Union[int, float]):
+            步骤计数器的限制
+        current (Union[int, float]):
+            步骤计数器的当前步骤
+        lock (Lock):
+            步骤计数器的锁
     """
     uid: str
-    objective: str
-    key_results: str
-    results: str
-
-
-class TreeTaskNode(Task):
-    """TreeTaskNode is the protocol for all the tasks. It is a tree structure of the tasks.
-    
-    Attributes:
-        status (TaskStatus):
-            The status of the current task.
-        history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
-            The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
-            The value is a list of the history messages. 
-        
-        uid (str): 
-            The unique identifier of the task. Do not specify this field. It will be automatically generated.
-        objective (str):
-            The objective of the task.
-        key_results (str):
-            The key results of the task and the verification method for the results.
-        results (str):
-            The results of the task. If the task is not finished, the results is None
-            
-        parent (TreeTaskNode):
-            The parent task of the current task. If the task does not have a parent task, the parent is None.
-        sub_tasks (OrderedDict[str, TreeTaskNode]):
-            The sub-tasks of the current task. If the task does not have any sub-tasks, the sub-tasks is an empty dictionary.
-        sub_task_depth (int):
-            The sub task depth is the number of layers of sub-objective layers that can be split from the objective.
-    """
-    # Parent and sub-tasks
-    parent: 'TreeTaskNode'
-    # NOTE: The key should be the objective of the sub-task, the value should be the sub-task instance. 
-    sub_tasks: OrderedDict[str, 'TreeTaskNode']
-    sub_task_depth: int
+    limit: Union[int, float]
+    current: Union[int, float]
+    lock: Lock
     
     @abstractmethod
-    def to_created(self) -> None:
-        """Set the current status of the stateful entity to created. This will also set the sub-tasks to cancelled if the 
-        sub-tasks are not finished.
+    async def reset(self) -> None:
+        """重置步骤计数器的当前步骤
+        
+        返回:
+            None
         """
         pass
     
     @abstractmethod
-    def to_running(self) -> None:
-        """Set the current status of the stateful entity to running. This will also set the parent task to running if the 
-        parent task is created and all the sub-tasks are running.
+    async def update_limit(self, limit: Union[int, float]) -> None:
+        """更新步骤计数器的限制
+        
+        参数:
+            limit (Union[int, float]):
+                步骤计数器的限制
         """
         pass
     
     @abstractmethod
-    def to_finished(self) -> None:
-        """Set the current status of the stateful entity to finished. This will also set the parent task to finished if the 
-        parent task is running and all the sub-tasks are finished.
+    async def check_limit(self) -> bool:
+        """检查步骤计数器的限制是否已达到
+        
+        返回:
+            bool:
+                步骤计数器的限制是否已达到
+        
+        异常:
+            MaxStepsError:
+                步骤计数器引发的最大步骤错误
         """
         pass
-
-
-class GraphTaskNode(Task):
-    """GraphTaskNode is the protocol for all the tasks. It is a graph structure of the tasks.
     
-    Attributes:
-        status (TaskStatus):
-            The status of the current task.
-        history (dict[TaskStatus, list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult]]]):
-            The history of the stateful object. The key is the status of the task, and it indicates the state of the task. 
-            The value is a list of the history messages. 
+    @abstractmethod
+    async def step(self, step: Union[int, float]) -> None:
+        """增加步骤计数器的当前步骤
         
-        uid (str):
-            The unique identifier of the task. Do not specify this field. It will be automatically generated.
-        objective (str):
-            The objective of the task.
-        key_results (str):
-            The key results of the task and the verification method for the results.
-        results (str):
-            The results of the task. If the task is not finished, the results is None.
+        参数:
+            step (Union[int, float]):
+                要增加的步骤
         
-        dependencies (OrderedDict[str, GraphTaskNode]):
-            The dependencies of the task. The key is the unique identifier of the dependency task, and the value is the dependency task.
-    """
-    # Dependencies
-    dependencies: OrderedDict[str, 'GraphTaskNode']
+        返回:
+            None 
+        
+        异常:
+            MaxStepsError:
+                步骤计数器引发的最大步骤错误
+        """
+        pass
+    
+    @abstractmethod
+    async def recharge(self, limit: Union[int, float]) -> None:
+        """为步骤计数器充值限制
+        
+        参数:
+            limit (Union[int, float]):
+                步骤计数器的限制
+        """
+        pass
 
 
 @runtime_checkable
-class TaskView(Protocol):
-    """TaskView defines the format protocol for the task. 
+class Agent(Protocol):
+    """在环境中运行的代理，根据工作流处理任务
     
-    Attributes:
-        task (Task):
-            The task to be viewed.
+    属性:
+        uid (str):
+            代理的唯一标识符
+        name (str):
+            代理的名称
+        agent_type (Enum):
+            代理的类型
+        profile (str):
+            代理的描述文件。描述代理的行为和目标
+        llm (LLM):
+            代理使用的语言模型
+        mcp_client (MCPClient):
+            代理使用的MCP客户端
+        tools (dict[str, FastMcpTool]):
+            代理使用的工具
+        workflow (Workflow):
+            代理运行的工作流
+        env (Environment):
+            代理运行的环境
+        step_counters (dict[str, StepCounter]):
+            代理使用的步骤计数器。任何一个达到限制，代理就会停止
+        lock (Lock):
+            代理的同步锁。代理一次只能处理一个任务
+        prompts (dict[str, str]):
+            运行工作流的提示
+        observe_format (dict[str, str]):
+            目标观察的格式
     """
-    task: Task
+    # 基本信息
+    uid: str
+    name: str
+    agent_type: Enum
+    profile: str
+    # 语言模型和MCP客户端
+    llm: LLM
+    mcp_client: MCPClient
+    tools: dict[str, FastMcpTool]
+    # 工作流和环境以及运行上下文
+    workflow: 'Workflow'
+    env: 'Environment'
+    # 代理的步骤计数器
+    step_counters: dict[str, StepCounter]
+    # 同步锁
+    lock: Lock
+    # 提示和观察格式
+    prompts: dict[str, str]
+    observe_format: dict[str, str]
     
     @abstractmethod
-    def format(self, *args, **kwargs) -> str:
-        """Format the task view to a string. 
+    async def prompt(
+        self, 
+        prompt: Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult], 
+        target: Stateful, 
+        **kwargs
+    ) -> None:
+        """环境向智能体发送提示
         
-        Args:
-            *args:
-                The additional arguments to pass to the format method.
+        参数:
+            prompt (Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]):
+                提示信息
+            target (Stateful):
+                提示的目标
             **kwargs:
-                The additional keyword arguments to pass to the format method.
+                提示的额外关键字参数
         
-        Returns: 
+        返回:
+            None
+        """
+        pass
+    
+    @abstractmethod
+    async def observe(
+        self, 
+        target: Stateful, 
+        observe_format: str, 
+        **kwargs, 
+    ) -> list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
+        """观察目标
+        
+        参数:
+            target (Stateful):
+                要观察的有状态实体
+            observe_format (str):
+                观察的格式。这必须是目标的有效观察格式
+            **kwargs:
+                观察目标的额外关键字参数
+
+        返回:
+            list[Union[SystemMessage, UserMessage, AssistantMessage, ToolCallResult]]:
+                从目标观察到的最新信息
+        """
+        pass 
+    
+    @abstractmethod
+    async def think(
+        self, 
+        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
+        completion_config: CompletionConfig, 
+        **kwargs, 
+    ) -> AssistantMessage:
+        """思考任务或环境的观察结果
+        
+        参数:
+            observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
+                从任务或环境观察到的消息
+            completion_config (CompletionConfig):
+                代理的完成配置
+            **kwargs:
+                思考任务或环境的额外关键字参数
+                
+        返回:
+            AssistantMessage:
+                语言模型思考的完成消息
+        """
+        pass 
+    
+    @abstractmethod
+    async def act(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
+        """根据工具调用采取行动。其他参数可以通过关键字参数提供给工具调用
+        
+        参数:
+            tool_call (ToolCallRequest):
+                工具调用请求，包括工具调用ID和工具调用参数
+            **kwargs:
+                调用工具的额外关键字参数
+                
+        返回:
+            ToolCallResult:
+                代理在环境或任务上行动后返回的工具调用结果
+            
+        异常:
+            ValueError:
+                如果工具调用名称未注册到工作流或环境
+        """
+        pass 
+    
+    @abstractmethod
+    async def run(
+        self, 
+        target: Stateful, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        completion_config: CompletionConfig, 
+        **kwargs
+    ) -> AssistantMessage:
+        """在任务或环境上运行代理。在运行代理之前，应该获取代理的锁
+        
+        参数:
+            target (Stateful):
+                运行代理的有状态实体
+            max_error_retry (int):
+                目标出错时重试代理的最大次数
+            max_idle_thinking (int):
+                代理空闲思考的最大次数
+            completion_config (CompletionConfig):
+                代理的完成配置
+            **kwargs:
+                运行代理的额外关键字参数
+                
+        返回:
+            AssistantMessage:
+                代理在有状态实体上运行后返回的助手消息
+        """
+        pass
+    
+    @abstractmethod
+    def register_counter(self, counter: StepCounter) -> None:
+        """向代理注册步骤计数器
+        
+        参数:
+            counter (StepCounter):
+                要注册的步骤计数器
+        """
+        pass
+    
+    @abstractmethod
+    def register_workflow(self, workflow: 'Workflow') -> None:
+        """向代理注册工作流
+        
+        参数:
+            workflow (Workflow):
+                要注册的工作流
+        """
+        pass
+    
+    @abstractmethod
+    def register_env(self, env: 'Environment') -> None:
+        """向代理注册环境
+        
+        参数:
+            env (Environment):
+                要注册的环境
+        """
+        pass
+
+
+class MemoryAgent(Agent):
+    """MemoryAgent 是一个可以使用记忆来思考和行动的代理
+    """
+    
+    @abstractmethod
+    def get_embedding_llm(self) -> EmbeddingLLM:
+        """获取智能体的嵌入模型
+        
+        返回:
+            LLM:
+                智能体的嵌入模型
+        """
+        pass
+    
+    @abstractmethod
+    def get_extraction_llm(self) -> LLM:
+        """获取智能体的记忆提取模型
+        
+        返回:
+            LLM:
+                智能体的记忆提取模型
+        """
+        pass
+    
+    @abstractmethod
+    def get_memory_workflow(self) -> 'MemoryWorkflow':
+        """获取记忆工作流
+        
+        返回:
+            MemoryWorkflow:
+                记忆工作流
+        """
+        pass
+    
+    @abstractmethod
+    def get_memory_collection(self, memory_type: str) -> VectorMemoryCollection:
+        """获取向量记忆集合
+        
+        参数:
+            memory_type (str):
+                记忆类型
+        
+        返回:
+            VectorMemoryCollection:
+                向量记忆集合
+        """
+        pass
+    
+    @abstractmethod
+    async def embed(self, text: str, dimensions: int, **kwargs) -> list[float]:
+        """嵌入文本
+        
+        参数:
+            text (str):
+                文本
+            dimensions (int):
+                嵌入维度
+            **kwargs:
+                额外参数
+        
+        返回:
+            list[float]:
+                嵌入向量
+        """
+        pass
+    
+    @abstractmethod
+    async def think_extract(
+        self, 
+        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
+        completion_config: CompletionConfig, 
+        **kwargs,
+    ) -> AssistantMessage:
+        """思考记忆提取。
+        
+        参数:
+            observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
+                观察到的消息
+            completion_config (CompletionConfig):
+                对话补全配置
+            **kwargs:
+                额外参数
+                
+        返回:
+            AssistantMessage:
+                思考记忆提取的完成消息
+        """
+        pass
+    
+    @abstractmethod
+    async def extract_memory(
+        self, 
+        target: Stateful, 
+        **kwargs,
+    ) -> Stateful:
+        """从有状态实体中提取记忆，并更新状态和记忆
+        
+        参数:
+            target (Stateful):
+                有状态实体
+            **kwargs:
+                额外参数
+                
+        返回:
+            Stateful:
+                更新后的有状态实体
+        """
+        pass
+    
+    @abstractmethod
+    async def search_memory(
+        self, 
+        text: str, 
+        limit: int, 
+        **kwargs, 
+    ) -> str:
+        """从记忆中搜索信息
+        
+        参数:
+            text (str):
+                文本
+            limit (int):
+                限制
+            **kwargs:
+                额外参数
+        
+        返回:
             str:
-                The formatted task view. 
+                从记忆中搜索的信息
+        """
+        pass
+    
+    @abstractmethod
+    def create_memory(self, memory_type: str, **kwargs) -> VectorMemoryItem:
+        """创建记忆
+        
+        参数:
+            memory_type (str):
+                记忆类型
+            **kwargs:
+                额外参数
+                
+        返回:
+            VectorMemoryItem:
+                向量记忆
+        """
+        pass
+    
+    @abstractmethod
+    async def update_memory(
+        self, 
+        memories: list[MemoryOperation], 
+        **kwargs, 
+    ) -> None:
+        """更新记忆
+        
+        参数:
+            memories (list[MemoryOperation]):
+                要更新的记忆
+            **kwargs:
+                额外参数
+        """
+        pass
+
+
+class Workflow(ToolsCaller, Scheduler):
+    """工作流是无状态的，它不存储任何关于状态的信息，仅用于编排任务或环境。
+    工作流不负责任务或环境的状态。
+    
+    属性:
+        profile (str):
+            工作流的描述文件。描述工作流的行为和目标
+        agent (Agent):
+            与工作流一起工作的代理
+        prompts (dict[str, str]):
+            工作流的提示。键是提示名称，值是提示内容
+        observe_formats (dict[str, str]):
+            观察的格式。键是观察名称，值是格式方法名称
+        sub_workflows (dict[str, 'Workflow']):
+            工作流的子工作流。键是子工作流的名称，值是子工作流实例
+    """
+    # 基本信息
+    profile: str
+    agent: Agent
+    prompts: dict[str, str]
+    observe_formats: dict[str, str]
+    # 子工作流
+    sub_workflows: dict[str, 'Workflow']
+    
+    @abstractmethod
+    def register_agent(self, agent: Agent) -> None:
+        """向工作流注册代理
+        
+        参数:
+            agent (Agent):
+                要注册的代理
+        """
+        pass
+    
+    @abstractmethod
+    async def run(
+        self, 
+        target: Stateful, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        completion_config: CompletionConfig, 
+        **kwargs, 
+    ) -> Stateful:
+        """运行工作流以修改有状态实体
+
+        参数:
+            target (Stateful): 
+                运行工作流的有状态实体
+            max_error_retry (int):
+                目标出错时重试工作流的最大次数
+            max_idle_thinking (int):
+                工作流空闲思考的最大次数
+            completion_config (CompletionConfig):
+                工作流的完成配置
+            **kwargs:
+                运行工作流的额外关键字参数
+
+        返回:
+            Stateful: 
+                运行工作流后的有状态实体
+        """
+        pass
+
+
+class ReActFlow(Workflow):
+    """ReActFlow 是一个基于推理和行动的工作流
+    """
+    
+    @abstractmethod
+    async def reason_act(
+        self, 
+        target: Stateful, 
+        completion_config: CompletionConfig, 
+        **kwargs, 
+    ) -> tuple[Stateful, bool, bool]:
+        """推理和行动步骤
+        
+        参数:
+            target (Stateful):
+                目标有状态实体
+            completion_config (CompletionConfig):
+                完成配置
+            **kwargs:
+                额外参数
+                
+        返回:
+            tuple[Stateful, bool, bool]:
+                修改后的目标、是否完成、是否继续
+        """
+        pass
+    
+    @abstractmethod
+    async def reflect(
+        self, 
+        target: Stateful, 
+        completion_config: CompletionConfig, 
+        **kwargs, 
+    ) -> tuple[Stateful, bool]:
+        """反思步骤
+        
+        参数:
+            target (Stateful):
+                目标有状态实体
+            completion_config (CompletionConfig):
+                完成配置
+            **kwargs:
+                额外参数
+                
+        返回:
+            tuple[Stateful, bool]:
+                修改后的目标、是否完成
+        """
+        pass
+    
+
+class MemoryWorkflow(Workflow):
+    """MemoryWorkflow 是一个基于记忆的工作流
+    """
+    
+    @abstractmethod
+    def get_memory_agent(self) -> MemoryAgent:
+        """获取记忆代理
+        
+        返回:
+            MemoryAgent:
+                记忆代理
+        """
+        pass
+
+    @abstractmethod
+    async def extract_memory(
+        self, 
+        text: str, 
+        **kwargs, 
+    ) -> None:
+        """从文本中提取记忆
+        
+        参数:
+            text (str):
+                文本
+            **kwargs:
+                额外参数
+                
+        返回:
+            None
+        """
+        pass
+
+
+class EnvironmentStatus(Enum):
+    """环境的状态
+    
+    - CREATED (int): 环境已创建
+    - PLANNING (int): 环境正在规划
+    - RUNNING (int): 环境正在运行
+    - FINISHED (int): 环境已完成
+    - ERROR (int): 环境出错
+    - CANCELLED (int): 环境已取消
+    """
+    CREATED = 0
+    PLANNING = 1
+    RUNNING = 2
+    FINISHED = 3
+    ERROR = 4
+    CANCELLED = 5
+
+
+class Environment(Stateful, ToolsCaller, Scheduler):
+    """环境是一个包含工作流的有状态对象。工作流可用于思考如何修改环境。
+    工具可用于修改环境。
+    
+    属性:
+        uid (str):
+            环境的唯一标识符
+        name (str):
+            环境的名称
+        profile (str):
+            环境的描述文件。描述环境的行为和目标
+        prompts (dict[str, str]):
+            环境的提示。键是提示名称，值是提示内容
+        required_agents (list[Enum]):
+            列表中的代理必须注册到环境
+        agents (dict[str, Agent]):
+            环境中的代理。键是代理名称，值是代理
+        agent_type_map (dict[Enum, list[str]]):
+            代理类型到代理名称的映射。键是代理类型，值是代理名称列表
+        agent_type_semaphore (dict[Enum, Semaphore]):
+            代理类型的信号量。键是代理类型，值是信号量
+    """
+    uid: str
+    name: str
+    profile: str
+    prompts: dict[str, str]
+    required_agents: list[Enum]
+    # 代理和并发控制
+    agents: dict[str, Agent]
+    agent_type_map: dict[Enum, list[str]]
+    agent_type_semaphore: dict[Enum, Semaphore]
+    
+    @abstractmethod
+    def register_agent(self, agent: Agent) -> None:
+        """向环境注册代理
+        
+        参数:
+            agent (Agent):
+                要注册的代理
+        """
+        pass
+    
+    @abstractmethod
+    async def call_agent(
+        self, 
+        agent_type: Enum, 
+        target: Stateful, 
+        max_error_retry: int, 
+        max_idle_thinking: int, 
+        completion_config: CompletionConfig, 
+        designated_agent: str, 
+        **kwargs, 
+    ) -> AssistantMessage:
+        """调用代理
+        
+        参数:
+            agent_type (Enum):
+                代理类型
+            target (Stateful):
+                目标有状态实体
+            max_error_retry (int):
+                最大错误重试次数
+            max_idle_thinking (int):
+                最大空闲思考次数
+            completion_config (CompletionConfig):
+                完成配置
+            designated_agent (str):
+                指定的代理名称
+            **kwargs:
+                额外参数
+                
+        返回:
+            AssistantMessage:
+                代理返回的助手消息
+        """
+        pass
+    
+    @abstractmethod
+    async def run(self, *args, **kwargs) -> Any:
+        """运行环境
+        
+        参数:
+            *args:
+                位置参数
+            **kwargs:
+                关键字参数
+                
+        返回:
+            Any:
+                运行结果
         """
         pass

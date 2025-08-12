@@ -9,11 +9,7 @@ from loguru import logger
 from datasets import load_from_disk
 
 from myagents.core.envs.orchestrate import Orchestrate
-from myagents.core.tasks.task import BaseTreeTaskNode, ToDoTaskView
-from myagents.core.llms import to_openai_dict
 from myagents.core.factory import AutoAgent, AutoAgentConfig
-from myagents.core.interface import Workflow
-from myagents.core.utils.step_counters import MaxStepsError, TokenStepCounter
 
 
 PROMPT = """
@@ -78,6 +74,8 @@ async def run_sample(
     output_dir: str, 
     num_workers: int = 1, 
     max_samples: int = 300, 
+    output_name: str = "results.jsonl", 
+    input_field: str = "question", 
 ) -> List[dict[str, Union[str, dict]]]:
     """运行样本处理
 
@@ -87,6 +85,8 @@ async def run_sample(
         output_dir (str): 输出目录
         num_workers (int, optional): 工作线程数. 默认为1
         max_samples (int, optional): 最大样本数. 默认为500
+        output_name (str, optional): 输出文件名. 默认为"results.jsonl"
+        input_field (str, optional): 输入字段名. 默认为"question"
 
     Returns:
         List[dict[str, Union[str, dict]]]: 所有任务的处理结果
@@ -96,12 +96,12 @@ async def run_sample(
     logger.info(f"加载数据集，数据集大小: {len(dataset)}")
     
     # 加载已经处理过的数据
-    if os.path.exists(os.path.join(output_dir, "results.jsonl")):
-        with open(os.path.join(output_dir, "results.jsonl"), "r", encoding="utf-8") as f:
+    if os.path.exists(os.path.join(output_dir, output_name)):
+        with open(os.path.join(output_dir, output_name), "r", encoding="utf-8") as f:
             processed_data = [json.loads(line) for line in f]
             
         # 过滤掉已经处理过的数据
-        dataset = dataset.filter(lambda x: x['question'] not in [item['question'] for item in processed_data])
+        dataset = dataset.filter(lambda x: x[input_field] not in [item[input_field] for item in processed_data])
         logger.info(f"过滤掉已处理过的数据，剩余数据: {len(dataset)}")
     
     # 随机采样
@@ -112,22 +112,22 @@ async def run_sample(
     # 创建信号量来控制并发
     semaphore = asyncio.Semaphore(num_workers)
     # 创建jsonl文件
-    jsonl_path = os.path.join(output_dir, "results.jsonl")
+    jsonl_path = os.path.join(output_dir, output_name)
     
     async def process_with_semaphore(item):
         async with semaphore:
             try:
-                result = await process_single_task(config, item['question'])
+                result = await process_single_task(config, item[input_field])
                 if result is not None:
                     # 将结果写入jsonl文件
                     with open(jsonl_path, "a", encoding="utf-8") as f:
                         json.dump(result, f, ensure_ascii=False)
                         f.write("\n")
                     
-                    logger.info(f"已处理并保存: {item['question'][:50]}...")
+                    logger.info(f"已处理并保存: {item[input_field][:50]}...")
                 return result
             except Exception as e:
-                logger.error(f'处理提示词时发生错误: {item["question"]}')
+                logger.error(f'处理提示词时发生错误: {item[input_field]}')
                 logger.error(f'错误信息: {format_exc()}')
                 return None
     
@@ -141,32 +141,69 @@ async def run_sample(
     return [r for r in results if r is not None]
 
 
-async def main():
+async def main(
+    dataset_path: str, 
+    output_dir: str, 
+    output_name: str, 
+    input_field: str = "question", 
+    key_config: str = "configs/api_keys.json", 
+    agents_config: str = "configs/sampling.json", 
+    num_workers: int = 1, 
+) -> None:
+    """运行样本处理
+    
+    Args:
+        dataset_path (str): 
+            数据集路径
+        output_dir (str): 
+            输出目录
+        output_name (str): 
+            输出文件名，必须是jsonl文件名
+        input_field (str, optional): 
+            输入字段名. 默认为"question"
+        key_config (str, optional): 
+            密钥配置文件路径. 默认为"configs/api_keys.json"
+        agents_config (str, optional): 
+            代理配置文件路径. 默认为"configs/sampling.json"
+        num_workers (int, optional): 
+            工作线程数. 默认为1
+            
+    Raises:
+        AssertionError: 
+            输出文件必须是jsonl文件
+    """
+    
     # 加载API密钥
-    with open("configs/api_keys.json", "r") as f:
+    with open(key_config, "r") as f:
         api_keys = json.load(f)
         for key, value in api_keys.items():
             os.environ[key] = value
     
     # 加载配置
-    with open("configs/sampling.json", "r") as f:
+    with open(agents_config, "r") as f:
         config = AutoAgentConfig.model_validate(json.load(f))
-        
-    # 设置数据集路径
-    dataset_path = "datasets/GAOKAO-Bench/processed/train"
     
+    assert output_name.endswith(".jsonl"), "输出文件名必须是jsonl文件名"
     # 创建输出目录
-    output_dir = f"datasets/generated_gaokao_qwen3_14b_awq_3"
+    output_dir = f"{output_dir}"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
     # 运行样本处理
-    results = await run_sample(config, dataset_path, output_dir, max_samples=-1)
+    results = await run_sample(
+        config, 
+        dataset_path, 
+        output_dir, 
+        num_workers, 
+        max_samples=-1,
+        output_name=output_name, 
+        input_field=input_field, 
+    )
     
     # 打印处理结果统计
     print(f"\n处理完成!")
     print(f"成功处理样本数: {len(results)}")
-    print(f"结果已保存到jsonl文件中")
+    print(f"结果已保存到jsonl文件中: {os.path.join(output_dir, output_name)}")
 
 
 if __name__ == "__main__":
