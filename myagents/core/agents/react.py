@@ -23,7 +23,7 @@ from myagents.prompts.memories.episode import (
     REASON_ACT_PROMPT as MEMORY_EPISODE_REASON_ACT_PROMPT, 
     REFLECT_PROMPT as MEMORY_EPISODE_REFLECT_PROMPT, 
 )
-from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE
+from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE, SYSTEM_MEMORY_TEMPLATE
 
 
 AGENT_PROFILE = """
@@ -193,6 +193,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
         # Memory Format Template
         memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
+        system_memory_template: str = SYSTEM_MEMORY_TEMPLATE, 
         **kwargs, 
     ) -> None: 
         """
@@ -234,7 +235,6 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             name=name, 
             mcp_client=mcp_client, 
             step_counters=step_counters, 
-            # trajectory_memory=trajectory_memory, # TODO: 暂时不使用轨迹记忆
             system_prompt=system_prompt, 
             reason_act_prompt=reason_act_prompt, 
             reflect_prompt=reflect_prompt, 
@@ -254,6 +254,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
             # Memory Format Template
             memory_prompt_template=memory_prompt_template, 
+            system_memory_template=system_memory_template, 
             **kwargs,
         )
         
@@ -479,6 +480,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
         # Memory Format Template
         memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
+        system_memory_template: str = SYSTEM_MEMORY_TEMPLATE, 
         **kwargs, 
     ) -> None:        
         """
@@ -541,6 +543,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
             # Memory Format Template
             memory_prompt_template=memory_prompt_template, 
+            system_memory_template=system_memory_template, 
             **kwargs,
         )
         

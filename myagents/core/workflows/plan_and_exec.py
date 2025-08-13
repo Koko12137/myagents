@@ -494,7 +494,7 @@ class MemoryPlanAndExecFlow(MemoryTreeTaskReActFlow):
         self, 
         target: TreeTaskNode, 
         **kwargs,
-    ) -> TreeTaskNode:
+    ) -> str:
         """Override the extract_memory method of the plan and exec workflow.
         """
         return await self.agent.extract_memory(target=target, **kwargs)

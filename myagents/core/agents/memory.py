@@ -40,6 +40,7 @@ class BaseMemoryAgent(BaseAgent):
     episode_memory: VectorMemoryCollection
     # 记忆提示词模板
     prompt_template: str
+    system_memory_template: str
     
     def __init__(
         self, 
@@ -55,6 +56,7 @@ class BaseMemoryAgent(BaseAgent):
         episode_memory_reflect_prompt: str, 
         # Memory Format Template
         memory_prompt_template: str, 
+        system_memory_template: str, 
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -90,6 +92,7 @@ class BaseMemoryAgent(BaseAgent):
         )
         
         self.prompt_template = memory_prompt_template
+        self.system_memory_template = system_memory_template
         # 记忆提取 workflow
         self.memory_workflow = memory_workflow
         # 注册 self 为 memory_workflow 的 agent
@@ -159,7 +162,7 @@ class BaseMemoryAgent(BaseAgent):
         self, 
         target: Stateful, 
         **kwargs,
-    ) -> Stateful:
+    ) -> str:
         """
         从文本中抽取记忆。
         
@@ -169,8 +172,8 @@ class BaseMemoryAgent(BaseAgent):
             **kwargs:
                 其他参数
         返回:
-            Stateful:
-                更新后的有状态实体
+            str:
+                提取的记忆
         """
         # 获取历史上下文
         history = target.get_history()
@@ -178,11 +181,11 @@ class BaseMemoryAgent(BaseAgent):
         history_str = "\n".join([f"{message.role}: {message.content}" for message in history])
         
         # 调用记忆提取 workflow
-        await self.memory_workflow.extract_memory(history_str, **kwargs)
+        compressed_memory = await self.memory_workflow.extract_memory(history_str, **kwargs)
         # 清空旧的历史上下文
         target.reset()
         # 返回更新后的目标
-        return target
+        return compressed_memory
         
     def create_memory(self, memory_type: str, **kwargs) -> VectorMemoryItem:
         """创建记忆
@@ -216,6 +219,16 @@ class BaseMemoryAgent(BaseAgent):
                 await self.episode_memory.update([memory_op.memory])
             elif memory_op.operation == MemoryOperationType.DELETE:
                 await self.episode_memory.delete([memory_op.memory.memory_id])
+                
+    async def update_temp_memory(
+        self, 
+        temp_memory: str, 
+        target: Stateful, 
+        **kwargs, 
+    ) -> None:
+        """更新临时记忆"""
+        # 更新临时记忆
+        await self.prompt(SystemMessage(content=self.system_memory_template.format(system_memory=temp_memory)), target)
         
     async def search_memory(
         self, 
@@ -281,7 +294,7 @@ class BaseMemoryAgent(BaseAgent):
         """
         # 观察
         observation = await super().observe(target=target, observe_format=observe_format, **kwargs)
-        
+
         # 转换为字符串
         observation_str = "\n".join([message.content for message in observation])
         # 提取记忆

@@ -61,18 +61,26 @@ class StateMixin(Stateful):
         """
         if isinstance(message, SystemMessage):
             if len(self.history[self.status]) > 0:
-                # Convert the SystemMessage to a UserMessage
-                message = UserMessage(content=message.content)
-                return self.update(message)
+                last_message = self.history[self.status][-1]
+                if last_message.role == MessageRole.SYSTEM:
+                    # 如果前一个也是SystemMessage，则追加内容
+                    last_message.content = f"{last_message.content}\n=====[Message Block]=====\n{message.content}"
+                else:
+                    # 如果前一个不是SystemMessage，则转换为UserMessage
+                    message = UserMessage(content=message.content)
+                    return self.update(message)
             else:
                 self.history[self.status].append(message)
         
         elif isinstance(message, UserMessage):
             if len(self.history[self.status]) > 0:
+                # 获取最后一个消息
                 last_message = self.history[self.status][-1]
                 if last_message.role == MessageRole.USER:
+                    # 如果前一个也是UserMessage，则追加内容
                     last_message.content = f"{last_message.content}\n=====[Message Block]=====\n{message.content}"
                 else:
+                    # 如果前一个不是UserMessage，则直接添加
                     self.history[self.status].append(message)
             else:
                 self.history[self.status].append(message)

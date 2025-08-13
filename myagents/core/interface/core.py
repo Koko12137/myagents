@@ -385,7 +385,7 @@ class MemoryAgent(Agent):
         self, 
         target: Stateful, 
         **kwargs,
-    ) -> Stateful:
+    ) -> str:
         """从有状态实体中提取记忆，并更新状态和记忆
         
         参数:
@@ -395,8 +395,8 @@ class MemoryAgent(Agent):
                 额外参数
                 
         返回:
-            Stateful:
-                更新后的有状态实体
+            str:
+                提取的记忆
         """
         pass
     
@@ -454,6 +454,24 @@ class MemoryAgent(Agent):
                 额外参数
         """
         pass
+    
+    @abstractmethod
+    async def update_temp_memory(
+        self, 
+        temp_memory: str, 
+        target: Stateful, 
+        **kwargs, 
+    ) -> None:
+        """更新临时记忆
+        
+        参数:
+            temp_memory (str):
+                临时记忆
+            target (Stateful):
+                目标
+            **kwargs:
+                额外参数
+        """
 
 
 class Workflow(ToolsCaller, Scheduler):
@@ -590,7 +608,7 @@ class MemoryWorkflow(Workflow):
         self, 
         text: str, 
         **kwargs, 
-    ) -> None:
+    ) -> str:
         """从文本中提取记忆
         
         参数:
@@ -600,7 +618,8 @@ class MemoryWorkflow(Workflow):
                 额外参数
                 
         返回:
-            None
+            str:
+                提取的记忆
         """
         pass
 

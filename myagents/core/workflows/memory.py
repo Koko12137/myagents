@@ -152,13 +152,6 @@ class EpisodeMemoryFlow(BaseWorkflow):
             )
             # 更新记忆的嵌入向量
             memory["embedding"] = embedding
-            # 添加原始内容
-            memory["metadata"] = {
-                "content": target.objective,
-                "abstract": memory.pop("abstract"),
-                "keywords": memory.pop("keywords"),
-                "is_error": memory["is_error"],
-            }
             # 更新记忆
             memory_op = BaseMemoryOperation(
                 operation=operation,
@@ -341,7 +334,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
         max_idle_thinking: int = 2, 
         completion_config: CompletionConfig = None, 
         **kwargs,
-    ) -> TreeTaskNode:
+    ) -> str:
         """从有状态实体中抽取记忆
         
         Args:
@@ -357,8 +350,8 @@ class EpisodeMemoryFlow(BaseWorkflow):
                 运行工作流的额外关键字参数
                 
         Returns:
-            TreeTaskNode:
-                提取记忆后的目标
+            str:
+                提取的记忆
         """
         # 创建一个新的任务节点
         new_target = BaseTreeTaskNode(
@@ -376,7 +369,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
             completion_config=completion_config, 
             **kwargs,
         )
-
+        return new_target.get_history()[-1].content
 
 class MemoryCompressWorkflow(BaseWorkflow):
     """压缩记忆(Memory Compress)工作流
@@ -533,12 +526,10 @@ class MemoryCompressWorkflow(BaseWorkflow):
         )
         
         # === 提取阶段 === 
-        # 获取压缩后的记忆
-        compressed_memory = target.get_history()[-1].content
         # 提取记忆
         for workflow in self.sub_workflows.values():
-            target = await workflow.extract_memory(
-                text=compressed_memory, 
+            await workflow.extract_memory(
+                text=target.objective, 
                 max_error_retry=max_error_retry, 
                 max_idle_thinking=max_idle_thinking, 
                 completion_config=completion_config, 
@@ -589,7 +580,7 @@ class MemoryCompressWorkflow(BaseWorkflow):
         max_idle_thinking: int = 2, 
         completion_config: CompletionConfig = None, 
         **kwargs,
-    ) -> None:
+    ) -> str:
         """从文本中提取记忆
         
         Args:
@@ -605,7 +596,8 @@ class MemoryCompressWorkflow(BaseWorkflow):
                 运行工作流的额外关键字参数
                 
         Returns:
-            None
+            str:
+                提取的记忆
         """
         # 创建一个新的任务节点
         new_target = BaseTreeTaskNode(
@@ -623,3 +615,4 @@ class MemoryCompressWorkflow(BaseWorkflow):
             completion_config=completion_config, 
             **kwargs,
         )
+        return new_target.get_history()[-1].content

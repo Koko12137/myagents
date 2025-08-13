@@ -11,7 +11,7 @@ from pymilvus import (
     MilvusException,
 )
 
-from myagents.core.memories.schemas import EpisodeMemoryItem, MemoryType, MemoryIDMap
+from myagents.core.memories.schemas import EpisodeMemoryItem, EpisodeMetadata, MemoryType
 
 
 class MilvusEpisodeMemoryCollection:
@@ -135,7 +135,8 @@ class MilvusEpisodeMemoryCollection:
                 anns_field="embedding",
                 limit=top_k,
                 output_fields=[
-                    "id", "env_id", "agent_id", "task_id", "memory_id", "task_status", "embedding", "metadata", "is_error", "created_at",
+                    "id", "env_id", "agent_id", "task_id", "memory_id", "task_status", 
+                    "created_at", "embedding", "keywords", "abstract", "is_error", "metadata",
                 ],
                 filter=expr,
             )
@@ -154,10 +155,21 @@ class MilvusEpisodeMemoryCollection:
                             memory_id=hit.get("memory_id"),
                             task_status=hit.get("task_status"),
                             embedding=hit.get("embedding"),
-                            metadata=hit.get("metadata"),
-                            is_error=hit.get("is_error"),
                             created_at=hit.get("created_at"),
+                            keywords=hit.get("keywords"),
+                            abstract=hit.get("abstract"),
+                            is_error=hit.get("is_error"),
+                            metadata=EpisodeMetadata(**hit.get("metadata")),
                         )
+                        
+                        # 兜底检查
+                        if (memory.env_id != env_id or 
+                            memory.agent_id != agent_id or 
+                            memory.task_status != task_status or 
+                            memory.task_id != task_id
+                        ):
+                            continue
+                        
                         # 添加到记忆列表
                         memories.append((memory.model_dump(), hit.score))
             
@@ -166,32 +178,6 @@ class MilvusEpisodeMemoryCollection:
         except Exception as e:
             logger.error(f"搜索向量记忆失败: {e}")
             return []
-    
-    # async def update(self, memories: list[EpisodeMemoryItem]) -> bool:
-    #     """更新向量记忆"""
-    #     try:
-    #         # 更新记录
-    #         await self.client.upsert(self.collection_name, [memory.model_dump() for memory in memories])
-            
-    #         logger.info(f"成功更新向量记忆: {len(memories)}")
-    #         return True
-            
-    #     except Exception as e:
-    #         logger.error(f"更新向量记忆失败: {e}")
-    #         return False
-    
-    # async def delete(self, memory_ids: list[int]) -> bool:
-    #     """删除向量记忆"""
-    #     try:
-    #         # 删除记忆
-    #         await self.client.delete(self.collection_name, f'memory_id in {memory_ids}')
-            
-    #         logger.info(f"成功删除向量记忆: {len(memory_ids)}")
-    #         return True
-            
-    #     except Exception as e:
-    #         logger.error(f"删除向量记忆失败: {e}")
-    #         return False
     
     async def get_collection_stats(self) -> dict[str, Any]:
         """获取集合统计信息"""
@@ -274,9 +260,11 @@ class MilvusManager:
                 FieldSchema(name="memory_id", dtype=DataType.VARCHAR, max_length=256),
                 FieldSchema(name="task_status", dtype=DataType.VARCHAR, max_length=256),
                 FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dimension),
-                FieldSchema(name="metadata", dtype=DataType.JSON),
-                FieldSchema(name="is_error", dtype=DataType.BOOL),
                 FieldSchema(name="created_at", dtype=DataType.INT64),
+                FieldSchema(name="keywords", dtype=DataType.VARCHAR, max_length=256),
+                FieldSchema(name="abstract", dtype=DataType.VARCHAR, max_length=65535),
+                FieldSchema(name="is_error", dtype=DataType.BOOL),
+                FieldSchema(name="metadata", dtype=DataType.JSON),
             ]
             # 创建集合模式
             schema = CollectionSchema(fields=fields, description=f"Vector memory collection: {collection_name}")

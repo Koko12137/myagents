@@ -537,8 +537,18 @@ class MemoryPlanWorkflow(PlanWorkflow):
         self, 
         target: TreeTaskNode, 
         **kwargs,
-    ) -> TreeTaskNode:
-        """Extract the memory from the target.
+    ) -> str:
+        """从目标中提取记忆，将临时记忆清空，返回压缩后的记忆
+        
+        参数:
+            target (TreeTaskNode):
+                目标
+            **kwargs:
+                额外参数
+                
+        返回:
+            str:
+                压缩后的记忆
         """
         # Get the memory agent
         memory_agent = self.get_memory_agent()
@@ -672,6 +682,8 @@ class MemoryPlanWorkflow(PlanWorkflow):
             
             # === Extract Memory ===
             # Extract the memory from the target
-            target = await self.extract_memory(target, **kwargs)
+            compressed_memory = await self.extract_memory(target, **kwargs)
+            # Update the compressed memory to the history
+            await self.agent.update_temp_memory(temp_memory=compressed_memory, target=target)
             
         return target

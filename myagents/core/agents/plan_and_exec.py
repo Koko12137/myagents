@@ -37,7 +37,7 @@ from myagents.prompts.memories.episode import (
     REASON_ACT_PROMPT as MEMORY_EPISODE_REASON_ACT_PROMPT, 
     REFLECT_PROMPT as MEMORY_EPISODE_REFLECT_PROMPT, 
 )
-from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE
+from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE, SYSTEM_MEMORY_TEMPLATE
 
 
 AGENT_PROFILE = """
@@ -297,6 +297,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
         episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
         # Memory Format Template
         memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
+        system_memory_template: str = SYSTEM_MEMORY_TEMPLATE, 
         **kwargs, 
     ) -> None: 
         """
@@ -349,6 +350,8 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
                 The reflect prompt of the memory.
             memory_prompt_template (str, optional):
                 The prompt template of the memory.
+            system_memory_template (str, optional):
+                The system memory template of the memory.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
@@ -387,6 +390,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
             episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
             # Memory Format Template
             memory_prompt_template=memory_prompt_template, 
+            system_memory_template=system_memory_template, 
             **kwargs,
         )
         

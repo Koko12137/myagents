@@ -113,6 +113,9 @@ class BlueprintWorkflow(BaseReActFlow):
         current_thinking = 0
         current_error = 0
         
+        # Create a new context for the workflow including an empty blueprint
+        self.context = self.context.create_next(blueprint="", task=target)
+        
         # Run the workflow
         while target.is_created():
         
@@ -132,6 +135,8 @@ class BlueprintWorkflow(BaseReActFlow):
             if blueprint != "":
                 # Set tool_call_flag to True
                 tool_call_flag = True
+                # Update the blueprint to the context
+                self.context.update("blueprint", blueprint)
             
             # Check if the error flag is set
             if error_flag:
@@ -192,8 +197,6 @@ class BlueprintWorkflow(BaseReActFlow):
         # === Update Context ===
         # Log the blueprint
         logger.info(f"Orchestration Blueprint: \n{blueprint}")
-        # Update the blueprint to the global environment context
-        self.context = self.context.create_next(blueprint=blueprint, task=target)
             
         return target
     
@@ -263,8 +266,18 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
         self, 
         target: TreeTaskNode, 
         **kwargs,
-    ) -> TreeTaskNode:
-        """Override the extract_memory method of the blueprint workflow.
+    ) -> str:
+        """从目标中提取记忆，将临时记忆清空，返回压缩后的记忆
+        
+        参数:
+            target (TreeTaskNode):
+                目标
+            **kwargs:
+                额外参数
+                
+        返回:
+            str:
+                压缩后的记忆
         """
         return await self.agent.extract_memory(target=target, **kwargs)
 
@@ -310,6 +323,9 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
         # continue flag
         should_continue = True
         
+        # Create a new context for the workflow including an empty blueprint
+        self.context = self.context.create_next(blueprint="【蓝图未规划】", task=target)
+        
         # Run the workflow
         while target.is_created() and should_continue:
         
@@ -319,7 +335,10 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
                 # Get the system prompt from the workflow
                 if "system_prompt" not in self.prompts:
                     raise KeyError("system_prompt not found in workflow prompts")
-                system_prompt = self.prompts["system_prompt"]
+                system_prompt = self.prompts["system_prompt"].format(
+                    profile=self.profile, 
+                    blueprint=self.context.get("blueprint", "【蓝图未规划】"),
+                )
                 # Update the system prompt to the history
                 message = SystemMessage(content=system_prompt)
                 await self.agent.prompt(message, target)
@@ -340,6 +359,8 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
             if blueprint != "":
                 # Set tool_call_flag to True
                 tool_call_flag = True
+                # Update the blueprint to the context
+                self.context.update("blueprint", blueprint)
             
             # Check if the error flag is set
             if error_flag:
@@ -400,13 +421,13 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
                 
             # === Extract Memory ===
             # Extract the memory from the target
-            target = await self.extract_memory(target=target, **kwargs)
+            compressed_memory = await self.extract_memory(target=target, **kwargs)
+            # Update the compressed memory to the history
+            await self.agent.update_temp_memory(temp_memory=compressed_memory, target=target)
             
         # === Update Context ===
         # Log the blueprint
         logger.info(f"Orchestration Blueprint: \n{blueprint}")
-        # Update the blueprint to the global environment context
-        self.context = self.context.create_next(blueprint=blueprint, task=target)
             
         return target
 
@@ -555,7 +576,7 @@ class OrchestrateFlow(PlanWorkflow):
         
         try:
             # Get the blueprint from the context
-            blueprint = self.sub_workflows["plan"].context.get("blueprint")
+            blueprint = self.sub_workflows["plan"].context.get("blueprint", "")
             # Done the blueprint workflow context
             self.sub_workflows["plan"].context = self.sub_workflows["plan"].context.done()
             # Check if the blueprint is valid
@@ -787,8 +808,18 @@ class MemoryOrchestrateFlow(MemoryPlanWorkflow):
         self, 
         target: TreeTaskNode, 
         **kwargs,
-    ) -> TreeTaskNode:
-        """Override the extract_memory method of the orchestrate workflow.
+    ) -> str:
+        """从目标中提取记忆，将临时记忆清空，返回压缩后的记忆
+        
+        参数:
+            target (TreeTaskNode):
+                目标
+            **kwargs:
+                额外参数
+                
+        返回:
+            str:
+                压缩后的记忆
         """
         return await self.agent.extract_memory(target=target, **kwargs)
 
