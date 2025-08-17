@@ -5,7 +5,7 @@ from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
-from myagents.core.interface import Agent, TreeTaskNode, Context, CompletionConfig
+from myagents.core.interface import Agent, TreeTaskNode, Workspace, CompletionConfig
 from myagents.core.agents import AgentType
 from myagents.core.tasks import DocumentTaskView, ToDoTaskView
 from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
@@ -33,7 +33,8 @@ class PlanAndExecEnv(BaseEnvironment):
     agent_type_semaphore: dict[AgentType, Semaphore]
     # Tools Mixin
     tools: dict[str, FastMcpTool]
-    context: Context
+    # Workspace
+    workspace: Workspace
     # Stateful Mixin
     status: EnvironmentStatus
     history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]

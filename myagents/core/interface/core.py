@@ -1,18 +1,18 @@
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 from asyncio import Semaphore, Lock
 from enum import Enum
-from typing import Any, Union, Protocol, runtime_checkable
+from typing import Any, Union
 
 from fastmcp.tools import Tool as FastMcpTool
 from fastmcp import Client as MCPClient
 
-from myagents.core.interface.base import Stateful, ToolsCaller, Scheduler
+from myagents.core.interface.base import Stateful, ToolsCaller, Scheduler, CallStack
 from myagents.core.interface.llm import LLM, CompletionConfig, EmbeddingLLM
 from myagents.core.interface.memory import MemoryOperation, VectorMemoryCollection, VectorMemoryItem
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
 
-class StepCounter(Protocol):
+class StepCounter(ABC):
     """步骤计数器的协议。限制可以是最大自动步骤或最大余额成本。最好为所有代理使用相同的步骤计数器。
     
     属性:
@@ -91,8 +91,7 @@ class StepCounter(Protocol):
         pass
 
 
-@runtime_checkable
-class Agent(Protocol):
+class Agent(ABC):
     """在环境中运行的代理，根据工作流处理任务
     
     属性:
@@ -209,7 +208,6 @@ class Agent(Protocol):
             AssistantMessage:
                 语言模型思考的完成消息
         """
-        pass 
     
     @abstractmethod
     async def act(self, tool_call: ToolCallRequest, **kwargs) -> ToolCallResult:
@@ -229,7 +227,6 @@ class Agent(Protocol):
             ValueError:
                 如果工具调用名称未注册到工作流或环境
         """
-        pass 
     
     @abstractmethod
     async def run(
@@ -258,7 +255,6 @@ class Agent(Protocol):
             AssistantMessage:
                 代理在有状态实体上运行后返回的助手消息
         """
-        pass
     
     @abstractmethod
     def register_counter(self, counter: StepCounter) -> None:
@@ -268,7 +264,6 @@ class Agent(Protocol):
             counter (StepCounter):
                 要注册的步骤计数器
         """
-        pass
     
     @abstractmethod
     def register_workflow(self, workflow: 'Workflow') -> None:
@@ -278,7 +273,6 @@ class Agent(Protocol):
             workflow (Workflow):
                 要注册的工作流
         """
-        pass
     
     @abstractmethod
     def register_env(self, env: 'Environment') -> None:
@@ -288,7 +282,6 @@ class Agent(Protocol):
             env (Environment):
                 要注册的环境
         """
-        pass
 
 
 class MemoryAgent(Agent):
@@ -506,7 +499,6 @@ class Workflow(ToolsCaller, Scheduler):
             agent (Agent):
                 要注册的代理
         """
-        pass
     
     @abstractmethod
     async def run(
@@ -535,7 +527,6 @@ class Workflow(ToolsCaller, Scheduler):
             Stateful: 
                 运行工作流后的有状态实体
         """
-        pass
 
 
 class ReActFlow(Workflow):
@@ -563,7 +554,6 @@ class ReActFlow(Workflow):
             tuple[Stateful, bool, bool]:
                 修改后的目标、是否完成、是否继续
         """
-        pass
     
     @abstractmethod
     async def reflect(
@@ -586,7 +576,6 @@ class ReActFlow(Workflow):
             tuple[Stateful, bool]:
                 修改后的目标、是否完成
         """
-        pass
     
 
 class MemoryWorkflow(Workflow):
@@ -621,7 +610,6 @@ class MemoryWorkflow(Workflow):
             str:
                 提取的记忆
         """
-        pass
 
 
 class EnvironmentStatus(Enum):
@@ -682,7 +670,6 @@ class Environment(Stateful, ToolsCaller, Scheduler):
             agent (Agent):
                 要注册的代理
         """
-        pass
     
     @abstractmethod
     async def call_agent(
@@ -717,7 +704,6 @@ class Environment(Stateful, ToolsCaller, Scheduler):
             AssistantMessage:
                 代理返回的助手消息
         """
-        pass
     
     @abstractmethod
     async def run(self, *args, **kwargs) -> Any:
@@ -733,4 +719,3 @@ class Environment(Stateful, ToolsCaller, Scheduler):
             Any:
                 运行结果
         """
-        pass

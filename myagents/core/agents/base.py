@@ -8,11 +8,11 @@ from fastmcp import Client as MCPClient
 from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow
+from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow, CallStack, Workspace
 from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.agents.types import AgentType
-from myagents.core.utils.step_counters import MaxStepsError
+from myagents.core.step_counters import MaxStepsError
 
 
 class BaseAgent(Agent):
@@ -74,6 +74,8 @@ class BaseAgent(Agent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
         agent_type: AgentType, 
         profile: str, 
@@ -108,6 +110,9 @@ class BaseAgent(Agent):
         """
         # Initialize the parent class
         super().__init__(**kwargs)
+        # Initialize the call_stack and workspace
+        self.call_stack = call_stack
+        self.workspace = workspace
         
         # Initialize the basic information
         self.uid = uuid4().hex

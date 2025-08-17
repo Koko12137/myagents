@@ -51,6 +51,7 @@
   - [ ] 合成任务规划拆解数据，进行KTO训练
 
 - 开发
+- [ ] 修改 Context 为 Workspace 用于保存全局变量，并修改为依赖注入，全局只维护一个 Workspace
 - [ ] FastAPI提供服务
 - [ ] Text2SQL Agent
 

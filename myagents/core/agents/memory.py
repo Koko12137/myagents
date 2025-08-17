@@ -4,7 +4,7 @@ from typing import Union
 
 from loguru import logger
 
-from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem, LLM
+from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem, LLM, CallStack, Workspace
 from myagents.core.messages import AssistantMessage, ToolCallResult, SystemMessage, UserMessage
 from myagents.core.agents.base import BaseAgent, MaxStepsError
 from myagents.core.llms.config import BaseCompletionConfig
@@ -44,6 +44,8 @@ class BaseMemoryAgent(BaseAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
         extraction_llm: LLM,
@@ -59,13 +61,15 @@ class BaseMemoryAgent(BaseAgent):
         system_memory_template: str, 
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs)
+        super().__init__(call_stack=call_stack, workspace=workspace, **kwargs)
         self.episode_memory = episode_memory
         self.embedding_llm = embedding_llm
         self.extraction_llm = extraction_llm
         
         # 初始化 EpisodeMemoryWorkflow
         episode_memory_workflow = EpisodeMemoryFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts={
                 "system_prompt": episode_memory_system_prompt, 
                 "reason_act_prompt": episode_memory_reason_act_prompt, 
@@ -79,6 +83,8 @@ class BaseMemoryAgent(BaseAgent):
         
         # 初始化 MemoryCompressWorkflow
         memory_workflow = MemoryCompressWorkflow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts={
                 "system_prompt": memory_compress_system_prompt, 
                 "reason_act_prompt": memory_compress_reason_act_prompt, 
@@ -295,19 +301,19 @@ class BaseMemoryAgent(BaseAgent):
         # 观察
         observation = await super().observe(target=target, observe_format=observe_format, **kwargs)
 
-        # 转换为字符串
-        observation_str = "\n".join([message.content for message in observation])
-        # 提取记忆
-        memories = await self.search_memory(
-            text=observation_str, 
-            limit=3, 
-            score_threshold=0.2, 
-            target=target, 
-            **kwargs,
-        )
+        # # 转换为字符串
+        # observation_str = "\n".join([message.content for message in observation])
+        # # 提取记忆
+        # memories = await self.search_memory(
+        #     text=observation_str, 
+        #     limit=3, 
+        #     score_threshold=0.2, 
+        #     target=target, 
+        #     **kwargs,
+        # )
         
-        # 拼接记忆到 history 中
-        await self.prompt(UserMessage(content=memories), target)
+        # # 拼接记忆到 history 中
+        # await self.prompt(UserMessage(content=memories), target)
         # 返回历史信息
         return target.get_history()
 

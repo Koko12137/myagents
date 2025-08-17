@@ -5,7 +5,7 @@ from json_repair import repair_json
 from loguru import logger
 
 from myagents.core.messages import UserMessage, SystemMessage
-from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent, MemoryWorkflow
+from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent, MemoryWorkflow, Workspace, CallStack
 from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.memories.schemas import BaseMemoryOperation, MemoryOperationType
@@ -22,6 +22,8 @@ class EpisodeMemoryFlow(BaseWorkflow):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         profile: str = EPISODE_PROFILE, 
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
@@ -56,6 +58,8 @@ class EpisodeMemoryFlow(BaseWorkflow):
             raise ValueError("The reflect format is required.")
         
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             profile=profile, 
             prompts=prompts, 
             observe_formats=observe_formats, 
@@ -379,6 +383,8 @@ class MemoryCompressWorkflow(BaseWorkflow):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         profile: str = PROFILE, 
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
@@ -388,6 +394,10 @@ class MemoryCompressWorkflow(BaseWorkflow):
         """初始化压缩记忆工作流
         
         Args:
+            call_stack (CallStack):
+                工作流的调用栈
+            workspace (Workspace):
+                工作流的 workspace
             profile (str):
                 工作流的配置文件
             prompts (dict[str, str]):
@@ -409,6 +419,8 @@ class MemoryCompressWorkflow(BaseWorkflow):
             raise ValueError("The reason act format is required.")
         
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             profile=profile, 
             prompts=prompts, 
             observe_formats=observe_formats, 
@@ -527,14 +539,14 @@ class MemoryCompressWorkflow(BaseWorkflow):
         
         # === 提取阶段 === 
         # 提取记忆
-        for workflow in self.sub_workflows.values():
-            await workflow.extract_memory(
-                text=target.objective, 
-                max_error_retry=max_error_retry, 
-                max_idle_thinking=max_idle_thinking, 
-                completion_config=completion_config, 
-                **kwargs,
-            )
+        # for workflow in self.sub_workflows.values():
+        #     await workflow.extract_memory(
+        #         text=target.objective, 
+        #         max_error_retry=max_error_retry, 
+        #         max_idle_thinking=max_idle_thinking, 
+        #         completion_config=completion_config, 
+        #         **kwargs,
+        #     )
         
         return target
 

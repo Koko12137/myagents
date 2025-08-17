@@ -4,7 +4,7 @@ from typing import Optional
 from fastmcp.client import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM
+from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM, CallStack, Workspace
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
@@ -101,6 +101,8 @@ class PlanAndExecAgent(BaseAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
@@ -197,6 +199,8 @@ class PlanAndExecAgent(BaseAgent):
         # Read the workflow profile
         # Initialize the workflow for the agent
         self.workflow = PlanAndExecFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,
@@ -264,6 +268,8 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
         llm: LLM, 
         embedding_llm: EmbeddingLLM, 
@@ -356,6 +362,8 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
                 The keyword arguments to be passed to the parent class.
         """
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             llm=llm, 
             name=name, 
             mcp_client=mcp_client, 
@@ -397,6 +405,8 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
         # Read the workflow profile
         # Initialize the workflow for the agent
         self.workflow = MemoryPlanAndExecFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,

@@ -2,7 +2,7 @@ from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import UserMessage
-from myagents.core.interface import Agent, Context, TreeTaskNode, ReActFlow, CompletionConfig, MemoryAgent
+from myagents.core.interface import Agent, Workspace, TreeTaskNode, ReActFlow, CompletionConfig, MemoryAgent, CallStack
 from myagents.core.workflows.react import TreeTaskReActFlow, MemoryTreeTaskReActFlow
 from myagents.core.workflows.orchestrate import OrchestrateFlow, MemoryOrchestrateFlow
 from myagents.core.tasks import DocumentTaskView, ToDoTaskView
@@ -15,8 +15,8 @@ class PlanAndExecFlow(TreeTaskReActFlow):
     
         
     Attributes:
-        context (Context):
-            The global context container of the workflow.
+        workspace (Workspace):
+            The global workspace of the workflow.
         tools (dict[str, FastMcpTool]):
             The tools can be used for the agent. 
         
@@ -32,9 +32,12 @@ class PlanAndExecFlow(TreeTaskReActFlow):
             The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the 
             sub-workflow instance. 
     """
-    # Context and tools
-    context: Context
+    # Workspace
+    workspace: Workspace
+    # Tools
     tools: dict[str, FastMcpTool]
+    # Call stack
+    call_stack: CallStack
     # Basic information
     profile: str
     agent: Agent
@@ -45,6 +48,8 @@ class PlanAndExecFlow(TreeTaskReActFlow):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         prompts: dict[str, str], 
         observe_formats: dict[str, str], 
         sub_workflows: dict[str, ReActFlow], 
@@ -53,6 +58,10 @@ class PlanAndExecFlow(TreeTaskReActFlow):
         """Initialize the OrchestrateFlow.
 
         Args:
+            call_stack (CallStack):
+                The call stack of the workflow.
+            workspace (Workspace):
+                The workspace of the workflow.
             prompts (dict[str, str]:
                 The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
                 The following prompts are required:
@@ -82,6 +91,8 @@ class PlanAndExecFlow(TreeTaskReActFlow):
         if "plan" not in sub_workflows:
             sub_workflows.update({
                 "plan": OrchestrateFlow(
+                    call_stack=call_stack,
+                    workspace=workspace,
                     prompts={
                         "plan_system_prompt": prompts["orch_plan_system_prompt"], 
                         "plan_reason_act_prompt": prompts["orch_plan_reason_act_prompt"], 
@@ -112,6 +123,8 @@ class PlanAndExecFlow(TreeTaskReActFlow):
         }
         
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             profile=PROFILE, 
             prompts=prompts, 
             observe_formats=observe_formats, 

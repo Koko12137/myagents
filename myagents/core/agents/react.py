@@ -4,7 +4,7 @@ from typing import Optional
 from fastmcp.client import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM
+from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM, CallStack, Workspace
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
@@ -87,6 +87,8 @@ class ReActAgent(BaseAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
@@ -130,6 +132,8 @@ class ReActAgent(BaseAgent):
         """
         # Initialize the parent class
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             llm=llm, 
             name=name, 
             agent_type=AgentType.REACT, 
@@ -151,6 +155,8 @@ class ReActAgent(BaseAgent):
         
         # Initialize the workflow for the agent
         self.workflow = BaseReActFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,
@@ -171,6 +177,8 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
@@ -231,6 +239,8 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         """
         # Initialize the parent class
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             llm=llm, 
             name=name, 
             mcp_client=mcp_client, 
@@ -260,6 +270,8 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         
         # Initialize the workflow for the agent
         self.workflow = MemoryReActFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,
@@ -327,6 +339,8 @@ class TreeReActAgent(BaseAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
@@ -370,6 +384,8 @@ class TreeReActAgent(BaseAgent):
         """
         # Initialize the parent class
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             llm=llm, 
             name=name, 
             agent_type=AgentType.TREE_REACT, 
@@ -391,6 +407,8 @@ class TreeReActAgent(BaseAgent):
         
         # Initialize the workflow for the agent
         self.workflow = TreeTaskReActFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,
@@ -458,6 +476,8 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
         llm: LLM, 
         step_counters: list[StepCounter], 
@@ -487,6 +507,10 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         Initialize the MemoryTreeReActAgent.
         
         Args:
+            call_stack (CallStack):
+                The call stack to use for the agent.
+            workspace (Workspace):
+                The workspace to use for the agent.
             name (str):
                 The name of the agent.
             llm (LLM):
@@ -520,6 +544,8 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         """
         # Initialize the parent class
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             llm=llm, 
             name=name, 
             mcp_client=mcp_client, 
@@ -549,6 +575,8 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         
         # Initialize the workflow for the agent
         self.workflow = MemoryTreeTaskReActFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,

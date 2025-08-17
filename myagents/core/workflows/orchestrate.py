@@ -1,9 +1,7 @@
-from typing import Callable
-
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import Agent, Context, TreeTaskNode, ReActFlow, CompletionConfig
+from myagents.core.interface import Agent, Workspace, TreeTaskNode, ReActFlow, CompletionConfig, CallStack
 from myagents.core.interface.core import MemoryAgent
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.messages import UserMessage, SystemMessage
@@ -17,13 +15,21 @@ class BlueprintWorkflow(BaseReActFlow):
     """BlueprintWorkflow is a workflow for generating the blueprint of the task.
     """
     sub_workflows: dict[str, ReActFlow]
+    # Workspace
+    workspace: Workspace
+    # Tools
+    tools: dict[str, FastMcpTool]
+    # Call stack
+    call_stack: CallStack
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         profile: str = PROFILE, 
         **kwargs,
     ) -> None:
-        super().__init__(profile=profile, **kwargs)
+        super().__init__(call_stack=call_stack, workspace=workspace, profile=profile, **kwargs)
     
     async def run(
         self, 
@@ -114,7 +120,7 @@ class BlueprintWorkflow(BaseReActFlow):
         current_error = 0
         
         # Create a new context for the workflow including an empty blueprint
-        self.context = self.context.create_next(blueprint="", task=target)
+        self.workspace.add(target.uid, "blueprint", "")
         
         # Run the workflow
         while target.is_created():
@@ -136,7 +142,7 @@ class BlueprintWorkflow(BaseReActFlow):
                 # Set tool_call_flag to True
                 tool_call_flag = True
                 # Update the blueprint to the context
-                self.context.update("blueprint", blueprint)
+                self.workspace.update(target.uid, "blueprint", blueprint)
             
             # Check if the error flag is set
             if error_flag:
@@ -324,24 +330,22 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
         should_continue = True
         
         # Create a new context for the workflow including an empty blueprint
-        self.context = self.context.create_next(blueprint="【蓝图未规划】", task=target)
+        self.workspace.add(target.uid, "blueprint", "【蓝图未规划】")
         
         # Run the workflow
         while target.is_created() and should_continue:
         
             # === Prepare System Instruction ===
-            # Check if the target has history
-            if len(target.get_history()) == 0:
-                # Get the system prompt from the workflow
-                if "system_prompt" not in self.prompts:
-                    raise KeyError("system_prompt not found in workflow prompts")
-                system_prompt = self.prompts["system_prompt"].format(
-                    profile=self.profile, 
-                    blueprint=self.context.get("blueprint", "【蓝图未规划】"),
-                )
-                # Update the system prompt to the history
-                message = SystemMessage(content=system_prompt)
-                await self.agent.prompt(message, target)
+            # Get the system prompt from the workflow
+            if "system_prompt" not in self.prompts:
+                raise KeyError("system_prompt not found in workflow prompts")
+            system_prompt = self.prompts["system_prompt"].format(
+                profile=self.profile, 
+                blueprint=self.workspace.get(target.uid, "blueprint", "【蓝图未规划】"),
+            )
+            # Update the system prompt to the history
+            message = SystemMessage(content=system_prompt)
+            await self.agent.prompt(message, target)
         
             # === Reason Stage ===
             # Reason and act on the target
@@ -360,7 +364,7 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
                 # Set tool_call_flag to True
                 tool_call_flag = True
                 # Update the blueprint to the context
-                self.context.update("blueprint", blueprint)
+                self.workspace.update(target.uid, "blueprint", blueprint)
             
             # Check if the error flag is set
             if error_flag:
@@ -437,8 +441,8 @@ class OrchestrateFlow(PlanWorkflow):
     only orchestrate the key objectives of the task. 
         
     Attributes:
-        context (Context):
-            The global context container of the workflow.
+        workspace (Workspace):
+            The global workspace of the workflow.
         tools (dict[str, FastMcpTool]):
             The tools can be used for the agent. 
         
@@ -454,9 +458,12 @@ class OrchestrateFlow(PlanWorkflow):
             The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the 
             sub-workflow instance. 
     """
-    # Context and tools
-    context: Context
+    # Workspace
+    workspace: Workspace
+    # Tools
     tools: dict[str, FastMcpTool]
+    # Call stack
+    call_stack: CallStack
     # Basic information
     profile: str
     agent: Agent
@@ -469,6 +476,8 @@ class OrchestrateFlow(PlanWorkflow):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
         need_user_check: bool = False, 
@@ -503,6 +512,8 @@ class OrchestrateFlow(PlanWorkflow):
         # Create the sub-workflows
         sub_workflows = {
             "plan": BlueprintWorkflow(
+                call_stack=call_stack,
+                workspace=workspace,
                 prompts={
                     "system_prompt": prompts["plan_system_prompt"], 
                     "reason_act_prompt": prompts["plan_reason_act_prompt"], 
@@ -529,6 +540,8 @@ class OrchestrateFlow(PlanWorkflow):
         
         # Initialize the parent class
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             profile=PROFILE, 
             prompts=prompts, 
             observe_formats=observe_formats, 
@@ -576,16 +589,11 @@ class OrchestrateFlow(PlanWorkflow):
         
         try:
             # Get the blueprint from the context
-            blueprint = self.sub_workflows["plan"].context.get("blueprint", "")
-            # Done the blueprint workflow context
-            self.sub_workflows["plan"].context = self.sub_workflows["plan"].context.done()
+            blueprint = self.workspace.get(target.uid, "blueprint")
             # Check if the blueprint is valid
             if blueprint == "":
                 # Log the error
                 logger.error("The blueprint is not valid.")
-            
-            # Update the blueprint to self context
-            self.context = self.context.create_next(blueprint=blueprint, task=target)
         
         except Exception as e:
             # Log the error
@@ -732,6 +740,8 @@ class MemoryOrchestrateFlow(MemoryPlanWorkflow):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
         need_user_check: bool = False, 
@@ -766,6 +776,8 @@ class MemoryOrchestrateFlow(MemoryPlanWorkflow):
         # Create the sub-workflows
         sub_workflows = {
             "plan": MemoryBlueprintWorkflow(
+                call_stack=call_stack,
+                workspace=workspace,
                 prompts={
                     "system_prompt": prompts["plan_system_prompt"], 
                     "reason_act_prompt": prompts["plan_reason_act_prompt"], 
@@ -792,6 +804,8 @@ class MemoryOrchestrateFlow(MemoryPlanWorkflow):
         
         # Initialize the parent class
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             profile=PROFILE, 
             prompts=prompts, 
             observe_formats=observe_formats, 
@@ -863,16 +877,11 @@ class MemoryOrchestrateFlow(MemoryPlanWorkflow):
         
         try:
             # Get the blueprint from the context
-            blueprint = self.sub_workflows["plan"].context.get("blueprint")
-            # Done the blueprint workflow context
-            self.sub_workflows["plan"].context = self.sub_workflows["plan"].context.done()
+            blueprint = self.workspace.get(target.uid, "blueprint")
             # Check if the blueprint is valid
             if blueprint == "":
                 # Log the error
                 logger.error("The blueprint is not valid.")
-            
-            # Update the blueprint to self context
-            self.context = self.context.create_next(blueprint=blueprint, task=target)
         
         except Exception as e:
             # Log the error

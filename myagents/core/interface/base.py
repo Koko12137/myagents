@@ -1,37 +1,81 @@
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 from enum import Enum
-from typing import Protocol, runtime_checkable, Union, Any, Callable, Awaitable, OrderedDict
+from typing import Protocol, runtime_checkable, Union, Any, Callable, Awaitable
 
 from mcp import Tool as MCPTool
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult
+ 
 
-
-@runtime_checkable
-class Context(Protocol):
-    """Context records the runtime information for global context. It is used to pass the information between 
-    tool calling and the workflow. It can also be a general variable container for the life cycle of the workflow.  
-    One context contains key-value pairs that set by the workflow, and the context visibility can be controlled 
-    by layer of the context. 
+class CallStack(ABC):
+    """调用栈
     
-    Attributes:
-        prev (Context):
-            The previous context.
-        next (Context):
-            The next context.
-        key_values (dict[str, Any]):
-            The key values of the context.
+    方法：
+        get_value(self, key: str) -> Any:
+            获取调用栈中的值
+        call_next(self, **kwargs) -> None:
+            创建下一个调用栈
+        return_prev(self) -> None:
+            完成调用栈，返回上一个调用栈，并删除当前调用栈
     """
-    prev: 'Context'
-    next: 'Context'
-    key_values: dict[str, Any]
     
     @abstractmethod
-    def append(self, key: str, value: Any) -> None:
-        """Append a key-value pair to the context.
+    def get_value(self, key: str, default: Any) -> Any:
+        """获取调用栈中的值
+        
+        参数:
+            key (str):
+                要获取的值的键
+            default (Any):
+                默认值
+        
+        返回:
+            Any:
+                调用栈中的值
+        """
+    
+    @abstractmethod
+    def call_next(
+        self, 
+        key_values: dict[str, Any] = None,
+        **kwargs,
+    ) -> None:
+        """创建下一个调用栈
+        
+        参数:
+            **kwargs:
+                额外参数
+        """
+        
+    @abstractmethod
+    def return_prev(self) -> None:
+        """完成调用栈，返回上一个调用栈，并删除当前调用栈
+        """
+
+
+class Workspace(ABC):
+    """
+    全局工作空间，用于记录全局可访问的变量
+    
+    方法:
+        add(sub_space_id: str, key: str, value: Any) -> None:
+            添加一个键值对到工作空间
+        update(sub_space_id: str, key: str, value: Any) -> None:
+            更新一个键值对
+        get(sub_space_id: str, key: str, default: Any) -> Any:
+            获取一个键值对
+        pop(sub_space_id: str, key: str) -> Any:
+            删除一个键值对
+    """
+    
+    @abstractmethod
+    def add(self, sub_space_id: str, key: str, value: Any) -> None:
+        """Add a key-value pair to the workspace.
         
         Args:
+            sub_space_id (str):
+                The sub space id of the workspace.
             key (str):
                 The key of the value.
             value (Any):
@@ -40,10 +84,12 @@ class Context(Protocol):
         pass
     
     @abstractmethod
-    def update(self, key: str, value: Any) -> None:
+    def update(self, sub_space_id: str, key: str, value: Any) -> None:
         """Update the value of the key.
         
         Args:
+            sub_space_id (str):
+                The sub space id of the workspace.
             key (str):
                 The key of the value.
             value (Any):
@@ -52,10 +98,12 @@ class Context(Protocol):
         pass
     
     @abstractmethod
-    def get(self, key: str, default: Any) -> Any:
+    def get(self, sub_space_id: str, key: str, default: Any) -> Any:
         """Get the value of the key.
         
         Args:
+            sub_space_id (str):
+                The sub space id of the workspace.
             key (str):
                 The key of the value.
             default (Any):
@@ -68,10 +116,12 @@ class Context(Protocol):
         pass
     
     @abstractmethod
-    def pop(self, key: str) -> Any:
+    def pop(self, sub_space_id: str, key: str) -> Any:
         """Pop the value of the key.
         
         Args:
+            sub_space_id (str):
+                The sub space id of the workspace.
             key (str):
                 The key of the value.
                 
@@ -82,30 +132,6 @@ class Context(Protocol):
         Raises:
             KeyError:
                 If the key is not found.
-        """
-        pass
-    
-    @abstractmethod
-    def create_next(self, **kwargs) -> 'Context':
-        """Create the next context.
-        
-        Args:
-            **kwargs:
-                The keyword arguments to create the next context.
-                
-        Returns:
-            Context:
-                The next context.
-        """
-        pass
-    
-    @abstractmethod
-    def done(self) -> 'Context':
-        """Done the context and return the previous context.
-        
-        Returns:
-            Context:
-                The previous context.
         """
         pass
 
@@ -270,12 +296,12 @@ class ToolsCaller(Protocol):
     Attributes:
         tools (dict[str, Union[FastMcpTool, MCPTool]]):
             The tools of the caller.
-        context (Context):
-            The context of the caller.
+        workspace (Workspace):
+            The workspace of the caller.
     """
-    # Tools and global context container
+    # Tools and global workspace
     tools: dict[str, Union[FastMcpTool, MCPTool]]
-    context: Context
+    workspace: Workspace
     
     @abstractmethod
     def post_init(self) -> None:
@@ -297,8 +323,8 @@ class ToolsCaller(Protocol):
         self, 
         name: str, 
         tool: Union[Awaitable[ToolCallResult], Callable[..., ToolCallResult]], 
-        tags: list[str] = [], 
-        replace: bool = True,
+        tags: list[str], 
+        replace: bool,
     ) -> None:
         """Add a tool to the caller.
         
@@ -307,9 +333,9 @@ class ToolsCaller(Protocol):
                 The name of the tool.
             tool (Union[Awaitable[ToolCallResult], Callable[..., ToolCallResult]]):
                 The tool to add. This tool should return the tool call result. 
-            tags (list[str], optional):
+            tags (list[str]):
                 The tags of the tool.
-            replace (bool, optional, defaults to True):
+            replace (bool):
                 Whether to replace the tool if it is already registered.
                 
         Returns:
@@ -322,17 +348,17 @@ class ToolsCaller(Protocol):
     def register_tool(
         self, 
         name: str, 
-        tags: list[str] = [], 
-        replace: bool = True,
+        tags: list[str], 
+        replace: bool,
     ) -> Union[Awaitable[ToolCallResult], Callable[..., ToolCallResult]]:
         """Register a tool to the caller.
         
         Args:
             name (str):
                 The name of the tool.
-            tags (list[str], optional):
+            tags (list[str]):
                 The tags of the tool.
-            replace (bool, optional, defaults to True):
+            replace (bool):
                 Whether to replace the tool if it is already registered.
                 
         Returns:

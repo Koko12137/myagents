@@ -7,7 +7,7 @@ from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
-from myagents.core.interface import Agent, TreeTaskNode, Context
+from myagents.core.interface import Agent, TreeTaskNode, Workspace, CallStack
 from myagents.core.agents import AgentType
 from myagents.core.tasks import BaseTreeTaskNode, DocumentTaskView, ToDoTaskView
 from myagents.core.llms.config import BaseCompletionConfig
@@ -70,8 +70,8 @@ class ComplexQuery(PlanAndExecEnv):
             The semaphore of the agent type. The key is the agent type and the value is the semaphore. 
         tools (dict[str, FastMcpTool]):
             The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
-        context (Context):
-            The context of the environment.
+        workspace (Workspace):
+            The workspace of the environment.
         status (EnvironmentStatus):
             The status of the environment.
         history (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
@@ -79,6 +79,12 @@ class ComplexQuery(PlanAndExecEnv):
         tasks (OrderedDict[str, Task]):
             The tasks of the environment. The key is the task question and the value is the task. 
     """
+    # Tools Mixin
+    tools: dict[str, FastMcpTool]
+    # Workspace
+    workspace: Workspace
+    # Call stack
+    call_stack: CallStack
     # Basic information
     uid: str
     name: str
@@ -89,10 +95,6 @@ class ComplexQuery(PlanAndExecEnv):
     agents: dict[str, Agent]
     agent_type_map: dict[AgentType, list[str]]
     agent_type_semaphore: dict[AgentType, Semaphore]
-    # Tools
-    tools: dict[str, FastMcpTool]
-    # Context
-    context: Context
     # Status and history
     status: EnvironmentStatus
     history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
@@ -199,9 +201,9 @@ class ComplexQuery(PlanAndExecEnv):
                     The tool call result.
             """
             # Get the tool call
-            tool_call = self.context.get("tool_call")
+            tool_call = self.call_stack.get_value("tool_call")
             # 获取当前文档对象
-            document: BaseDocument = self.context.get("document")
+            document: BaseDocument = self.workspace.get(self.uid, "document")
             # 解析diff字符串为DocumentLog列表
             logs = []
             logs.append(DocumentLog(action=action, line=line_num, content=content))
@@ -210,7 +212,7 @@ class ComplexQuery(PlanAndExecEnv):
             # 更新当前文档对象
             document.modify(logs)
             # 更新当前文档对象
-            self.context["document"] = document
+            self.workspace.update(self.uid, "document", document)
             
             # Create a new tool call result
             result = ToolCallResult(
@@ -237,9 +239,9 @@ class ComplexQuery(PlanAndExecEnv):
                     选项（不允许包含除选项外的任何字符）或者填空的内容。
             """
             # Get the task
-            target: TreeTaskNode = self.context.get("target")
+            target: TreeTaskNode = self.call_stack.get_value("target")
             # Get the tool call
-            tool_call = self.context.get("tool_call")
+            tool_call = self.call_stack.get_value("tool_call")
             # Set the answer to self.answers
             self.answers[target.tasks[f"任务{len(self.tasks)}"].uid] = answer
             # Create a new tool call result
@@ -319,8 +321,6 @@ class ComplexQuery(PlanAndExecEnv):
         )
         # Set the task as the sub-task
         self.tasks[task.name] = task
-        # Add task to the context
-        self.context = self.context.create_next(task=task)
         # Log the task
         logger.info(f"任务创建: \n{task.objective}")
         
@@ -344,8 +344,6 @@ class ComplexQuery(PlanAndExecEnv):
             logger.info(f"最终答案: \n{task.outputs}")
             # Record the answer
             self.answers[task.name] = task.outputs
-            # Done the context
-            self.context = self.context.done()
             # Return the answer
             return task.outputs
         
@@ -379,8 +377,6 @@ class ComplexQuery(PlanAndExecEnv):
             )
             # Update the environment history
             self.update(message)
-            # Done the context
-            self.context = self.context.done()
             # Log the answer
             logger.info(f"Agent Response: \n{message.content}")
             # Return the answer
@@ -405,8 +401,6 @@ class ComplexQuery(PlanAndExecEnv):
             )
             # Set the status to finished
             self.to_finished()
-            # Done the context
-            self.context = self.context.done()
             # Log the answer
             logger.info(f"Agent Response: \n{message.content}")
             # Return the answer
