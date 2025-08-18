@@ -321,6 +321,8 @@ class ComplexQuery(PlanAndExecEnv):
         )
         # Set the task as the sub-task
         self.tasks[task.name] = task
+        # Set the task as the root task
+        self.workspace.update(self.uid, "root_task", task)
         # Log the task
         logger.info(f"任务创建: \n{task.objective}")
         

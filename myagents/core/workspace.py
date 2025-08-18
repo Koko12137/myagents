@@ -71,6 +71,10 @@ class BaseWorkspace(Workspace):
             value (Any):
                 The value of the key.
         """
+        # Check if the sub-space id exists
+        if sub_space_id not in self.key_values:
+            self.key_values[sub_space_id] = {}
+        
         self.key_values[sub_space_id][key] = value
     
     def pop(self, sub_space_id: str, key: str) -> None:

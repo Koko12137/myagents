@@ -120,7 +120,7 @@ class BlueprintWorkflow(BaseReActFlow):
         current_error = 0
         
         # Create a new context for the workflow including an empty blueprint
-        self.workspace.add(target.uid, "blueprint", "")
+        self.workspace.update(target.uid, "blueprint", "")
         
         # Run the workflow
         while target.is_created():
@@ -330,7 +330,7 @@ class MemoryBlueprintWorkflow(BlueprintWorkflow):
         should_continue = True
         
         # Create a new context for the workflow including an empty blueprint
-        self.workspace.add(target.uid, "blueprint", "【蓝图未规划】")
+        self.workspace.update(target.uid, "blueprint", "【蓝图未规划】")
         
         # Run the workflow
         while target.is_created() and should_continue:

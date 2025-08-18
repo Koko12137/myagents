@@ -665,7 +665,7 @@ class TreeTaskReActFlow(BaseReActFlow):
             await self.agent.prompt(message, target)
             
             # Get the task from the context
-            root_task = self.agent.env.workspace.get("root_task")
+            root_task = self.agent.env.workspace.get(self.agent.env.uid, "root_task")
             # Create a UserMessage for the task results
             task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=root_task).format()}")
             # Update the task message to the history
@@ -848,7 +848,7 @@ class MemoryTreeTaskReActFlow(TreeTaskReActFlow):
             await self.agent.prompt(message, target)
             
             # Get the task from the context
-            root_task = self.agent.env.workspace.get("root_task")
+            root_task = self.agent.env.workspace.get(self.agent.env.uid, "root_task")
             # Create a UserMessage for the task results
             task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=root_task).format()}")
             # Update the task message to the history
