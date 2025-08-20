@@ -7,15 +7,20 @@ from myagents.core.envs.complex_query import ComplexQuery, OutputType
 from myagents.core.factory import AutoAgent, AutoAgentConfig
 
 
+def load_imo25_data() -> list[str]:
+    # 列出 datasets/IMO25 目录下的所有txt文件
+    files = os.listdir("datasets/IMO25")
+    files = [file for file in files if file.endswith(".txt")]
+    # 读取每个txt文件
+    data = []
+    for file in files:
+        with open(os.path.join("datasets/IMO25", file), "r") as f:
+            data.append(f.read())
+    return data
+
+
 async def test_async_query():
-    # question = "请你讲一讲陀思妥耶夫斯基的罪与罚"
-    # description = "我需要知道陀思妥耶夫斯基的罪与罚结构化的内容"
-    # 读取 datasets/GAOKAO-Math-Bench 数据集
-    dataset = load_from_disk("datasets/GAOKAO-Math-Bench")
-    # 随机选择一个数据集
-    data = dataset.shuffle(seed=42).select(range(1))
-    # 打印数据集
-    print(data[0])
+    data = load_imo25_data()
     
     # Load API keys from json and convert to environment variables
     with open("configs/api_keys.json", "r") as f:
@@ -34,12 +39,12 @@ async def test_async_query():
     
     # Run the query
     answer = await query.run(
-        question="请仔细分析这道数学题，给出正确的答案选项。最终答案只包含A,B,C,D中的一个", 
-        description=data[0]["question"],
+        question="请仔细分析这道数学题，给出正确的答案，所有过程需要用中文作答。", 
+        description=data[0],
         sub_task_depth=2,
-        output_type=OutputType.SELECTION,
+        output_type=OutputType.SUMMARY,
     )
     print("-" * 60)
     # Check the answer and the correct answer
     print("answer: ", answer)
-    print("correct answer: ", data[0]["answer"])
+    # print("correct answer: ", data[0]["answer"])

@@ -123,7 +123,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
         # 观察目标
         observe = await self.agent.observe(target, observe_format=self.observe_formats["reason_act_format"])
         # 记录观察结果
-        logger.info(f"观察结果: \n{observe[-1].content}")
+        logger.debug(f"观察结果: \n{observe[-1].content}")
         # 思考目标
         message = await self.agent.think_extract(observe=observe, completion_config=completion_config)
         # 将消息更新到目标
@@ -132,7 +132,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
         if logger.level == "DEBUG":
             logger.debug(f"{str(self.agent)}: \n{message}")
         else:
-            logger.info(f"{str(self.agent)}: \n{message.content}")
+            logger.debug(f"{str(self.agent)}: \n{message.content}")
         
         # === 提取记忆 ===
         try:
@@ -172,7 +172,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
             # 更新记忆
             await self.agent.prompt(message, target)
             # 记录用户消息
-            logger.info(f"用户消息: \n{message.content}")
+            logger.debug(f"用户消息: \n{message.content}")
             
             # 设置工具调用标志
             tool_call_flag = True
@@ -260,7 +260,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
                 message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
                 await self.agent.prompt(message, target)
                 # 记录错误消息
-                logger.info(f"错误消息: \n{message}")
+                logger.debug(f"错误消息: \n{message}")
                 # 检查错误计数器是否大于最大错误重试次数
                 if current_error >= max_error_retry:
                     # 将任务状态设置为错误
@@ -281,7 +281,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
                 message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
                 await self.agent.prompt(message, target)
                 # 记录空闲思考消息
-                logger.info(f"空闲思考消息: \n{message}")
+                logger.debug(f"空闲思考消息: \n{message}")
                 # 检查空闲思考计数器是否大于最大空闲思考次数
                 if current_thinking >= max_idle_thinking:
                     # 将任务状态设置为错误
@@ -476,7 +476,7 @@ class MemoryCompressWorkflow(BaseWorkflow):
         # 观察目标
         observe = await self.agent.observe(target, observe_format=self.observe_formats["reason_act_format"])
         # 记录观察结果
-        logger.info(f"观察结果: \n{observe[-1].content}")
+        logger.debug(f"观察结果: \n{observe[-1].content}")
         # 思考目标
         message = await self.agent.think(observe=observe, completion_config=completion_config)
         # 将消息更新到目标
@@ -485,7 +485,7 @@ class MemoryCompressWorkflow(BaseWorkflow):
         if logger.level == "DEBUG":
             logger.debug(f"{str(self.agent)}: \n{message}")
         else:
-            logger.info(f"{str(self.agent)}: \n{message.content}")
+            logger.debug(f"{str(self.agent)}: \n{message.content}")
             
         return target
         

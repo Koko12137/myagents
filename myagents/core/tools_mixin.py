@@ -142,11 +142,7 @@ class ToolsMixin(ToolsCaller):
             # Call the tool
             result = await self.tools[tool_call.name].run(tool_call.args)
             # Format the result
-            result = ToolCallResult(
-                tool_call_id=tool_call.id, 
-                content=result.content, 
-                is_error=False, 
-            )
+            result = ToolCallResult(**result.structured_content)
         except Exception as e:
             # Log the error
             logger.error(f"Error calling tool {tool_call.name}: {e}")

@@ -299,6 +299,13 @@ class PlanWorkflow(BaseReActFlow):
             logger.info(f"{str(self.agent)}: \n{message.content}")
 
         # === Create Task ===
+        # Check if the target has sub-tasks
+        if len(target.sub_tasks) > 0:
+            # Set the prev of target to the prev of the first sub-task
+            target.prev = target.sub_tasks[list(target.sub_tasks.keys())[0]].prev
+            # Delete all the sub-tasks
+            target.sub_tasks.clear()
+        
         # Create new tasks based on the orchestration json
         message, error_flag = self.create_task(
             parent=target, 
