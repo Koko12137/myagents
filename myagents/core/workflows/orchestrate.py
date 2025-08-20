@@ -129,7 +129,7 @@ class BlueprintWorkflow(BaseReActFlow):
             # Reason and act on the target
             target, error_flag, tool_call_flag = await self.reason_act(
                 target=target, 
-                completion_config=completion_config, 
+                completion_config=completion_config.update(format_json=False), 
                 **kwargs,
             )
 
@@ -169,7 +169,7 @@ class BlueprintWorkflow(BaseReActFlow):
             # Reflect on the target
             target, finish_flag = await self.reflect(
                 target=target, 
-                completion_config=completion_config, 
+                completion_config=completion_config.update(format_json=False), 
                 **kwargs,
             )
             # Check if the target is finished

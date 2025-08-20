@@ -245,7 +245,7 @@ class ToDoTaskView(TaskView):
             The template of the task view.
     """
     task: TreeTaskNode
-    template: str = """{status_value} {name} \n\t - 目标: {objective}\n\t - 关键结果: {key_results}"""
+    template: str = """{status_value} {name} \n\t - 目标描述: {objective}\n\t - 关键产出: {key_results}"""
     
     def __init__(self, task: TreeTaskNode) -> None:
         self.task = task
@@ -376,9 +376,9 @@ class JsonTaskView(TaskView):
         """Recursively format the task and its sub-tasks to a dictionary."""
         return {
             task.name: {
-                "objective": task.objective,
-                "key_results": task.key_results,
-                "sub_tasks": {
+                "目标描述": task.objective,
+                "关键产出": task.key_results,
+                "子任务": {
                     sub_task.name: self._format_dict(sub_task)[sub_task.name]
                     for sub_task in getattr(task, 'sub_tasks', {}).values()
                 }

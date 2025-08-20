@@ -93,7 +93,7 @@ class OpenAiLLM(LLM):
         
         # Check streaming
         if completion_config.stream:
-            # Get thequeue
+            # Get the queue
             queue = completion_config.stream_queue
         
         # Call for the completion

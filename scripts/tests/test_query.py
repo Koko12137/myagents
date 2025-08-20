@@ -41,7 +41,7 @@ async def test_async_query():
     answer = await query.run(
         question="请仔细分析这道数学题，给出正确的答案，所有过程需要用中文作答。", 
         description=data[0],
-        sub_task_depth=2,
+        sub_task_depth=1,
         output_type=OutputType.SUMMARY,
     )
     print("-" * 60)
