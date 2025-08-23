@@ -1,4 +1,4 @@
-from abc import abstractmethod, ABC
+from abc import ABC, abstractmethod
 from asyncio import Semaphore, Lock
 from enum import Enum
 from typing import Any, Union
@@ -13,7 +13,7 @@ from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage,
 
 
 class StepCounter(ABC):
-    """步骤计数器的协议。限制可以是最大自动步骤或最大余额成本。最好为所有代理使用相同的步骤计数器。
+    """步骤计数器的协议。限制可以是最大自动步骤或最大余额成本。最好为所有Agent使用相同的步骤计数器。
     
     属性:
         uid (str):
@@ -92,31 +92,31 @@ class StepCounter(ABC):
 
 
 class Agent(ABC):
-    """在环境中运行的代理，根据工作流处理任务
+    """在环境中运行的Agent，根据工作流处理任务
     
     属性:
         uid (str):
-            代理的唯一标识符
+            Agent的唯一标识符
         name (str):
-            代理的名称
+            Agent的名称
         agent_type (Enum):
-            代理的类型
+            Agent的类型
         profile (str):
-            代理的描述文件。描述代理的行为和目标
-        llm (LLM):
-            代理使用的语言模型
+            Agent的描述文件。描述Agent的行为和目标
+        llms (dict[str, LLM]):
+            Agent使用的语言模型
         mcp_client (MCPClient):
-            代理使用的MCP客户端
+            Agent使用的MCP客户端
         tools (dict[str, FastMcpTool]):
-            代理使用的工具
+            Agent使用的工具
         workflow (Workflow):
-            代理运行的工作流
+            Agent运行的工作流
         env (Environment):
-            代理运行的环境
+            Agent运行的环境
         step_counters (dict[str, StepCounter]):
-            代理使用的步骤计数器。任何一个达到限制，代理就会停止
+            Agent使用的步骤计数器。任何一个达到限制，Agent就会停止
         lock (Lock):
-            代理的同步锁。代理一次只能处理一个任务
+            Agent的同步锁。Agent一次只能处理一个任务
         prompts (dict[str, str]):
             运行工作流的提示
         observe_format (dict[str, str]):
@@ -128,13 +128,13 @@ class Agent(ABC):
     agent_type: Enum
     profile: str
     # 语言模型和MCP客户端
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     tools: dict[str, FastMcpTool]
     # 工作流和环境以及运行上下文
     workflow: 'Workflow'
     env: 'Environment'
-    # 代理的步骤计数器
+    # Agent的步骤计数器
     step_counters: dict[str, StepCounter]
     # 同步锁
     lock: Lock
@@ -190,6 +190,7 @@ class Agent(ABC):
     @abstractmethod
     async def think(
         self, 
+        llm_name: str, 
         observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
         completion_config: CompletionConfig, 
         **kwargs, 
@@ -197,10 +198,12 @@ class Agent(ABC):
         """思考任务或环境的观察结果
         
         参数:
+            llm_name (str):
+                语言模型的名称，用于按照阶段名称选择对应的LLM
             observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
                 从任务或环境观察到的消息
             completion_config (CompletionConfig):
-                代理的完成配置
+                Agent的完成配置
             **kwargs:
                 思考任务或环境的额外关键字参数
                 
@@ -221,7 +224,7 @@ class Agent(ABC):
                 
         返回:
             ToolCallResult:
-                代理在环境或任务上行动后返回的工具调用结果
+                Agent在环境或任务上行动后返回的工具调用结果
             
         异常:
             ValueError:
@@ -237,28 +240,28 @@ class Agent(ABC):
         completion_config: CompletionConfig, 
         **kwargs
     ) -> AssistantMessage:
-        """在任务或环境上运行代理。在运行代理之前，应该获取代理的锁
+        """在任务或环境上运行Agent。在运行Agent之前，应该获取Agent的锁
         
         参数:
             target (Stateful):
-                运行代理的有状态实体
+                运行Agent的有状态实体
             max_error_retry (int):
-                目标出错时重试代理的最大次数
+                目标出错时重试Agent的最大次数
             max_idle_thinking (int):
-                代理空闲思考的最大次数
+                Agent空闲思考的最大次数
             completion_config (CompletionConfig):
-                代理的完成配置
+                Agent的完成配置
             **kwargs:
-                运行代理的额外关键字参数
+                运行Agent的额外关键字参数
                 
         返回:
             AssistantMessage:
-                代理在有状态实体上运行后返回的助手消息
+                Agent在有状态实体上运行后返回的助手消息
         """
     
     @abstractmethod
     def register_counter(self, counter: StepCounter) -> None:
-        """向代理注册步骤计数器
+        """向Agent注册步骤计数器
         
         参数:
             counter (StepCounter):
@@ -267,7 +270,7 @@ class Agent(ABC):
     
     @abstractmethod
     def register_workflow(self, workflow: 'Workflow') -> None:
-        """向代理注册工作流
+        """向Agent注册工作流
         
         参数:
             workflow (Workflow):
@@ -276,7 +279,7 @@ class Agent(ABC):
     
     @abstractmethod
     def register_env(self, env: 'Environment') -> None:
-        """向代理注册环境
+        """向Agent注册环境
         
         参数:
             env (Environment):
@@ -285,7 +288,7 @@ class Agent(ABC):
 
 
 class MemoryAgent(Agent):
-    """MemoryAgent 是一个可以使用记忆来思考和行动的代理
+    """MemoryAgent 是一个可以使用记忆来思考和行动的Agent
     """
     
     @abstractmethod
@@ -347,29 +350,6 @@ class MemoryAgent(Agent):
         返回:
             list[float]:
                 嵌入向量
-        """
-        pass
-    
-    @abstractmethod
-    async def think_extract(
-        self, 
-        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
-        completion_config: CompletionConfig, 
-        **kwargs,
-    ) -> AssistantMessage:
-        """思考记忆提取。
-        
-        参数:
-            observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
-                观察到的消息
-            completion_config (CompletionConfig):
-                对话补全配置
-            **kwargs:
-                额外参数
-                
-        返回:
-            AssistantMessage:
-                思考记忆提取的完成消息
         """
         pass
     
@@ -475,7 +455,7 @@ class Workflow(ToolsCaller, Scheduler):
         profile (str):
             工作流的描述文件。描述工作流的行为和目标
         agent (Agent):
-            与工作流一起工作的代理
+            与工作流一起工作的Agent
         prompts (dict[str, str]):
             工作流的提示。键是提示名称，值是提示内容
         observe_formats (dict[str, str]):
@@ -493,11 +473,11 @@ class Workflow(ToolsCaller, Scheduler):
     
     @abstractmethod
     def register_agent(self, agent: Agent) -> None:
-        """向工作流注册代理
+        """向工作流注册Agent
         
         参数:
             agent (Agent):
-                要注册的代理
+                要注册的Agent
         """
     
     @abstractmethod
@@ -584,11 +564,11 @@ class MemoryWorkflow(Workflow):
     
     @abstractmethod
     def get_memory_agent(self) -> MemoryAgent:
-        """获取记忆代理
+        """获取记忆Agent
         
         返回:
             MemoryAgent:
-                记忆代理
+                记忆Agent
         """
         pass
 
@@ -644,31 +624,31 @@ class Environment(Stateful, ToolsCaller, Scheduler):
         prompts (dict[str, str]):
             环境的提示。键是提示名称，值是提示内容
         required_agents (list[Enum]):
-            列表中的代理必须注册到环境
+            列表中的Agent必须注册到环境
         agents (dict[str, Agent]):
-            环境中的代理。键是代理名称，值是代理
+            环境中的Agent。键是Agent名称，值是Agent
         agent_type_map (dict[Enum, list[str]]):
-            代理类型到代理名称的映射。键是代理类型，值是代理名称列表
+            Agent类型到Agent名称的映射。键是Agent类型，值是Agent名称列表
         agent_type_semaphore (dict[Enum, Semaphore]):
-            代理类型的信号量。键是代理类型，值是信号量
+            Agent类型的信号量。键是Agent类型，值是信号量
     """
     uid: str
     name: str
     profile: str
     prompts: dict[str, str]
     required_agents: list[Enum]
-    # 代理和并发控制
+    # Agent和并发控制
     agents: dict[str, Agent]
     agent_type_map: dict[Enum, list[str]]
     agent_type_semaphore: dict[Enum, Semaphore]
     
     @abstractmethod
     def register_agent(self, agent: Agent) -> None:
-        """向环境注册代理
+        """向环境注册Agent
         
         参数:
             agent (Agent):
-                要注册的代理
+                要注册的Agent
         """
     
     @abstractmethod
@@ -682,11 +662,11 @@ class Environment(Stateful, ToolsCaller, Scheduler):
         designated_agent: str, 
         **kwargs, 
     ) -> AssistantMessage:
-        """调用代理
+        """调用Agent
         
         参数:
             agent_type (Enum):
-                代理类型
+                Agent类型
             target (Stateful):
                 目标有状态实体
             max_error_retry (int):
@@ -696,13 +676,13 @@ class Environment(Stateful, ToolsCaller, Scheduler):
             completion_config (CompletionConfig):
                 完成配置
             designated_agent (str):
-                指定的代理名称
+                指定的Agent名称
             **kwargs:
                 额外参数
                 
         返回:
             AssistantMessage:
-                代理返回的助手消息
+                Agent返回的助手消息
         """
     
     @abstractmethod

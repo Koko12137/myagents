@@ -84,7 +84,7 @@ class PlanAndExecAgent(BaseAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -104,7 +104,7 @@ class PlanAndExecAgent(BaseAgent):
         call_stack: CallStack,
         workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
         orch_plan_system_prompt: str = ORCH_PLAN_SYSTEM_PROMPT, 
@@ -132,7 +132,7 @@ class PlanAndExecAgent(BaseAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
@@ -165,8 +165,14 @@ class PlanAndExecAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
+        if "reason_act_llm" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect_llm" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         super().__init__(
-            llm=llm, 
+            llms=llms, 
             name=name, 
             agent_type=AgentType.PLAN_AND_EXECUTE, 
             profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
@@ -251,7 +257,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -271,7 +277,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
         call_stack: CallStack,
         workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         embedding_llm: EmbeddingLLM, 
         extraction_llm: LLM, 
         step_counters: list[StepCounter], 
@@ -312,7 +318,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
@@ -361,10 +367,16 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
+        if "reason_act_llm" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect_llm" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            llm=llm, 
+            llms=llms, 
             name=name, 
             mcp_client=mcp_client, 
             step_counters=step_counters, 

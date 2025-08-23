@@ -70,7 +70,7 @@ class ReActAgent(BaseAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -90,7 +90,7 @@ class ReActAgent(BaseAgent):
         call_stack: CallStack,
         workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = SYSTEM_PROMPT, 
@@ -107,7 +107,7 @@ class ReActAgent(BaseAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
@@ -130,11 +130,17 @@ class ReActAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
+        if "reason_act_llm" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect_llm" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         # Initialize the parent class
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            llm=llm, 
+            llms=llms, 
             name=name, 
             agent_type=AgentType.REACT, 
             profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
@@ -180,7 +186,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         call_stack: CallStack,
         workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
@@ -210,7 +216,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             episode_memory (VectorMemoryCollection):
                 The episode memory to use for the agent.
@@ -237,11 +243,17 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
+        if "reason_act_llm" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect_llm" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         # Initialize the parent class
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            llm=llm, 
+            llms=llms, 
             name=name, 
             mcp_client=mcp_client, 
             step_counters=step_counters, 
@@ -322,7 +334,7 @@ class TreeReActAgent(BaseAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -342,7 +354,7 @@ class TreeReActAgent(BaseAgent):
         call_stack: CallStack,
         workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = EXEC_SYSTEM_PROMPT, 
@@ -359,7 +371,7 @@ class TreeReActAgent(BaseAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
@@ -382,11 +394,17 @@ class TreeReActAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
+        if "reason_act_llm" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect_llm" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         # Initialize the parent class
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            llm=llm, 
+            llms=llms, 
             name=name, 
             agent_type=AgentType.TREE_REACT, 
             profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
@@ -459,7 +477,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -479,7 +497,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         call_stack: CallStack,
         workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
@@ -513,7 +531,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
                 The workspace to use for the agent.
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
@@ -542,11 +560,17 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
+        if "reason_act_llm" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect_llm" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         # Initialize the parent class
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            llm=llm, 
+            llms=llms, 
             name=name, 
             mcp_client=mcp_client, 
             step_counters=step_counters, 

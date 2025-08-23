@@ -478,7 +478,7 @@ class MemoryCompressWorkflow(BaseWorkflow):
         # 记录观察结果
         logger.debug(f"观察结果: \n{observe[-1].content}")
         # 思考目标
-        message = await self.agent.think(observe=observe, completion_config=completion_config)
+        message = await self.agent.think(llm_name="reason_act_llm", observe=observe, completion_config=completion_config)
         # 将消息更新到目标
         await self.agent.prompt(message, target)
         # 记录助手消息

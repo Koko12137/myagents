@@ -48,7 +48,6 @@ class BaseMemoryAgent(BaseAgent):
         workspace: Workspace,
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        extraction_llm: LLM,
         # Memory Compress
         memory_compress_system_prompt: str, 
         memory_compress_reason_act_prompt: str, 
@@ -64,7 +63,6 @@ class BaseMemoryAgent(BaseAgent):
         super().__init__(call_stack=call_stack, workspace=workspace, **kwargs)
         self.episode_memory = episode_memory
         self.embedding_llm = embedding_llm
-        self.extraction_llm = extraction_llm
         
         # 初始化 EpisodeMemoryWorkflow
         episode_memory_workflow = EpisodeMemoryFlow(

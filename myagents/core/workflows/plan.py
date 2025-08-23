@@ -289,7 +289,7 @@ class PlanWorkflow(BaseReActFlow):
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Think about the target
-        message = await self.agent.think(observe=observe, completion_config=completion_config)
+        message = await self.agent.think(llm_name="reason_act_llm", observe=observe, completion_config=completion_config)
         # Update the message to the target
         await self.agent.prompt(message, target)
         # Log the assistant message

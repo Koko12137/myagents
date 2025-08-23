@@ -43,7 +43,7 @@ class BaseReActFlow(BaseWorkflow):
     agent: Agent
     prompts: dict[str, str]
     observe_formats: dict[str, str]
-    # Sub-worflows
+    # Sub-workflows
     sub_workflows: dict[str, Workflow]
     # Workspace
     workspace: Workspace
@@ -345,7 +345,7 @@ class BaseReActFlow(BaseWorkflow):
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Think about the target
-        message = await self.agent.think(observe=observe, completion_config=completion_config)
+        message = await self.agent.think(llm_name="reason_act_llm", observe=observe, completion_config=completion_config)
         # Update the message to the target
         await self.agent.prompt(message, target)
         # Log the assistant message
@@ -417,7 +417,7 @@ class BaseReActFlow(BaseWorkflow):
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Reflect the action taken on the target
-        message = await self.agent.think(observe=observe, completion_config=completion_config)
+        message = await self.agent.think(llm_name="reflect_llm", observe=observe, completion_config=completion_config)
         # Update the message to the target
         await self.agent.prompt(message, target)
         # Log the assistant message

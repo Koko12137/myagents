@@ -1,6 +1,6 @@
 {
     "debug": false, 
-    "save_dir": "stdout", 
+    "save_dir": "logs", 
     "environment": {
         "type": "ComplexQuery", 
         "step_counters": [
