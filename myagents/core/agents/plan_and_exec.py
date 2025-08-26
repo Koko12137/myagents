@@ -165,10 +165,10 @@ class PlanAndExecAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
-        if "reason_act_llm" not in llms:
+        # 检查 llms 是否包含 reason_act 和 reflect
+        if "reason_act" not in llms:
             raise ValueError("The reason act LLM is required.")
-        if "reflect_llm" not in llms:
+        if "reflect" not in llms:
             raise ValueError("The reflect LLM is required.")
         
         super().__init__(
@@ -364,10 +364,10 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
-        if "reason_act_llm" not in llms:
+        # 检查 llms 是否包含 reason_act 和 reflect
+        if "reason_act" not in llms:
             raise ValueError("The reason act LLM is required.")
-        if "reflect_llm" not in llms:
+        if "reflect" not in llms:
             raise ValueError("The reflect LLM is required.")
         
         super().__init__(

@@ -8,7 +8,7 @@ from myagents.core.interface import LLM, Workflow, Environment, StepCounter, Vec
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
-from myagents.core.workflows import OrchestrateFlow, MemoryOrchestrateFlow, MemoryCompressWorkflow
+from myagents.core.workflows import OrchestrateFlow, MemoryOrchestrateFlow
 from myagents.prompts.workflows.orchestrate import (
     PROFILE, 
     PLAN_SYSTEM_PROMPT, 

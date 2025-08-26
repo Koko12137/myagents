@@ -107,7 +107,6 @@ class AutoAgent:
                 return OpenAiLLM(
                     base_url=config.base_url,
                     model=config.model,
-                    temperature=config.temperature, 
                     **kwargs, 
                 )
             case _:

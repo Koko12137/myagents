@@ -131,9 +131,9 @@ class ReActAgent(BaseAgent):
                 The keyword arguments to be passed to the parent class.
         """
         # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
-        if "reason_act_llm" not in llms:
+        if "reason_act" not in llms:
             raise ValueError("The reason act LLM is required.")
-        if "reflect_llm" not in llms:
+        if "reflect" not in llms:
             raise ValueError("The reflect LLM is required.")
         
         # Initialize the parent class
@@ -241,9 +241,9 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
                 The keyword arguments to be passed to the parent class.
         """
         # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
-        if "reason_act_llm" not in llms:
+        if "reason_act" not in llms:
             raise ValueError("The reason act LLM is required.")
-        if "reflect_llm" not in llms:
+        if "reflect" not in llms:
             raise ValueError("The reflect LLM is required.")
         
         # Initialize the parent class
@@ -391,9 +391,9 @@ class TreeReActAgent(BaseAgent):
                 The keyword arguments to be passed to the parent class.
         """
         # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
-        if "reason_act_llm" not in llms:
+        if "reason_act" not in llms:
             raise ValueError("The reason act LLM is required.")
-        if "reflect_llm" not in llms:
+        if "reflect" not in llms:
             raise ValueError("The reflect LLM is required.")
         
         # Initialize the parent class
@@ -554,9 +554,9 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
                 The keyword arguments to be passed to the parent class.
         """
         # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
-        if "reason_act_llm" not in llms:
+        if "reason_act" not in llms:
             raise ValueError("The reason act LLM is required.")
-        if "reflect_llm" not in llms:
+        if "reflect" not in llms:
             raise ValueError("The reflect LLM is required.")
         
         # Initialize the parent class

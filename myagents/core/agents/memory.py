@@ -2,12 +2,9 @@ import uuid
 import time
 from typing import Union
 
-from loguru import logger
-
-from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem, LLM, CallStack, Workspace
+from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem, CallStack, Workspace
 from myagents.core.messages import AssistantMessage, ToolCallResult, SystemMessage, UserMessage
-from myagents.core.agents.base import BaseAgent, MaxStepsError
-from myagents.core.llms.config import BaseCompletionConfig
+from myagents.core.agents.base import BaseAgent
 from myagents.core.memories.schemas import (
     EpisodeMemoryItem, 
     MemoryType, 
