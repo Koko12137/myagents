@@ -31,7 +31,7 @@ class BaseAgent(Agent):
             智能体类型。
         profile (str):
             智能体简介。
-        llm (LLM):
+        llms (dict[str, LLM]):
             智能体使用的大语言模型。
         mcp_client (MCPClient):
             智能体使用的 MCP 客户端。

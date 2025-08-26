@@ -1,6 +1,6 @@
 from typing import Union, Optional, Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from myagents.core.configs.llms import LLMConfig
 from myagents.core.configs.mcps import MCPConfig
@@ -26,7 +26,7 @@ class AgentConfig(BaseModel):
     参数:
         type (str):
             Agent 的类型
-        llm (LLMConfig):
+        llms (dict[str, LLMConfig]):
             语言模型的配置
         mcp_client (MCPConfig, 可选):
             MCP 客户端的配置
@@ -40,7 +40,7 @@ class AgentConfig(BaseModel):
             Agent 的额外配置
     """
     type: str = Field(description="Agent 的类型")
-    llm: LLMConfig = Field(description="语言模型的配置")
+    llms: dict[str, LLMConfig] = Field(description="语言模型的配置")
     mcp_client: Optional[MCPConfig] = Field(
         description="MCP 客户端的配置", 
         default=None, 
@@ -53,10 +53,6 @@ class AgentConfig(BaseModel):
         description="嵌入语言模型的配置", 
         default=None, 
     )
-    extraction_llm: Optional[LLMConfig] = Field(
-        description="记忆提取语言模型的配置", 
-        default=None, 
-    )
     memory_config: Optional[VectorCollectionConfig] = Field(
         description="向量记忆集合的配置", 
         default=None, 
@@ -65,15 +61,3 @@ class AgentConfig(BaseModel):
         description="Agent 的额外配置",
         default={},
     )
-
-    @model_validator(mode="after")
-    def check_extraction_llm(self) -> bool:
-        """检查是否提供了 `extraction_llm`，如果没有提供，则设置为 `llm`
-        
-        返回:
-            bool:
-                是否提供了 `extraction_llm`
-        """
-        if self.extraction_llm is None:
-            self.extraction_llm = self.llm
-        return self

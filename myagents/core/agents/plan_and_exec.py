@@ -279,7 +279,6 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
         name: str, 
         llms: dict[str, LLM], 
         embedding_llm: EmbeddingLLM, 
-        extraction_llm: LLM, 
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         mcp_client: Optional[MCPClient] = None, 
@@ -322,8 +321,6 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
                 The LLM to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
-            extraction_llm (LLM):
-                The extraction LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
@@ -380,7 +377,6 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
             name=name, 
             mcp_client=mcp_client, 
             step_counters=step_counters, 
-            extraction_llm=extraction_llm, 
             orch_plan_system_prompt=orch_plan_system_prompt, 
             orch_plan_think_prompt=orch_plan_think_prompt, 
             orch_plan_reflect_prompt=orch_plan_reflect_prompt, 

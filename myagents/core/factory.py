@@ -202,8 +202,7 @@ class AutoAgent:
         agent_type = AgentType(config.type)
         
         # 构建语言模型
-        llm = self.__build_llm(config.llm)
-        extraction_llm = self.__build_llm(config.extraction_llm)
+        llms = {name: self.__build_llm(llm) for name, llm in config.llms.items()}
         # 构建 MCP 客户端
         mcp_client = self.__build_mcp_client(config.mcp_client)
         # 生成唯一的代理名字
@@ -247,21 +246,19 @@ class AutoAgent:
                 call_stack=call_stack,
                 workspace=workspace,
                 name=agent_name,
-                llm=llm, 
+                llms=llms, 
                 step_counters=step_counters, 
                 mcp_client=mcp_client, 
                 episode_memory=episode_memory, 
                 embedding_llm=embedding_llm, 
-                extraction_llm=extraction_llm, 
             )
         
         # 构建代理
         return AGENT(
             name=agent_name,
-            llm=llm, 
+            llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
-            extraction_llm=extraction_llm, 
         )
             
     async def __build_environment(self, config: EnvironmentConfig, call_stack: CallStack, workspace: Workspace) -> Environment:

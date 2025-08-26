@@ -302,16 +302,6 @@ class MemoryAgent(Agent):
         pass
     
     @abstractmethod
-    def get_extraction_llm(self) -> LLM:
-        """获取智能体的记忆提取模型
-        
-        返回:
-            LLM:
-                智能体的记忆提取模型
-        """
-        pass
-    
-    @abstractmethod
     def get_memory_workflow(self) -> 'MemoryWorkflow':
         """获取记忆工作流
         

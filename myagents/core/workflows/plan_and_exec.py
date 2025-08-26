@@ -43,7 +43,7 @@ class PlanAndExecFlow(TreeTaskReActFlow):
     agent: Agent
     prompts: dict[str, str]
     observe_format: str
-    # Sub-worflows
+    # Sub-workflows
     sub_workflows: dict[str, ReActFlow]
     
     def __init__(

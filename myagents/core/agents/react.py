@@ -140,10 +140,10 @@ class ReActAgent(BaseAgent):
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            llms=llms, 
             name=name, 
             agent_type=AgentType.REACT, 
-            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
+            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE),
+            llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             prompts={
@@ -190,7 +190,6 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        extraction_llm: LLM, 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = SYSTEM_PROMPT, 
         reason_act_prompt: str = THINK_PROMPT, 
@@ -222,8 +221,6 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
                 The episode memory to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
-            extraction_llm (LLM):
-                The extraction LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
@@ -253,10 +250,10 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            llms=llms, 
             name=name, 
-            mcp_client=mcp_client, 
+            llms=llms, 
             step_counters=step_counters, 
+            mcp_client=mcp_client, 
             system_prompt=system_prompt, 
             reason_act_prompt=reason_act_prompt, 
             reflect_prompt=reflect_prompt, 
@@ -266,7 +263,6 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             # Memory
             episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
-            extraction_llm=extraction_llm, 
             # Memory Compress
             memory_compress_system_prompt=memory_compress_system_prompt, 
             memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
@@ -404,10 +400,10 @@ class TreeReActAgent(BaseAgent):
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            llms=llms, 
             name=name, 
             agent_type=AgentType.TREE_REACT, 
-            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
+            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE),
+            llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             prompts={
@@ -501,7 +497,6 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        extraction_llm: LLM, 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = EXEC_SYSTEM_PROMPT, 
         reason_act_prompt: str = EXEC_THINK_PROMPT, 
@@ -539,8 +534,6 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
                 The episode memory to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
-            extraction_llm (LLM):
-                The extraction LLM to use for the agent.
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
             system_prompt (str):
@@ -570,10 +563,10 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            llms=llms, 
             name=name, 
-            mcp_client=mcp_client, 
+            llms=llms, 
             step_counters=step_counters, 
+            mcp_client=mcp_client, 
             system_prompt=system_prompt, 
             reason_act_prompt=reason_act_prompt, 
             reflect_prompt=reflect_prompt, 
@@ -583,7 +576,6 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             # Memory
             episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
-            extraction_llm=extraction_llm, 
             # Memory Compress
             memory_compress_system_prompt=memory_compress_system_prompt, 
             memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
