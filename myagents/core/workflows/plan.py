@@ -5,7 +5,7 @@ from json_repair import repair_json
 from loguru import logger
 
 from myagents.core.messages import UserMessage, SystemMessage
-from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent
+from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent, CallStack, Workspace
 from myagents.core.workflows.react import BaseReActFlow
 from myagents.core.tasks import ToDoTaskView, BaseTreeTaskNode, DocumentTaskView
 from myagents.core.llms.config import BaseCompletionConfig
@@ -48,8 +48,8 @@ class PlanWorkflow(BaseReActFlow):
     ```
     
     Attributes:
-        context (Context):
-            The global context container of the workflow.
+        workspace (Workspace):
+            The global workspace of the workflow.
         tools (dict[str, FastMcpTool]):
             The tools can be used for the agent. 
         
@@ -65,6 +65,8 @@ class PlanWorkflow(BaseReActFlow):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         profile: str = PROFILE, 
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
@@ -74,6 +76,10 @@ class PlanWorkflow(BaseReActFlow):
         """Initialize the PlanWorkflow.
         
         Args:
+            call_stack (CallStack):
+                The call stack of the workflow.
+            workspace (Workspace):
+                The workspace of the workflow.
             profile (str, optional):
                 The profile of the workflow.
             prompts (dict[str, str], optional):
@@ -107,6 +113,8 @@ class PlanWorkflow(BaseReActFlow):
             raise ValueError("The reflect format is required.")
         
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             profile=profile, 
             prompts=prompts, 
             observe_formats=observe_formats, 
@@ -281,7 +289,7 @@ class PlanWorkflow(BaseReActFlow):
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Think about the target
-        message = await self.agent.think(observe=observe, completion_config=completion_config)
+        message = await self.agent.think(llm_name="reason_act", observe=observe, completion_config=completion_config)
         # Update the message to the target
         await self.agent.prompt(message, target)
         # Log the assistant message
@@ -291,6 +299,13 @@ class PlanWorkflow(BaseReActFlow):
             logger.info(f"{str(self.agent)}: \n{message.content}")
 
         # === Create Task ===
+        # Check if the target has sub-tasks
+        if len(target.sub_tasks) > 0:
+            # Set the prev of target to the prev of the first sub-task
+            target.prev = target.sub_tasks[list(target.sub_tasks.keys())[0]].prev
+            # Delete all the sub-tasks
+            target.sub_tasks.clear()
+        
         # Create new tasks based on the orchestration json
         message, error_flag = self.create_task(
             parent=target, 
@@ -537,8 +552,18 @@ class MemoryPlanWorkflow(PlanWorkflow):
         self, 
         target: TreeTaskNode, 
         **kwargs,
-    ) -> TreeTaskNode:
-        """Extract the memory from the target.
+    ) -> str:
+        """从目标中提取记忆，将临时记忆清空，返回压缩后的记忆
+        
+        参数:
+            target (TreeTaskNode):
+                目标
+            **kwargs:
+                额外参数
+                
+        返回:
+            str:
+                压缩后的记忆
         """
         # Get the memory agent
         memory_agent = self.get_memory_agent()
@@ -590,29 +615,29 @@ class MemoryPlanWorkflow(PlanWorkflow):
         # This is used for no tool calling thinking limit.
         current_thinking = 0
         current_error = 0
+        # Continue flag
+        should_continue = True
         
         # Run the workflow
-        while target.is_created():
+        while target.is_created() and should_continue:
         
             # === Prepare System Instruction ===
-            # Check if the target has history
-            if len(target.get_history()) == 0:
-                # Get the system prompt from the workflow
-                if "system_prompt" not in self.prompts:
-                    raise KeyError("system_prompt not found in workflow prompts")
-                system_prompt = self.prompts["system_prompt"]
-                # Update the system prompt to the history
-                await self.agent.prompt(SystemMessage(content=system_prompt), target)
-                # Create a UserMessage for the blueprint
-                blueprint_message = UserMessage(content=BLUEPRINT_FORMAT.format(blueprint=blueprint))
-                # Update the blueprint message to the history
-                await self.agent.prompt(blueprint_message, target)
-                # Create a new message for the current task results
-                task_results = DocumentTaskView(task=target).format()
-                # Create a UserMessage for the task results
-                task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
-                # Update the task results message to the history
-                await self.agent.prompt(task_results_message, target)
+            # Get the system prompt from the workflow
+            if "system_prompt" not in self.prompts:
+                raise KeyError("system_prompt not found in workflow prompts")
+            system_prompt = self.prompts["system_prompt"]
+            # Update the system prompt to the history
+            await self.agent.prompt(SystemMessage(content=system_prompt), target)
+            # Create a UserMessage for the blueprint
+            blueprint_message = UserMessage(content=BLUEPRINT_FORMAT.format(blueprint=blueprint))
+            # Update the blueprint message to the history
+            await self.agent.prompt(blueprint_message, target)
+            # Create a new message for the current task results
+            task_results = DocumentTaskView(task=target).format()
+            # Create a UserMessage for the task results
+            task_results_message = UserMessage(content=f"## 任务目前结果进度\n\n{task_results}")
+            # Update the task results message to the history
+            await self.agent.prompt(task_results_message, target)
         
             # === Reason Stage ===
             # Reason and act on the target
@@ -650,7 +675,7 @@ class MemoryPlanWorkflow(PlanWorkflow):
             # Check if the target is finished
             if finish_flag:
                 # Force the loop to break
-                break
+                should_continue = False
             
             # Check if the tool call flag is not set
             elif not tool_call_flag:
@@ -668,10 +693,12 @@ class MemoryPlanWorkflow(PlanWorkflow):
                     # Log the error message
                     logger.critical(f"连续思考次数限制已达上限: {current_thinking}/{max_idle_thinking}，进入错误状态。")
                     # Force the loop to break
-                    break
+                    should_continue = False
             
             # === Extract Memory ===
             # Extract the memory from the target
-            target = await self.extract_memory(target, **kwargs)
+            compressed_memory = await self.extract_memory(target, **kwargs)
+            # Update the compressed memory to the history
+            await self.agent.update_temp_memory(temp_memory=compressed_memory, target=target)
             
         return target

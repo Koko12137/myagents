@@ -4,7 +4,7 @@ from typing import Optional
 from fastmcp.client import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM
+from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM, CallStack, Workspace
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
@@ -23,7 +23,7 @@ from myagents.prompts.memories.episode import (
     REASON_ACT_PROMPT as MEMORY_EPISODE_REASON_ACT_PROMPT, 
     REFLECT_PROMPT as MEMORY_EPISODE_REFLECT_PROMPT, 
 )
-from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE
+from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE, SYSTEM_MEMORY_TEMPLATE
 
 
 AGENT_PROFILE = """
@@ -70,7 +70,7 @@ class ReActAgent(BaseAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -87,8 +87,10 @@ class ReActAgent(BaseAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = SYSTEM_PROMPT, 
@@ -105,7 +107,7 @@ class ReActAgent(BaseAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
@@ -128,12 +130,20 @@ class ReActAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
+        if "reason_act" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         # Initialize the parent class
         super().__init__(
-            llm=llm, 
+            call_stack=call_stack,
+            workspace=workspace,
             name=name, 
             agent_type=AgentType.REACT, 
-            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
+            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE),
+            llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             prompts={
@@ -151,6 +161,8 @@ class ReActAgent(BaseAgent):
         
         # Initialize the workflow for the agent
         self.workflow = BaseReActFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,
@@ -171,12 +183,13 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        extraction_llm: LLM, 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = SYSTEM_PROMPT, 
         reason_act_prompt: str = THINK_PROMPT, 
@@ -193,6 +206,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
         # Memory Format Template
         memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
+        system_memory_template: str = SYSTEM_MEMORY_TEMPLATE, 
         **kwargs, 
     ) -> None: 
         """
@@ -201,14 +215,12 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             episode_memory (VectorMemoryCollection):
                 The episode memory to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
-            extraction_llm (LLM):
-                The extraction LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
@@ -228,13 +240,20 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
+        if "reason_act" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         # Initialize the parent class
         super().__init__(
-            llm=llm, 
+            call_stack=call_stack,
+            workspace=workspace,
             name=name, 
-            mcp_client=mcp_client, 
+            llms=llms, 
             step_counters=step_counters, 
-            # trajectory_memory=trajectory_memory, # TODO: 暂时不使用轨迹记忆
+            mcp_client=mcp_client, 
             system_prompt=system_prompt, 
             reason_act_prompt=reason_act_prompt, 
             reflect_prompt=reflect_prompt, 
@@ -244,7 +263,6 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             # Memory
             episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
-            extraction_llm=extraction_llm, 
             # Memory Compress
             memory_compress_system_prompt=memory_compress_system_prompt, 
             memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
@@ -254,11 +272,14 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
             # Memory Format Template
             memory_prompt_template=memory_prompt_template, 
+            system_memory_template=system_memory_template, 
             **kwargs,
         )
         
         # Initialize the workflow for the agent
         self.workflow = MemoryReActFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,
@@ -309,7 +330,7 @@ class TreeReActAgent(BaseAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -326,8 +347,10 @@ class TreeReActAgent(BaseAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = EXEC_SYSTEM_PROMPT, 
@@ -344,7 +367,7 @@ class TreeReActAgent(BaseAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
@@ -367,12 +390,20 @@ class TreeReActAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
+        if "reason_act" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         # Initialize the parent class
         super().__init__(
-            llm=llm, 
+            call_stack=call_stack,
+            workspace=workspace,
             name=name, 
             agent_type=AgentType.TREE_REACT, 
-            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
+            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE),
+            llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             prompts={
@@ -390,6 +421,8 @@ class TreeReActAgent(BaseAgent):
         
         # Initialize the workflow for the agent
         self.workflow = TreeTaskReActFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,
@@ -440,7 +473,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -457,12 +490,13 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        extraction_llm: LLM, 
         mcp_client: Optional[MCPClient] = None, 
         system_prompt: str = EXEC_SYSTEM_PROMPT, 
         reason_act_prompt: str = EXEC_THINK_PROMPT, 
@@ -479,15 +513,20 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
         # Memory Format Template
         memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
+        system_memory_template: str = SYSTEM_MEMORY_TEMPLATE, 
         **kwargs, 
     ) -> None:        
         """
         Initialize the MemoryTreeReActAgent.
         
         Args:
+            call_stack (CallStack):
+                The call stack to use for the agent.
+            workspace (Workspace):
+                The workspace to use for the agent.
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
@@ -495,8 +534,6 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
                 The episode memory to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
-            extraction_llm (LLM):
-                The extraction LLM to use for the agent.
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
             system_prompt (str):
@@ -516,12 +553,20 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
+        if "reason_act" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         # Initialize the parent class
         super().__init__(
-            llm=llm, 
+            call_stack=call_stack,
+            workspace=workspace,
             name=name, 
-            mcp_client=mcp_client, 
+            llms=llms, 
             step_counters=step_counters, 
+            mcp_client=mcp_client, 
             system_prompt=system_prompt, 
             reason_act_prompt=reason_act_prompt, 
             reflect_prompt=reflect_prompt, 
@@ -531,7 +576,6 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             # Memory
             episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
-            extraction_llm=extraction_llm, 
             # Memory Compress
             memory_compress_system_prompt=memory_compress_system_prompt, 
             memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
@@ -541,11 +585,14 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
             # Memory Format Template
             memory_prompt_template=memory_prompt_template, 
+            system_memory_template=system_memory_template, 
             **kwargs,
         )
         
         # Initialize the workflow for the agent
         self.workflow = MemoryTreeTaskReActFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,

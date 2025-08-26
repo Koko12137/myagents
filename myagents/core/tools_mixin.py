@@ -1,29 +1,31 @@
 from typing import Callable, Awaitable, Union
 
-from fastmcp.tools import Tool as FastMCPTool
+from fastmcp.tools import Tool as FastMcpTool
 from loguru import logger
 
-from myagents.core.interface import ToolsCaller
-from myagents.core.utils.context import BaseContext
+from myagents.core.interface import ToolsCaller, Stateful
 from myagents.core.messages import ToolCallRequest, ToolCallResult
+from myagents.core.interface import CallStack
 
 
 class ToolsMixin(ToolsCaller):
     """ToolsMixin is a mixin class for tools management.
     
     Attributes:
-        tools (dict[str, FastMCPTool]):
+        tools (dict[str, FastMcpTool]):
             The tools of the mixin.
-        context (Context):
-            The context of the mixin.
+        call_stack (CallStack):
+            The call stack of the mixin.
     """
-    tools: dict[str, FastMCPTool]
-    context: BaseContext
+    tools: dict[str, FastMcpTool]
+    call_stack: CallStack
     
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, call_stack: CallStack, *args, **kwargs) -> None:
         """Initialize the ToolsMixin.
 
         Args:
+            call_stack (CallStack):
+                The call stack of the mixin.
             *args:
                 The arguments to be passed to the parent class.
             **kwargs:
@@ -33,8 +35,8 @@ class ToolsMixin(ToolsCaller):
         
         # Initialize the tools
         self.tools = {}
-        # Initialize the context
-        self.context = BaseContext()
+        # Initialize the call stack
+        self.call_stack = call_stack
         
     def add_tool(
         self, 
@@ -63,8 +65,8 @@ class ToolsMixin(ToolsCaller):
         if name in self.tools and not replace:
             raise ValueError(f"Tool {name} is already registered.")
         
-        # Create a FastMCPTool instance
-        tool_obj = FastMCPTool.from_function(tool, tags=tags)
+        # Create a FastMcpTool instance
+        tool_obj = FastMcpTool.from_function(tool, tags=tags)
         # Register the tool to the mixin
         self.tools[name] = tool_obj
         
@@ -111,6 +113,7 @@ class ToolsMixin(ToolsCaller):
     async def call_tool(
         self, 
         tool_call: ToolCallRequest, 
+        target: Stateful,
         **kwargs,
     ) -> ToolCallResult:
         """Call a tool to control the workflow.
@@ -118,6 +121,8 @@ class ToolsMixin(ToolsCaller):
         Args:
             tool_call (ToolCallRequest):
                 The tool call request.
+            target (Stateful):
+                The target of the tool call.
             **kwargs:
                 The additional keyword arguments for calling the tool.
                 
@@ -129,18 +134,15 @@ class ToolsMixin(ToolsCaller):
         if tool_call.name not in self.tools:
             raise ValueError(f"Tool {tool_call.name} is not registered.")
         
-        # Put the tool_call and keyword arguments to the context
-        self.context = self.context.create_next(tool_call=tool_call, **kwargs)
+        # Push the kwargs to the call stack
+        self.call_stack.call_next(key_values={"target": target, "tool_call": tool_call, **kwargs})
         
+        # Call the tool
         try:
             # Call the tool
             result = await self.tools[tool_call.name].run(tool_call.args)
             # Format the result
-            result = ToolCallResult(
-                tool_call_id=tool_call.id, 
-                content=result.content, 
-                is_error=False, 
-            )
+            result = ToolCallResult(**result.structured_content)
         except Exception as e:
             # Log the error
             logger.error(f"Error calling tool {tool_call.name}: {e}")
@@ -151,7 +153,8 @@ class ToolsMixin(ToolsCaller):
                 content=f"工具调用失败: {e}"
             )
             
-        # Resume the context
-        self.context = self.context.done()
+        # Resume the call stack
+        self.call_stack.return_prev()
+        
         # Return the tool call result
         return result

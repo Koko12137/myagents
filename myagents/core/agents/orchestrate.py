@@ -4,11 +4,11 @@ from typing import Optional
 from fastmcp.client import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM
+from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM, CallStack, Workspace
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
-from myagents.core.workflows import OrchestrateFlow, MemoryOrchestrateFlow, MemoryCompressWorkflow
+from myagents.core.workflows import OrchestrateFlow, MemoryOrchestrateFlow
 from myagents.prompts.workflows.orchestrate import (
     PROFILE, 
     PLAN_SYSTEM_PROMPT, 
@@ -27,7 +27,7 @@ from myagents.prompts.memories.episode import (
     REASON_ACT_PROMPT as MEMORY_EPISODE_REASON_ACT_PROMPT, 
     REFLECT_PROMPT as MEMORY_EPISODE_REFLECT_PROMPT, 
 )
-from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE
+from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE, SYSTEM_MEMORY_TEMPLATE
 
 
 AGENT_PROFILE = """
@@ -74,7 +74,7 @@ class OrchestrateAgent(BaseAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -91,8 +91,10 @@ class OrchestrateAgent(BaseAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
         need_user_check: bool = False, 
@@ -124,25 +126,25 @@ class OrchestrateAgent(BaseAgent):
             need_user_check (bool, optional, defaults to False):
                 Whether to need the user to check the orchestration blueprint.
             plan_system_prompt (str, optional):
-                The system prompt of the orchestation plan reason stage.
+                The system prompt of the orchestration plan reason stage.
             plan_reason_act_prompt (str, optional):
-                The think prompt of the orchestation plan reason stage.
+                The think prompt of the orchestration plan reason stage.
             plan_reflect_prompt (str, optional):
-                The react system prompt of the orchestation plan reflect stage.
+                The react system prompt of the orchestration plan reflect stage.
             exec_system_prompt (str, optional):
-                The action prompt of the orchestation execution reason stage.
+                The action prompt of the orchestration execution reason stage.
             exec_reason_act_prompt (str, optional):
-                The reflect prompt of the orchestation execution reason stage.
+                The reflect prompt of the orchestration execution reason stage.
             exec_reflect_prompt (str, optional):
-                The reflect prompt of the orchestation execution reflect stage.
+                The reflect prompt of the orchestration execution reflect stage.
             plan_reason_act_format (str, optional, defaults to "todo"):
-                The observation format of the orchestation execution reason stage.
+                The observation format of the orchestration execution reason stage.
             plan_reflect_format (str, optional, defaults to "todo"):
-                The observation format of the orchestation execution reflect stage.
+                The observation format of the orchestration execution reflect stage.
             exec_reason_act_format (str, optional, defaults to "json"):
-                The observation format of the orchestation execution reason stage.
+                The observation format of the orchestration execution reason stage.
             exec_reflect_format (str, optional, defaults to "json"):
-                The observation format of the orchestation execution reflect stage.
+                The observation format of the orchestration execution reflect stage.
             agent_format (str, optional, defaults to "todo"):
                 The observation format of the agent.
             **kwargs:
@@ -150,10 +152,12 @@ class OrchestrateAgent(BaseAgent):
         """
         # Initialize the parent class
         super().__init__(
-            llm=llm, 
+            call_stack=call_stack,
+            workspace=workspace,
             name=name, 
+            llms=llms, 
             agent_type=AgentType.ORCHESTRATE, 
-            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
+            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE),
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             prompts={
@@ -174,9 +178,10 @@ class OrchestrateAgent(BaseAgent):
             **kwargs,
         )
         
-        # Read the workflow profile
         # Initialize the workflow for the agent
         self.workflow = OrchestrateFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             need_user_check=need_user_check, 
@@ -191,6 +196,7 @@ class OrchestrateAgent(BaseAgent):
     def __repr__(self) -> str:
         return self.__str__()
 
+
 class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
     """MemoryOrchestrateAgent is the agent that is used to orchestrate the environment with memory.
     
@@ -203,7 +209,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             The type of the agent.
         profile (str):
             The profile of the agent.
-        llm (LLM):tee
+        llms (dict[str, LLM]):
             The LLM to use for the agent. 
         mcp_client (MCPClient):
             The MCP client to use for the agent.
@@ -227,7 +233,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -244,12 +250,13 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
-        embedding_llm: EmbeddingLLM, 
-        extraction_llm: LLM, 
+        embedding_llm: EmbeddingLLM,
         mcp_client: Optional[MCPClient] = None, 
         need_user_check: bool = False, 
         plan_system_prompt: str = PLAN_SYSTEM_PROMPT, 
@@ -272,6 +279,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
         episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
         # Memory Format Template
         memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
+        system_memory_template: str = SYSTEM_MEMORY_TEMPLATE, 
         **kwargs, 
     ) -> None: 
         """
@@ -280,7 +288,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
@@ -288,41 +296,43 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
                 The vector memory to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
-            extraction_llm (LLM):
-                The extraction LLM to use for the agent.
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
             need_user_check (bool, optional, defaults to False):
                 Whether to need the user to check the orchestration blueprint.
             plan_system_prompt (str, optional):
-                The system prompt of the orchestation plan reason stage.
+                The system prompt of the orchestration plan reason stage.
             plan_reason_act_prompt (str, optional):
-                The think prompt of the orchestation plan reason stage.
+                The think prompt of the orchestration plan reason stage.
             plan_reflect_prompt (str, optional):
-                The react system prompt of the orchestation plan reflect stage.
+                The react system prompt of the orchestration plan reflect stage.
             exec_system_prompt (str, optional):
-                The action prompt of the orchestation execution reason stage.
+                The action prompt of the orchestration execution reason stage.
             exec_reason_act_prompt (str, optional):
-                The reflect prompt of the orchestation execution reason stage.
+                The reflect prompt of the orchestration execution reason stage.
             exec_reflect_prompt (str, optional):
-                The reflect prompt of the orchestation execution reflect stage.
+                The reflect prompt of the orchestration execution reflect stage.
             plan_reason_act_format (str, optional, defaults to "todo"):
-                The observation format of the orchestation execution reason stage.
+                The observation format of the orchestration execution reason stage.
             plan_reflect_format (str, optional, defaults to "todo"):
-                The observation format of the orchestation execution reflect stage.
+                The observation format of the orchestration execution reflect stage.
             exec_reason_act_format (str, optional, defaults to "json"):
-                The observation format of the orchestation execution reason stage.
+                The observation format of the orchestration execution reason stage.
             exec_reflect_format (str, optional, defaults to "json"):
-                The observation format of the orchestation execution reflect stage.
+                The observation format of the orchestration execution reflect stage.
             agent_format (str, optional, defaults to "todo"):
                 The observation format of the agent.
+            system_memory_template (str, optional):
+                The system memory template of the memory.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
         # Initialize the parent class
         super().__init__(
-            llm=llm, 
+            call_stack=call_stack,
+            workspace=workspace,
             name=name, 
+            llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             need_user_check=need_user_check, 
@@ -340,7 +350,6 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             # Memory
             episode_memory=episode_memory, 
             embedding_llm=embedding_llm, 
-            extraction_llm=extraction_llm, 
             # Memory Compress
             memory_compress_system_prompt=memory_compress_system_prompt, 
             memory_compress_reason_act_prompt=memory_compress_reason_act_prompt, 
@@ -350,12 +359,15 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
             # Memory Format Template
             memory_prompt_template=memory_prompt_template, 
+            system_memory_template=system_memory_template, 
             **kwargs,
         )
         
         # Read the workflow profile
         # Initialize the workflow for the agent
         self.workflow = MemoryOrchestrateFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             need_user_check=need_user_check, 

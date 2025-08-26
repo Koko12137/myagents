@@ -21,6 +21,7 @@ class BaseVectorMemoryItem(BaseModel):
         task_id (str): 任务ID
         metadata (dict): 记忆元数据
         embedding (List[float]): 记忆向量
+        created_at (int): 创建时间
     """
     id: int = Field(description="ID", default=None)
     
@@ -29,7 +30,6 @@ class BaseVectorMemoryItem(BaseModel):
     task_id: str = Field(description="任务ID")
     memory_id: str = Field(description="记忆ID")
     task_status: str = Field(description="任务状态")
-    metadata: dict = Field(description="记忆元数据")
     embedding: list[float] = Field(description="记忆向量")
     created_at: int = Field(description="创建时间")
     
@@ -51,9 +51,6 @@ class BaseVectorMemoryItem(BaseModel):
     def get_task_status(self) -> str:
         return self.task_status
     
-    def get_metadata(self) -> dict:
-        return self.metadata
-    
     def get_embedding(self) -> list[float]:
         return self.embedding
     
@@ -61,29 +58,47 @@ class BaseVectorMemoryItem(BaseModel):
         return self.model_dump()
 
 
+class EpisodeMetadata(BaseModel):
+    """情节记忆元数据
+    
+    属性：
+        instruction (str): 需要做什么事
+        situation (str): 当前的情况
+        action (str): 采取的行动
+        result (str): 行动的结果
+        reflection (str): 结果的反思
+    """
+    instruction: str = Field(description="需要做什么事")
+    situation: str = Field(description="当前的情况")
+    action: str = Field(description="采取的行动")
+    result: str = Field(description="行动的结果")
+    reflection: str = Field(description="结果的反思")
+
+
 class EpisodeMemoryItem(BaseVectorMemoryItem):
     """情节记忆数据结构
     
     属性：
-        memory_id (int): 记忆ID
-        env_id (str): 环境ID
-        agent_id (str): 代理ID
-        task_id (str): 任务ID
-        task_status: str
-        metadata (dict): 记忆元数据
-        embedding (List[float]): 记忆向量
-        abstract (str): 摘要
         keywords (list[str]): 关键词
+        abstract (str): 摘要
+        metadata (EpisodeMetadata): 记忆元数据
         is_error (bool): 是否为错误经验
     """
+    keywords: list[str] = Field(description="关键词")
+    abstract: str = Field(description="摘要")
+    metadata: EpisodeMetadata = Field(description="记忆元数据")
     is_error: bool = Field(description="是否为错误经验")
     
     def format(self) -> Union[str, list[dict]]:
         return EPISODE_ITEM_FORMAT.format(
             memory_id=self.memory_id, 
-            abstract=self.metadata.get("abstract"), 
-            keywords=self.metadata.get("keywords"), 
-            content=self.metadata.get("content"), 
+            abstract=self.abstract, 
+            keywords=self.keywords, 
+            instruction=self.metadata.instruction, 
+            situation=self.metadata.situation, 
+            action=self.metadata.action, 
+            result=self.metadata.result, 
+            reflection=self.metadata.reflection, 
             is_error=self.is_error, 
         )
 
@@ -116,16 +131,3 @@ class BaseMemoryOperation(BaseModel):
     
     def get_memory(self) -> BaseVectorMemoryItem:
         return self.memory
-
-
-class MemoryIDMap(BaseModel):
-    """记忆ID映射数据结构
-    
-    属性：
-        fake_id (int): 虚拟ID，用于在记忆上下文中使用
-        raw_id (int): 原始ID，用于在向量数据库中使用
-        memory (BaseVectorMemoryItem): 记忆项
-    """
-    fake_id: int = Field(description="虚拟ID，用于在记忆上下文中使用")
-    raw_id: int = Field(description="原始ID，用于在向量数据库中使用")
-    memory: BaseVectorMemoryItem = Field(description="记忆项")

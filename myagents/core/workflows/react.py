@@ -3,7 +3,7 @@ import re
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import Agent, Workflow, Stateful, Context, TreeTaskNode, CompletionConfig, MemoryAgent
+from myagents.core.interface import Agent, Workflow, Stateful, Workspace, TreeTaskNode, CompletionConfig, MemoryAgent, CallStack
 from myagents.core.messages import SystemMessage, UserMessage, StopReason, ToolCallResult, ToolCallRequest
 from myagents.core.messages.message import AssistantMessage
 from myagents.core.workflows.base import BaseWorkflow
@@ -17,8 +17,8 @@ class BaseReActFlow(BaseWorkflow):
     """BaseReActFlow implements the ReAct workflow interface.
     
     Attributes:
-        context (Context):
-            The context of the workflow.
+        workspace (Workspace):
+            The workspace of the workflow.
         tools (dict[str, FastMcpTool]):
             The tools of the workflow.
         
@@ -34,19 +34,24 @@ class BaseReActFlow(BaseWorkflow):
             The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the 
             sub-workflow instance. 
     """
-    # Context and tools
-    context: Context
+    # Tools
     tools: dict[str, FastMcpTool]
+    # Call stack
+    call_stack: CallStack
     # Basic information
     profile: str
     agent: Agent
     prompts: dict[str, str]
     observe_formats: dict[str, str]
-    # Sub-worflows
+    # Sub-workflows
     sub_workflows: dict[str, Workflow]
+    # Workspace
+    workspace: Workspace
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         profile: str = PROFILE, 
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
@@ -56,6 +61,10 @@ class BaseReActFlow(BaseWorkflow):
         """Initialize the BaseReActFlow.
 
         Args:
+            call_stack (CallStack):
+                The call stack of the workflow.
+            workspace (Workspace):
+                The workspace of the workflow.
             profile (str):
                 The profile of the workflow.
             prompts (dict[str, str]):
@@ -84,6 +93,8 @@ class BaseReActFlow(BaseWorkflow):
         
         # Initialize the workflow
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             profile=profile, 
             prompts=prompts, 
             observe_formats=observe_formats, 
@@ -110,26 +121,30 @@ class BaseReActFlow(BaseWorkflow):
                     The tool call result.
             """
             # Get the target
-            target: TreeTaskNode = self.context.get("target")
+            target: TreeTaskNode = self.call_stack.get_value("target")
             # Get the tool call
-            tool_call: ToolCallRequest = self.context.get("tool_call")
+            tool_call: ToolCallRequest = self.call_stack.get_value("tool_call")
             # Get the message
-            message: AssistantMessage = self.context.get("message")
+            message: AssistantMessage = target.get_history()[-1]
             
-            # 检测并处理 finish_flag
-            finish_flag_content = extract_by_label(message.content, "finish_flag", "finish_workflow", "finish")
-            
-            if finish_flag_content:
-                # 如果存在 finish_flag，检查值是否为 True
-                if finish_flag_content.strip() == "True":
-                    # 已经是 True，无需修改
-                    pass
+            if message.content is not None:
+                # 检测并处理 finish_flag
+                finish_flag_content = extract_by_label(message.content, "finish_flag", "finish_workflow", "finish")
+                
+                if finish_flag_content:
+                    # 如果存在 finish_flag，检查值是否为 True
+                    if finish_flag_content.strip() == "True":
+                        # 已经是 True，无需修改
+                        pass
+                    else:
+                        # 不是 True，强制修改为 True
+                        message.content = re.sub(r"<finish_flag>.*?</finish_flag>", "<finish_flag>True</finish_flag>", message.content)
                 else:
-                    # 不是 True，强制修改为 True
-                    message.content = re.sub(r"<finish_flag>.*?</finish_flag>", "<finish_flag>True</finish_flag>", message.content)
+                    # 如果不存在 finish_flag，添加它
+                    message.content += "\n<finish_flag>True</finish_flag>"
             else:
-                # 如果不存在 finish_flag，添加它
-                message.content += "\n<finish_flag>True</finish_flag>"
+                # 如果 message.content 为 None，则设置 finish_flag 为 True
+                message.content = "<finish_flag>True</finish_flag>"
             
             # Create a new tool call result
             result = ToolCallResult(
@@ -330,7 +345,7 @@ class BaseReActFlow(BaseWorkflow):
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Think about the target
-        message = await self.agent.think(observe=observe, completion_config=completion_config)
+        message = await self.agent.think(llm_name="reason_act", observe=observe, completion_config=completion_config)
         # Update the message to the target
         await self.agent.prompt(message, target)
         # Log the assistant message
@@ -402,7 +417,7 @@ class BaseReActFlow(BaseWorkflow):
         # Log the observe
         logger.info(f"Observe: \n{observe[-1].content}")
         # Reflect the action taken on the target
-        message = await self.agent.think(observe=observe, completion_config=completion_config)
+        message = await self.agent.think(llm_name="reflect", observe=observe, completion_config=completion_config)
         # Update the message to the target
         await self.agent.prompt(message, target)
         # Log the assistant message
@@ -459,8 +474,18 @@ class MemoryReActFlow(BaseReActFlow):
         self, 
         target: Stateful, 
         **kwargs,
-    ) -> Stateful:
-        """Extract the memory from the target.
+    ) -> str:
+        """从目标中提取记忆，将临时记忆清空，返回压缩后的记忆
+        
+        参数:
+            target (Stateful):
+                目标
+            **kwargs:
+                额外参数
+                
+        返回:
+            str:
+                压缩后的记忆
         """
         # Get the memory agent
         memory_agent = self.get_memory_agent()
@@ -513,15 +538,13 @@ class MemoryReActFlow(BaseReActFlow):
             
             # === Prepare System Instruction ===
             # Get the system prompt from the workflow
-            if len(target.get_history()) == 0:
-                # Get the system prompt from the workflow
-                if "system_prompt" not in self.prompts:
-                    raise KeyError("system_prompt not found in workflow prompts")
-                exec_system = self.prompts["system_prompt"]
-                # Append the system prompt to the history
-                message = SystemMessage(content=exec_system)
-                # Update the system message to the history
-                await self.agent.prompt(message, target)
+            if "system_prompt" not in self.prompts:
+                raise KeyError("system_prompt not found in workflow prompts")
+            system_prompt = self.prompts["system_prompt"]
+            # Append the system prompt to the history
+            message = SystemMessage(content=system_prompt)
+            # Update the system message to the history
+            await self.agent.prompt(message, target)
         
             # === Reason Stage ===
             # Reason and act on the target
@@ -581,7 +604,9 @@ class MemoryReActFlow(BaseReActFlow):
             
             # === Extract Memory ===
             # Extract the memory from the target
-            target = await self.extract_memory(target, **kwargs)
+            compressed_memory = await self.extract_memory(target, **kwargs)
+            # Update the compressed memory to the history
+            await self.agent.update_temp_memory(temp_memory=compressed_memory, target=target)
             
         return target
     
@@ -640,9 +665,9 @@ class TreeTaskReActFlow(BaseReActFlow):
             await self.agent.prompt(message, target)
             
             # Get the task from the context
-            task = self.agent.env.context.get("task")
+            root_task = self.agent.env.workspace.get(self.agent.env.uid, "root_task")
             # Create a UserMessage for the task results
-            task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=task).format()}")
+            task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=root_task).format()}")
             # Update the task message to the history
             await self.agent.prompt(task_message, target)
         
@@ -750,8 +775,18 @@ class MemoryTreeTaskReActFlow(TreeTaskReActFlow):
         self, 
         target: Stateful, 
         **kwargs,
-    ) -> Stateful:
-        """Extract the memory from the target.
+    ) -> str:
+        """从目标中提取记忆，将临时记忆清空，返回压缩后的记忆
+        
+        参数:
+            target (Stateful):
+                目标
+            **kwargs:
+                额外参数
+                
+        返回:
+            str:
+                压缩后的记忆
         """
         # Get the memory agent
         memory_agent = self.get_memory_agent()
@@ -802,24 +837,22 @@ class MemoryTreeTaskReActFlow(TreeTaskReActFlow):
         
         while target.is_running():
             
-            # Check if the target has history
-            if len(target.get_history()) == 0:
-                # === Prepare System Instruction ===
-                # Get the prompts from the agent
-                if "system_prompt" not in self.prompts:
-                    raise KeyError("system_prompt not found in workflow prompts")
-                exec_system = self.prompts["system_prompt"]
-                # Append the system prompt to the history
-                message = SystemMessage(content=exec_system)
-                # Update the system message to the history
-                await self.agent.prompt(message, target)
-                
-                # Get the task from the context
-                task = self.agent.env.context.get("task")
-                # Create a UserMessage for the task results
-                task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=task).format()}")
-                # Update the task message to the history
-                await self.agent.prompt(task_message, target)
+            # === Prepare System Instruction ===
+            # Get the prompts from the agent
+            if "system_prompt" not in self.prompts:
+                raise KeyError("system_prompt not found in workflow prompts")
+            system_prompt = self.prompts["system_prompt"]
+            # Append the system prompt to the history
+            message = SystemMessage(content=system_prompt)
+            # Update the system message to the history
+            await self.agent.prompt(message, target)
+            
+            # Get the task from the context
+            root_task = self.agent.env.workspace.get(self.agent.env.uid, "root_task")
+            # Create a UserMessage for the task results
+            task_message = UserMessage(content=f"## 任务目前结果进度\n\n{DocumentTaskView(task=root_task).format()}")
+            # Update the task message to the history
+            await self.agent.prompt(task_message, target)
             
             # === Reason and Act ===
             target, error_flag, tool_call_flag = await self.reason_act(
@@ -897,7 +930,9 @@ class MemoryTreeTaskReActFlow(TreeTaskReActFlow):
             
             # === Extract Memory ===
             # Extract the memory from the target
-            target = await self.extract_memory(target, **kwargs)
+            compressed_memory = await self.extract_memory(target, **kwargs)
+            # Update the compressed memory to the history
+            await self.agent.update_temp_memory(temp_memory=compressed_memory, target=target)
         
         # Set the answer of the task
         if not target.results and target.is_finished(): 

@@ -7,7 +7,7 @@ from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
-from myagents.core.interface import Agent, TreeTaskNode, Context
+from myagents.core.interface import Agent, TreeTaskNode, Workspace
 from myagents.core.agents import AgentType
 from myagents.core.tasks import BaseTreeTaskNode, ToDoTaskView, JsonTaskView
 from myagents.core.llms.config import BaseCompletionConfig
@@ -44,8 +44,8 @@ class Orchestrate(BaseEnvironment):
             The semaphore of the agent type. The key is the agent type and the value is the semaphore. 
         tools (dict[str, FastMcpTool]):
             The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
-        context (Context):
-            The context of the environment.
+        workspace (Workspace):
+            The workspace of the environment.
         status (EnvironmentStatus):
             The status of the environment.
         history (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
@@ -64,10 +64,10 @@ class Orchestrate(BaseEnvironment):
     agents: dict[str, Agent]
     agent_type_map: dict[AgentType, list[str]]
     agent_type_semaphore: dict[AgentType, Semaphore]
-    # Tools
+    # Tools Mixin
     tools: dict[str, FastMcpTool]
-    # Context
-    context: Context
+    # Workspace
+    workspace: Workspace
     # Status and history
     status: EnvironmentStatus
     history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
@@ -194,7 +194,7 @@ class Orchestrate(BaseEnvironment):
         # Process the task
         task = await self.process_task(task, completion_config=completion_config, **kwargs)
         # Get the blueprint of the task
-        blueprint: str = self.context.get("blueprint")
+        blueprint: str = self.workspace.get(self.uid, "blueprint")
         # Get the JSON view of the task
         todo_view = ToDoTaskView(task).format()
         # Get the JSON view of the task

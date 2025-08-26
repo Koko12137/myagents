@@ -16,7 +16,6 @@ class OpenAiLLM(LLM):
     provider: Provider
     model: str
     base_url: str
-    temperature: float
     
     def __init__(
         self, 
@@ -31,8 +30,6 @@ class OpenAiLLM(LLM):
                 The model of the LLM.
             base_url (str): 
                 The base URL of the LLM.
-            temperature (float, defaults to 1.0): 
-                The temperature of the LLM.
             custom_logger (Logger, defaults to logger): 
                 The custom logger. If not provided, the default loguru logger will be used.
             debug (bool, defaults to False): 
@@ -40,9 +37,6 @@ class OpenAiLLM(LLM):
             **kwargs: 
                 The additional keyword arguments.
         """
-        # Initialize the parent class
-        super().__init__(**kwargs)
-        
         # Initialize the provider
         self.provider = Provider.OPENAI
         
@@ -93,7 +87,7 @@ class OpenAiLLM(LLM):
         
         # Check streaming
         if completion_config.stream:
-            # Get thequeue
+            # Get the queue
             queue = completion_config.stream_queue
         
         # Call for the completion

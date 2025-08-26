@@ -4,7 +4,7 @@ from typing import Optional
 from fastmcp.client import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM
+from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM, CallStack, Workspace
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
@@ -37,7 +37,7 @@ from myagents.prompts.memories.episode import (
     REASON_ACT_PROMPT as MEMORY_EPISODE_REASON_ACT_PROMPT, 
     REFLECT_PROMPT as MEMORY_EPISODE_REFLECT_PROMPT, 
 )
-from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE
+from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE, SYSTEM_MEMORY_TEMPLATE
 
 
 AGENT_PROFILE = """
@@ -84,7 +84,7 @@ class PlanAndExecAgent(BaseAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -101,8 +101,10 @@ class PlanAndExecAgent(BaseAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
         orch_plan_system_prompt: str = ORCH_PLAN_SYSTEM_PROMPT, 
@@ -130,7 +132,7 @@ class PlanAndExecAgent(BaseAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
@@ -163,8 +165,14 @@ class PlanAndExecAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act 和 reflect
+        if "reason_act" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         super().__init__(
-            llm=llm, 
+            llms=llms, 
             name=name, 
             agent_type=AgentType.PLAN_AND_EXECUTE, 
             profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
@@ -197,6 +205,8 @@ class PlanAndExecAgent(BaseAgent):
         # Read the workflow profile
         # Initialize the workflow for the agent
         self.workflow = PlanAndExecFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,
@@ -247,7 +257,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -264,10 +274,11 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         embedding_llm: EmbeddingLLM, 
-        extraction_llm: LLM, 
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         mcp_client: Optional[MCPClient] = None, 
@@ -297,6 +308,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
         episode_memory_reflect_prompt: str = MEMORY_EPISODE_REFLECT_PROMPT, 
         # Memory Format Template
         memory_prompt_template: str = MEMORY_PROMPT_TEMPLATE, 
+        system_memory_template: str = SYSTEM_MEMORY_TEMPLATE, 
         **kwargs, 
     ) -> None: 
         """
@@ -305,12 +317,10 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
         Args:
             name (str):
                 The name of the agent.
-            llm (LLM):
+            llms (dict[str, LLM]):
                 The LLM to use for the agent.
             embedding_llm (EmbeddingLLM):
                 The embedding LLM to use for the agent.
-            extraction_llm (LLM):
-                The extraction LLM to use for the agent.
             step_counters (list[StepCounter]):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
@@ -349,15 +359,24 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
                 The reflect prompt of the memory.
             memory_prompt_template (str, optional):
                 The prompt template of the memory.
+            system_memory_template (str, optional):
+                The system memory template of the memory.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # 检查 llms 是否包含 reason_act 和 reflect
+        if "reason_act" not in llms:
+            raise ValueError("The reason act LLM is required.")
+        if "reflect" not in llms:
+            raise ValueError("The reflect LLM is required.")
+        
         super().__init__(
-            llm=llm, 
+            call_stack=call_stack,
+            workspace=workspace,
+            llms=llms, 
             name=name, 
             mcp_client=mcp_client, 
             step_counters=step_counters, 
-            extraction_llm=extraction_llm, 
             orch_plan_system_prompt=orch_plan_system_prompt, 
             orch_plan_think_prompt=orch_plan_think_prompt, 
             orch_plan_reflect_prompt=orch_plan_reflect_prompt, 
@@ -387,12 +406,15 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
             episode_memory_reflect_prompt=episode_memory_reflect_prompt, 
             # Memory Format Template
             memory_prompt_template=memory_prompt_template, 
+            system_memory_template=system_memory_template, 
             **kwargs,
         )
         
         # Read the workflow profile
         # Initialize the workflow for the agent
         self.workflow = MemoryPlanAndExecFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts=self.prompts, 
             observe_formats=self.observe_formats, 
             **kwargs,

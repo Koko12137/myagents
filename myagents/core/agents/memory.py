@@ -2,12 +2,9 @@ import uuid
 import time
 from typing import Union
 
-from loguru import logger
-
-from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem, LLM
+from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem, CallStack, Workspace
 from myagents.core.messages import AssistantMessage, ToolCallResult, SystemMessage, UserMessage
-from myagents.core.agents.base import BaseAgent, MaxStepsError
-from myagents.core.llms.config import BaseCompletionConfig
+from myagents.core.agents.base import BaseAgent
 from myagents.core.memories.schemas import (
     EpisodeMemoryItem, 
     MemoryType, 
@@ -40,12 +37,14 @@ class BaseMemoryAgent(BaseAgent):
     episode_memory: VectorMemoryCollection
     # 记忆提示词模板
     prompt_template: str
+    system_memory_template: str
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
-        extraction_llm: LLM,
         # Memory Compress
         memory_compress_system_prompt: str, 
         memory_compress_reason_act_prompt: str, 
@@ -55,15 +54,17 @@ class BaseMemoryAgent(BaseAgent):
         episode_memory_reflect_prompt: str, 
         # Memory Format Template
         memory_prompt_template: str, 
+        system_memory_template: str, 
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs)
+        super().__init__(call_stack=call_stack, workspace=workspace, **kwargs)
         self.episode_memory = episode_memory
         self.embedding_llm = embedding_llm
-        self.extraction_llm = extraction_llm
         
         # 初始化 EpisodeMemoryWorkflow
         episode_memory_workflow = EpisodeMemoryFlow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts={
                 "system_prompt": episode_memory_system_prompt, 
                 "reason_act_prompt": episode_memory_reason_act_prompt, 
@@ -77,6 +78,8 @@ class BaseMemoryAgent(BaseAgent):
         
         # 初始化 MemoryCompressWorkflow
         memory_workflow = MemoryCompressWorkflow(
+            call_stack=call_stack,
+            workspace=workspace,
             prompts={
                 "system_prompt": memory_compress_system_prompt, 
                 "reason_act_prompt": memory_compress_reason_act_prompt, 
@@ -90,6 +93,7 @@ class BaseMemoryAgent(BaseAgent):
         )
         
         self.prompt_template = memory_prompt_template
+        self.system_memory_template = system_memory_template
         # 记忆提取 workflow
         self.memory_workflow = memory_workflow
         # 注册 self 为 memory_workflow 的 agent
@@ -103,15 +107,6 @@ class BaseMemoryAgent(BaseAgent):
                 记忆工作流
         """
         return self.memory_workflow
-    
-    def get_extraction_llm(self) -> LLM:
-        """获取记忆提取语言模型
-        
-        返回:
-            LLM:
-                记忆提取语言模型
-        """
-        return self.extraction_llm
     
     def get_embedding_llm(self) -> EmbeddingLLM:
         """获取嵌入语言模型
@@ -159,7 +154,7 @@ class BaseMemoryAgent(BaseAgent):
         self, 
         target: Stateful, 
         **kwargs,
-    ) -> Stateful:
+    ) -> str:
         """
         从文本中抽取记忆。
         
@@ -169,8 +164,8 @@ class BaseMemoryAgent(BaseAgent):
             **kwargs:
                 其他参数
         返回:
-            Stateful:
-                更新后的有状态实体
+            str:
+                提取的记忆
         """
         # 获取历史上下文
         history = target.get_history()
@@ -178,11 +173,11 @@ class BaseMemoryAgent(BaseAgent):
         history_str = "\n".join([f"{message.role}: {message.content}" for message in history])
         
         # 调用记忆提取 workflow
-        await self.memory_workflow.extract_memory(history_str, **kwargs)
+        compressed_memory = await self.memory_workflow.extract_memory(history_str, **kwargs)
         # 清空旧的历史上下文
         target.reset()
         # 返回更新后的目标
-        return target
+        return compressed_memory
         
     def create_memory(self, memory_type: str, **kwargs) -> VectorMemoryItem:
         """创建记忆
@@ -216,6 +211,16 @@ class BaseMemoryAgent(BaseAgent):
                 await self.episode_memory.update([memory_op.memory])
             elif memory_op.operation == MemoryOperationType.DELETE:
                 await self.episode_memory.delete([memory_op.memory.memory_id])
+                
+    async def update_temp_memory(
+        self, 
+        temp_memory: str, 
+        target: Stateful, 
+        **kwargs, 
+    ) -> None:
+        """更新临时记忆"""
+        # 更新临时记忆
+        await self.prompt(SystemMessage(content=self.system_memory_template.format(system_memory=temp_memory)), target)
         
     async def search_memory(
         self, 
@@ -281,66 +286,19 @@ class BaseMemoryAgent(BaseAgent):
         """
         # 观察
         observation = await super().observe(target=target, observe_format=observe_format, **kwargs)
+
+        # # 转换为字符串
+        # observation_str = "\n".join([message.content for message in observation])
+        # # 提取记忆
+        # memories = await self.search_memory(
+        #     text=observation_str, 
+        #     limit=3, 
+        #     score_threshold=0.2, 
+        #     target=target, 
+        #     **kwargs,
+        # )
         
-        # 转换为字符串
-        observation_str = "\n".join([message.content for message in observation])
-        # 提取记忆
-        memories = await self.search_memory(
-            text=observation_str, 
-            limit=3, 
-            score_threshold=0.2, 
-            target=target, 
-            **kwargs,
-        )
-        
-        # 拼接记忆到 history 中
-        await self.prompt(UserMessage(content=memories), target)
+        # # 拼接记忆到 history 中
+        # await self.prompt(UserMessage(content=memories), target)
         # 返回历史信息
         return target.get_history()
-
-    async def think_extract(
-        self, 
-        observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
-        completion_config: BaseCompletionConfig, 
-        **kwargs, 
-    ) -> AssistantMessage:
-        """对环境进行思考，并提取记忆。
-        
-        参数：
-            observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
-                从环境中观察到的消息。
-            completion_config (BaseCompletionConfig):
-                智能体的对话补全配置。
-            **kwargs:
-                其他思考参数。
-        返回：
-            AssistantMessage:
-                LLM 生成的记忆提取回复。
-        """
-        # Check if the limit of the step counters is reached
-        for step_counter in self.step_counters.values():
-            await step_counter.check_limit()
-        
-        # Call for completion from the LLM
-        message = await self.extraction_llm.completion(
-            observe, 
-            completion_config=completion_config, 
-            **kwargs,
-        )
-        
-        errors = []
-        # Increase the current step
-        for step_counter in self.step_counters.values():
-            try:
-                await step_counter.step(message.usage)
-            except MaxStepsError as e:
-                errors.append(e)
-            except Exception as e:
-                logger.error(f"Unexpected error in step counter: {e}")
-                raise e
-        
-        if len(errors) > 0:
-            raise errors[0] from errors[0]
-        
-        # Return the response
-        return message

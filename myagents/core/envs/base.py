@@ -7,9 +7,9 @@ from typing import Union, Any, Callable
 
 from fastmcp.tools import Tool as FastMCPTool
 
-from myagents.core.interface import Workflow
+from myagents.core.interface import CallStack, Workspace
 from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
-from myagents.core.interface import Agent, Environment, Context, Stateful
+from myagents.core.interface import Agent, Environment, Stateful
 from myagents.core.agents import AgentType
 from myagents.core.state_mixin import StateMixin
 from myagents.core.tools_mixin import ToolsMixin
@@ -54,8 +54,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
             The semaphore of the agent type. The key is the agent type and the value is the semaphore. 
         tools (dict[str, FastMCPTool]):
             The tools that can be used to modify the environment. The key is the tool name and the value is the tool. 
-        context (Context):
-            The context of the environment.
+        workspace (Workspace):
+            The workspace of the environment.
         status (EnvironmentStatus):
             The status of the environment.
         history (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
@@ -73,13 +73,15 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
     agent_type_semaphore: dict[AgentType, Semaphore]
     # Tools Mixin
     tools: dict[str, FastMCPTool]
-    context: Context
+    workspace: Workspace
     # Stateful Mixin
     status: EnvironmentStatus
     history: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
         profile: str, 
         prompts: dict[str, str], 
@@ -101,7 +103,7 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
                 The keyword arguments to be passed to the parent class.
         """
         # Initialize the parent class
-        super().__init__(status_class=EnvironmentStatus, **kwargs)
+        super().__init__(status_class=EnvironmentStatus, call_stack=call_stack, **kwargs)
         
         # Initialize the basic information
         self.name = name
@@ -112,7 +114,8 @@ class BaseEnvironment(Environment, ToolsMixin, StateMixin):
         self.agents = {}
         self.agent_type_map = {}
         self.agent_type_semaphore = {}
-        # Initialize the tools
+        # Initialize the workspace
+        self.workspace = workspace
         self.post_init()
         # Initialize the status
         self.to_created()

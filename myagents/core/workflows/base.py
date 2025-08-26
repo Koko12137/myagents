@@ -1,8 +1,7 @@
 from fastmcp.settings import logger
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import Agent, Workflow
-from myagents.core.utils.context import BaseContext
+from myagents.core.interface import Agent, Workflow, Workspace, CallStack
 from myagents.core.tools_mixin import ToolsMixin
 
 
@@ -10,10 +9,12 @@ class BaseWorkflow(Workflow, ToolsMixin):
     """BaseWorkflow is the base class for all the workflows.
     
     Attributes:
-        context (BaseContext):
-            The context of the workflow.
         tools (dict[str, FastMcpTool]):
             The tools of the workflow.
+        workspace (Workspace):
+            The workspace of the workflow.
+        call_stack (CallStack):
+            The call stack of the workflow.
         
         profile (str):
             The profile of the workflow.
@@ -27,9 +28,13 @@ class BaseWorkflow(Workflow, ToolsMixin):
             The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the 
             sub-workflow instance. 
     """
-    # Context and tools
-    context: BaseContext
+    
+    # Tools
     tools: dict[str, FastMcpTool]
+    # Workspace
+    workspace: Workspace
+    # Call stack information
+    call_stack: CallStack
     # Basic information
     profile: str
     agent: Agent
@@ -40,6 +45,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         profile: str, 
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
@@ -49,6 +56,10 @@ class BaseWorkflow(Workflow, ToolsMixin):
         """Initialize the BaseWorkflow.
 
         Args:
+            call_stack (CallStack):
+                The call stack of the workflow.
+            workspace (Workspace):
+                The workspace of the workflow.
             profile (str):
                 The profile of the workflow.
             prompts (dict[str, str], optional):
@@ -62,7 +73,7 @@ class BaseWorkflow(Workflow, ToolsMixin):
                 The keyword arguments to be passed to the parent class.
         """
         # Initialize the parent class
-        super().__init__(**kwargs)
+        super().__init__(call_stack=call_stack, **kwargs)
                 
         # Initialize the workflow components
         self.profile = profile
@@ -72,6 +83,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
         
         # Initialize the agent
         self.agent = None
+        # Initialize the workspace
+        self.workspace = workspace
 
         # Post initialize
         self.post_init()

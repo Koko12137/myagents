@@ -4,13 +4,15 @@ from typing import Union, Any
 from fastmcp.client import Client as MCPClient
 from pydantic import BaseModel, Field
 
+from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment, VectorMemoryCollection, CallStack, Workspace
 from myagents.core.configs.agents import CounterConfig, AgentConfig
 from myagents.core.configs.llms import LLMConfig
 from myagents.core.configs.mcps import MCPConfig
 from myagents.core.configs.envs import EnvironmentConfig
 from myagents.core.configs.memories import VectorCollectionConfig
-from myagents.core.envs.orchestrate import Orchestrate
-from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment, VectorMemoryCollection
+from myagents.core.envs import ComplexQuery, EnvironmentType, Orchestrate
+from myagents.core.call_stack import BaseCallStack
+from myagents.core.workspace import BaseWorkspace
 from myagents.core.llms import OpenAiLLM
 from myagents.core.agents import (
     AgentType, 
@@ -22,9 +24,8 @@ from myagents.core.agents import (
     MemoryOrchestrateAgent, 
     MemoryPlanAndExecAgent, 
 )
-from myagents.core.envs import ComplexQuery, EnvironmentType
 from myagents.core.memories import MilvusManager
-from myagents.core.utils.step_counters import BaseStepCounter, MaxStepCounter, TokenStepCounter
+from myagents.core.step_counters import BaseStepCounter, MaxStepCounter, TokenStepCounter
 from myagents.core.utils.logger import init_logger
 from myagents.core.utils.name_generator import generate_name
 
@@ -106,7 +107,6 @@ class AutoAgent:
                 return OpenAiLLM(
                     base_url=config.base_url,
                     model=config.model,
-                    temperature=config.temperature, 
                     **kwargs, 
                 )
             case _:
@@ -182,7 +182,7 @@ class AutoAgent:
         return mcp_client
         
         
-    async def __build_agent(self, config: AgentConfig, step_counters: list[StepCounter]) -> Agent:
+    async def __build_agent(self, config: AgentConfig, step_counters: list[StepCounter], call_stack: CallStack, workspace: Workspace) -> Agent:
         """构建代理
         
         参数:
@@ -190,7 +190,10 @@ class AutoAgent:
                 代理的配置
             step_counters (list[StepCounter]):
                 代理的步骤计数器。任何一个达到限制，代理就会停止
-        
+            call_stack (CallStack):
+                调用栈
+            workspace (Workspace):
+                工作空间
         返回:
             Agent:
                 代理
@@ -198,8 +201,7 @@ class AutoAgent:
         agent_type = AgentType(config.type)
         
         # 构建语言模型
-        llm = self.__build_llm(config.llm)
-        extraction_llm = self.__build_llm(config.extraction_llm)
+        llms = {name: self.__build_llm(llm) for name, llm in config.llms.items()}
         # 构建 MCP 客户端
         mcp_client = self.__build_mcp_client(config.mcp_client)
         # 生成唯一的代理名字
@@ -240,31 +242,34 @@ class AutoAgent:
             
             # 构建代理
             return AGENT(
+                call_stack=call_stack,
+                workspace=workspace,
                 name=agent_name,
-                llm=llm, 
+                llms=llms, 
                 step_counters=step_counters, 
                 mcp_client=mcp_client, 
                 episode_memory=episode_memory, 
                 embedding_llm=embedding_llm, 
-                extraction_llm=extraction_llm, 
             )
         
         # 构建代理
         return AGENT(
             name=agent_name,
-            llm=llm, 
+            llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
-            extraction_llm=extraction_llm, 
         )
             
-    async def __build_environment(self, config: EnvironmentConfig) -> Environment:
+    async def __build_environment(self, config: EnvironmentConfig, call_stack: CallStack, workspace: Workspace) -> Environment:
         """构建环境
         
         参数:
             config (EnvironmentConfig):
                 环境的配置
-        
+            call_stack (CallStack):
+                调用栈
+            workspace (Workspace):
+                工作空间
         返回:
             Environment:
                 环境
@@ -272,20 +277,20 @@ class AutoAgent:
         # 构建全局步骤计数器
         counters = [self.build_counter(counter) for counter in config.step_counters]
         # 构建代理
-        agents = [await self.__build_agent(agent, counters) for agent in config.agents]
+        agents = [await self.__build_agent(agent, counters, call_stack, workspace) for agent in config.agents]
         
         env_type = EnvironmentType(config.type)
         # 构建环境
         match env_type:
             case EnvironmentType.COMPLEX_QUERY:
-                env = ComplexQuery
+                ENV = ComplexQuery
             case EnvironmentType.ORCHESTRATE:
-                env = Orchestrate
+                ENV = Orchestrate
             case _:
                 raise ValueError(f"无效的环境类型: {env_type}")
         
         # 构建环境
-        env = env()
+        env = ENV(call_stack=call_stack, workspace=workspace)
         # 将代理注册到环境
         for agent in agents:
             # 将代理注册到环境
@@ -310,6 +315,11 @@ class AutoAgent:
             ValueError:
                 如果同时提供了环境和工作流，或者没有提供环境和工作流
         """
+        # 构建调用栈
+        call_stack = BaseCallStack()
+        # 构建工作空间
+        workspace = BaseWorkspace()
+        
         # 设置调试和日志级别
         log_level = "DEBUG" if config.debug else "INFO"
         # 创建日志记录器
@@ -323,6 +333,6 @@ class AutoAgent:
             custom_logger.add(sys.stdout, level=log_level, colorize=True)
         
         # 构建环境
-        environment = await self.__build_environment(config.environment)
+        environment = await self.__build_environment(config.environment, call_stack, workspace)
         # 返回环境
         return environment

@@ -5,7 +5,7 @@ from json_repair import repair_json
 from loguru import logger
 
 from myagents.core.messages import UserMessage, SystemMessage
-from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent, MemoryWorkflow
+from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent, MemoryWorkflow, Workspace, CallStack
 from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.memories.schemas import BaseMemoryOperation, MemoryOperationType
@@ -22,6 +22,8 @@ class EpisodeMemoryFlow(BaseWorkflow):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         profile: str = EPISODE_PROFILE, 
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
@@ -56,6 +58,8 @@ class EpisodeMemoryFlow(BaseWorkflow):
             raise ValueError("The reflect format is required.")
         
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             profile=profile, 
             prompts=prompts, 
             observe_formats=observe_formats, 
@@ -119,7 +123,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
         # 观察目标
         observe = await self.agent.observe(target, observe_format=self.observe_formats["reason_act_format"])
         # 记录观察结果
-        logger.info(f"观察结果: \n{observe[-1].content}")
+        logger.debug(f"观察结果: \n{observe[-1].content}")
         # 思考目标
         message = await self.agent.think_extract(observe=observe, completion_config=completion_config)
         # 将消息更新到目标
@@ -128,7 +132,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
         if logger.level == "DEBUG":
             logger.debug(f"{str(self.agent)}: \n{message}")
         else:
-            logger.info(f"{str(self.agent)}: \n{message.content}")
+            logger.debug(f"{str(self.agent)}: \n{message.content}")
         
         # === 提取记忆 ===
         try:
@@ -152,13 +156,6 @@ class EpisodeMemoryFlow(BaseWorkflow):
             )
             # 更新记忆的嵌入向量
             memory["embedding"] = embedding
-            # 添加原始内容
-            memory["metadata"] = {
-                "content": target.objective,
-                "abstract": memory.pop("abstract"),
-                "keywords": memory.pop("keywords"),
-                "is_error": memory["is_error"],
-            }
             # 更新记忆
             memory_op = BaseMemoryOperation(
                 operation=operation,
@@ -175,7 +172,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
             # 更新记忆
             await self.agent.prompt(message, target)
             # 记录用户消息
-            logger.info(f"用户消息: \n{message.content}")
+            logger.debug(f"用户消息: \n{message.content}")
             
             # 设置工具调用标志
             tool_call_flag = True
@@ -263,7 +260,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
                 message = UserMessage(content=f"错误次数限制: {current_error}/{max_error_retry}，请重新思考，达到最大限制后将会被强制终止工作流。")
                 await self.agent.prompt(message, target)
                 # 记录错误消息
-                logger.info(f"错误消息: \n{message}")
+                logger.debug(f"错误消息: \n{message}")
                 # 检查错误计数器是否大于最大错误重试次数
                 if current_error >= max_error_retry:
                     # 将任务状态设置为错误
@@ -284,7 +281,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
                 message = UserMessage(content=f"空闲思考次数限制: {current_thinking}/{max_idle_thinking}，请重新思考，达到最大限制后将会被强制终止工作流。")
                 await self.agent.prompt(message, target)
                 # 记录空闲思考消息
-                logger.info(f"空闲思考消息: \n{message}")
+                logger.debug(f"空闲思考消息: \n{message}")
                 # 检查空闲思考计数器是否大于最大空闲思考次数
                 if current_thinking >= max_idle_thinking:
                     # 将任务状态设置为错误
@@ -341,7 +338,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
         max_idle_thinking: int = 2, 
         completion_config: CompletionConfig = None, 
         **kwargs,
-    ) -> TreeTaskNode:
+    ) -> str:
         """从有状态实体中抽取记忆
         
         Args:
@@ -357,8 +354,8 @@ class EpisodeMemoryFlow(BaseWorkflow):
                 运行工作流的额外关键字参数
                 
         Returns:
-            TreeTaskNode:
-                提取记忆后的目标
+            str:
+                提取的记忆
         """
         # 创建一个新的任务节点
         new_target = BaseTreeTaskNode(
@@ -376,7 +373,7 @@ class EpisodeMemoryFlow(BaseWorkflow):
             completion_config=completion_config, 
             **kwargs,
         )
-
+        return new_target.get_history()[-1].content
 
 class MemoryCompressWorkflow(BaseWorkflow):
     """压缩记忆(Memory Compress)工作流
@@ -386,6 +383,8 @@ class MemoryCompressWorkflow(BaseWorkflow):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         profile: str = PROFILE, 
         prompts: dict[str, str] = {}, 
         observe_formats: dict[str, str] = {}, 
@@ -395,6 +394,10 @@ class MemoryCompressWorkflow(BaseWorkflow):
         """初始化压缩记忆工作流
         
         Args:
+            call_stack (CallStack):
+                工作流的调用栈
+            workspace (Workspace):
+                工作流的 workspace
             profile (str):
                 工作流的配置文件
             prompts (dict[str, str]):
@@ -416,6 +419,8 @@ class MemoryCompressWorkflow(BaseWorkflow):
             raise ValueError("The reason act format is required.")
         
         super().__init__(
+            call_stack=call_stack,
+            workspace=workspace,
             profile=profile, 
             prompts=prompts, 
             observe_formats=observe_formats, 
@@ -471,16 +476,16 @@ class MemoryCompressWorkflow(BaseWorkflow):
         # 观察目标
         observe = await self.agent.observe(target, observe_format=self.observe_formats["reason_act_format"])
         # 记录观察结果
-        logger.info(f"观察结果: \n{observe[-1].content}")
+        logger.debug(f"观察结果: \n{observe[-1].content}")
         # 思考目标
-        message = await self.agent.think(observe=observe, completion_config=completion_config)
+        message = await self.agent.think(llm_name="compress", observe=observe, completion_config=completion_config)
         # 将消息更新到目标
         await self.agent.prompt(message, target)
         # 记录助手消息
         if logger.level == "DEBUG":
             logger.debug(f"{str(self.agent)}: \n{message}")
         else:
-            logger.info(f"{str(self.agent)}: \n{message.content}")
+            logger.debug(f"{str(self.agent)}: \n{message.content}")
             
         return target
         
@@ -533,17 +538,15 @@ class MemoryCompressWorkflow(BaseWorkflow):
         )
         
         # === 提取阶段 === 
-        # 获取压缩后的记忆
-        compressed_memory = target.get_history()[-1].content
         # 提取记忆
-        for workflow in self.sub_workflows.values():
-            target = await workflow.extract_memory(
-                text=compressed_memory, 
-                max_error_retry=max_error_retry, 
-                max_idle_thinking=max_idle_thinking, 
-                completion_config=completion_config, 
-                **kwargs,
-            )
+        # for workflow in self.sub_workflows.values():
+        #     await workflow.extract_memory(
+        #         text=target.objective, 
+        #         max_error_retry=max_error_retry, 
+        #         max_idle_thinking=max_idle_thinking, 
+        #         completion_config=completion_config, 
+        #         **kwargs,
+        #     )
         
         return target
 
@@ -589,7 +592,7 @@ class MemoryCompressWorkflow(BaseWorkflow):
         max_idle_thinking: int = 2, 
         completion_config: CompletionConfig = None, 
         **kwargs,
-    ) -> None:
+    ) -> str:
         """从文本中提取记忆
         
         Args:
@@ -605,7 +608,8 @@ class MemoryCompressWorkflow(BaseWorkflow):
                 运行工作流的额外关键字参数
                 
         Returns:
-            None
+            str:
+                提取的记忆
         """
         # 创建一个新的任务节点
         new_target = BaseTreeTaskNode(
@@ -623,3 +627,4 @@ class MemoryCompressWorkflow(BaseWorkflow):
             completion_config=completion_config, 
             **kwargs,
         )
+        return new_target.get_history()[-1].content

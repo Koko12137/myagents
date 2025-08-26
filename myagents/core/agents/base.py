@@ -8,11 +8,11 @@ from fastmcp import Client as MCPClient
 from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow
+from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow, CallStack, Workspace
 from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
 from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.agents.types import AgentType
-from myagents.core.utils.step_counters import MaxStepsError
+from myagents.core.step_counters import MaxStepsError
 
 
 class BaseAgent(Agent):
@@ -31,7 +31,7 @@ class BaseAgent(Agent):
             智能体类型。
         profile (str):
             智能体简介。
-        llm (LLM):
+        llms (dict[str, LLM]):
             智能体使用的大语言模型。
         mcp_client (MCPClient):
             智能体使用的 MCP 客户端。
@@ -57,7 +57,7 @@ class BaseAgent(Agent):
     agent_type: AgentType
     profile: str
     # LLM and MCP client
-    llm: LLM
+    llms: dict[str, LLM]
     mcp_client: MCPClient
     # Tools
     tools: dict[str, FastMcpTool]
@@ -74,10 +74,12 @@ class BaseAgent(Agent):
     
     def __init__(
         self, 
+        call_stack: CallStack,
+        workspace: Workspace,
         name: str, 
         agent_type: AgentType, 
         profile: str, 
-        llm: LLM, 
+        llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: MCPClient = None, 
         prompts: dict[str, str] = None, 
@@ -93,7 +95,7 @@ class BaseAgent(Agent):
                 智能体类型。
             profile (str):
                 智能体简介。
-            llm (LLM):
+            llms (dict[str, LLM]):
                 智能体使用的大语言模型。
             step_counters (list[StepCounter]):
                 智能体的步数计数器，任一计数器达到上限时，智能体将停止。
@@ -108,14 +110,18 @@ class BaseAgent(Agent):
         """
         # Initialize the parent class
         super().__init__(**kwargs)
+        # Initialize the call_stack and workspace
+        self.call_stack = call_stack
+        self.workspace = workspace
         
         # Initialize the basic information
         self.uid = uuid4().hex
         self.name = name
         self.agent_type = agent_type
         self.profile = profile
-        # Initialize the LLM and MCP client
-        self.llm = llm
+        # Initialize the LLM
+        self.llms = llms
+        # Initialize the MCP client
         self.mcp_client = mcp_client
         self.tools = {}
         # Initialize the workflow and environment
@@ -195,6 +201,7 @@ class BaseAgent(Agent):
     
     async def think(
         self, 
+        llm_name: str, 
         observe: list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]], 
         completion_config: BaseCompletionConfig, 
         **kwargs, 
@@ -202,6 +209,8 @@ class BaseAgent(Agent):
         """对环境进行思考。
         
         参数：
+            llm_name (str):
+                语言模型的名称
             observe (list[Union[AssistantMessage, UserMessage, SystemMessage, ToolCallResult]]):
                 从环境中观察到的消息。
             completion_config (CompletionConfig):
@@ -217,7 +226,7 @@ class BaseAgent(Agent):
             await step_counter.check_limit()
         
         # Call for completion from the LLM
-        message = await self.llm.completion(
+        message = await self.llms[llm_name].completion(
             observe, 
             completion_config=completion_config, 
             **kwargs,
