@@ -4,11 +4,11 @@ import traceback
 from json_repair import repair_json
 from loguru import logger
 
-from myagents.core.messages import UserMessage, SystemMessage
+from myagents.schemas.messages import UserMessage, SystemMessage
+from myagents.schemas.llms.config import BaseCompletionConfig
 from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent, CallStack, Workspace
 from myagents.core.workflows.react import BaseReActFlow
 from myagents.core.tasks import ToDoTaskView, BaseTreeTaskNode, DocumentTaskView
-from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.utils.strings import normalize_string
 from myagents.prompts.workflows.plan import PROFILE
 

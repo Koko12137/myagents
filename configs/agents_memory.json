@@ -1,6 +1,6 @@
 {
     "debug": false, 
-    "save_dir": "logs", 
+    "save_dir": "stdout", 
     "environment": {
         "type": "ComplexQuery", 
         "step_counters": [
@@ -19,19 +19,19 @@
                 "llms": {
                     "reason_act": {
                         "provider": "openai",
-                        "base_url": "http://10.255.251.2:65189/v1",
+                        "base_url": "http://localhost:8889/v1",
                         "model": "Qwen/Qwen3-14B-FP8",
                         "api_key_field": "LOCAL_KEY"
                     }, 
                     "reflect": {
                         "provider": "openai",
-                        "base_url": "http://10.255.251.2:65189/v1",
+                        "base_url": "http://localhost:8889/v1",
                         "model": "Qwen/Qwen3-14B-FP8",
                         "api_key_field": "LOCAL_KEY"
                     }, 
                     "compress": {
                         "provider": "openai",
-                        "base_url": "http://10.255.251.2:65189/v1",
+                        "base_url": "http://localhost:8889/v1",
                         "model": "Qwen/Qwen3-14B-FP8",
                         "api_key_field": "LOCAL_KEY"
                     }
@@ -39,7 +39,7 @@
                 "use_memory": true, 
                 "embedding_llm": {
                     "provider": "openai",
-                    "base_url": "http://10.255.251.2:65190/v1",
+                    "base_url": "http://localhost:9000/v1",
                     "model": "Qwen/Qwen3-Embedding-4B",
                     "temperature": 0, 
                     "api_key_field": "LOCAL_KEY"
@@ -61,19 +61,19 @@
                 "llms": {
                     "reason_act": {
                         "provider": "openai",
-                        "base_url": "http://10.255.251.2:65189/v1",
+                        "base_url": "http://localhost:8889/v1",
                         "model": "Qwen/Qwen3-14B-FP8",
                         "api_key_field": "LOCAL_KEY"
                     }, 
                     "reflect": {
                         "provider": "openai",
-                        "base_url": "http://10.255.251.2:65189/v1",
+                        "base_url": "http://localhost:8889/v1",
                         "model": "Qwen/Qwen3-14B-FP8",
                         "api_key_field": "LOCAL_KEY"
                     },
                     "compress": {
                         "provider": "openai",
-                        "base_url": "http://10.255.251.2:65189/v1",
+                        "base_url": "http://localhost:8889/v1",
                         "model": "Qwen/Qwen3-14B-FP8",
                         "api_key_field": "LOCAL_KEY"
                     }
@@ -81,7 +81,7 @@
                 "use_memory": true, 
                 "embedding_llm": {
                     "provider": "openai",
-                    "base_url": "http://10.255.251.2:65190/v1",
+                    "base_url": "http://localhost:9000/v1",
                     "model": "Qwen/Qwen3-Embedding-4B",
                     "api_key_field": "LOCAL_KEY"
                 },

@@ -3,7 +3,6 @@ import asyncio
 import click
 
 from scripts.sample.sampling import main as sampling_main
-from scripts.sample.neg_sampling import main as neg_sampling_main
 from scripts.tests.raw_llm import main as raw_llm_main
 
 

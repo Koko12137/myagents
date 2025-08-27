@@ -4,8 +4,8 @@ from uuid import uuid4
 from collections import OrderedDict
 from typing import Union
 
+from myagents.schemas.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult
 from myagents.core.interface import TaskStatus, TaskView, TreeTaskNode
-from myagents.core.messages.message import AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult
 from myagents.core.state_mixin import StateMixin
 
 

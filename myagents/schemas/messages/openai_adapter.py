@@ -1,7 +1,7 @@
 from typing import Union
 import json
 
-from myagents.core.messages import ToolCallRequest, ToolCallResult, AssistantMessage, UserMessage, SystemMessage
+from myagents.schemas.messages import ToolCallRequest, ToolCallResult, AssistantMessage, UserMessage, SystemMessage
 
 
 def to_openai_dict(

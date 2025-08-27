@@ -8,9 +8,9 @@ from fastmcp import Client as MCPClient
 from fastmcp.exceptions import ClientError
 from fastmcp.tools import Tool as FastMcpTool
 
+from myagents.schemas.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
+from myagents.schemas.llms.config import BaseCompletionConfig
 from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow, CallStack, Workspace
-from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
-from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.agents.types import AgentType
 from myagents.core.step_counters import MaxStepsError
 

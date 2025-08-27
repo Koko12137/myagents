@@ -4,8 +4,8 @@ from typing import Union, Optional
 
 from loguru import logger
 
+from myagents.schemas.messages import AssistantMessage, ToolCallRequest, ToolCallResult
 from myagents.core.interface import LLM, Logger
-from myagents.core.messages import AssistantMessage, ToolCallRequest, ToolCallResult
 from myagents.core.utils.tools import Provider
 
 

@@ -2,9 +2,9 @@ from typing import Union, Optional, Any
 
 from pydantic import BaseModel, Field
 
-from myagents.core.configs.llms import LLMConfig
-from myagents.core.configs.mcps import MCPConfig
-from myagents.core.configs.memories import VectorCollectionConfig
+from myagents.schemas.configs.llms import LLMConfig
+from myagents.schemas.configs.mcps import MCPConfig
+from myagents.schemas.configs.memories import VectorCollectionConfig
 
 
 class CounterConfig(BaseModel):

@@ -11,7 +11,11 @@ from pymilvus import (
     MilvusException,
 )
 
-from myagents.core.memories.schemas import EpisodeMemoryItem, EpisodeMetadata, MemoryType
+from myagents.schemas.dbs.milvus import (
+    EpisodeMemoryItem, 
+    EpisodeMetadata, 
+    MemoryType,
+)
 
 
 class MilvusEpisodeMemoryCollection:

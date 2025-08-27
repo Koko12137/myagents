@@ -6,10 +6,19 @@ from typing import Union
 from loguru import logger
 from openai import AsyncOpenAI
 
-from myagents.core.messages import ToolCallRequest, ToolCallResult, AssistantMessage, StopReason, CompletionUsage, MessageRole, UserMessage, SystemMessage
+from myagents.schemas.messages import (
+    ToolCallRequest, 
+    ToolCallResult, 
+    AssistantMessage, 
+    StopReason, 
+    CompletionUsage, 
+    MessageRole, 
+    UserMessage, 
+    SystemMessage, 
+    to_openai_dict,
+)
 from myagents.core.interface import LLM, Provider
 from myagents.core.interface.llm import CompletionConfig
-from myagents.core.messages.openai_adapter import to_openai_dict
 
 
 class OpenAiLLM(LLM):

@@ -5,7 +5,7 @@ from typing import Protocol, runtime_checkable, Union, Any, Callable, Awaitable
 from mcp import Tool as MCPTool
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult
+from myagents.schemas.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult
  
 
 class CallStack(ABC):

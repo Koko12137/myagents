@@ -4,7 +4,7 @@ from typing import Union
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
+from myagents.schemas.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
 from myagents.core.interface import Agent, TreeTaskNode, Workspace, CompletionConfig
 from myagents.core.agents import AgentType
 from myagents.core.tasks import DocumentTaskView, ToDoTaskView

@@ -3,7 +3,7 @@ from uuid import uuid4
 from typing import Union
 
 from myagents.core.interface import Stateful
-from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, MessageRole
+from myagents.schemas.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, MessageRole
 
 
 class StateMixin(Stateful):

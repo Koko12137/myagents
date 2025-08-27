@@ -9,7 +9,7 @@ from fastmcp import Client as MCPClient
 from myagents.core.interface.base import Stateful, ToolsCaller, Scheduler, CallStack
 from myagents.core.interface.llm import LLM, CompletionConfig, EmbeddingLLM
 from myagents.core.interface.memory import MemoryOperation, VectorMemoryCollection, VectorMemoryItem
-from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
+from myagents.schemas.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
 
 class StepCounter(ABC):

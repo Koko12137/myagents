@@ -4,11 +4,11 @@ import traceback
 from json_repair import repair_json
 from loguru import logger
 
-from myagents.core.messages import UserMessage, SystemMessage
+from myagents.schemas.llms.config import BaseCompletionConfig
+from myagents.schemas.messages import UserMessage, SystemMessage
+from myagents.schemas.dbs.milvus import BaseMemoryOperation, MemoryOperationType
 from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, MemoryAgent, MemoryWorkflow, Workspace, CallStack
 from myagents.core.workflows.base import BaseWorkflow
-from myagents.core.llms.config import BaseCompletionConfig
-from myagents.core.memories.schemas import BaseMemoryOperation, MemoryOperationType
 from myagents.core.tasks import BaseTreeTaskNode
 from myagents.prompts.memories.compress import PROFILE
 from myagents.prompts.memories.episode import PROFILE as EPISODE_PROFILE

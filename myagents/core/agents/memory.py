@@ -2,15 +2,23 @@ import uuid
 import time
 from typing import Union
 
-from myagents.core.interface import Stateful, VectorMemoryCollection, EmbeddingLLM, MemoryWorkflow, VectorMemoryItem, CallStack, Workspace
-from myagents.core.messages import AssistantMessage, ToolCallResult, SystemMessage, UserMessage
-from myagents.core.agents.base import BaseAgent
-from myagents.core.memories.schemas import (
+from myagents.schemas.messages import AssistantMessage, ToolCallResult, SystemMessage, UserMessage
+from myagents.schemas.dbs.milvus import (
     EpisodeMemoryItem, 
     MemoryType, 
     BaseMemoryOperation, 
     MemoryOperationType, 
 )
+from myagents.core.interface import (
+    Stateful, 
+    VectorMemoryCollection, 
+    EmbeddingLLM, 
+    MemoryWorkflow, 
+    VectorMemoryItem, 
+    CallStack, 
+    Workspace,
+)
+from myagents.core.agents.base import BaseAgent
 from myagents.core.workflows import EpisodeMemoryFlow, MemoryCompressWorkflow
 
 

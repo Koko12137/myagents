@@ -4,13 +4,24 @@ from typing import Union, Any
 from fastmcp.client import Client as MCPClient
 from pydantic import BaseModel, Field
 
-from myagents.core.interface import LLM, StepCounter, Agent, Workflow, Environment, VectorMemoryCollection, CallStack, Workspace
-from myagents.core.configs.agents import CounterConfig, AgentConfig
-from myagents.core.configs.llms import LLMConfig
-from myagents.core.configs.mcps import MCPConfig
-from myagents.core.configs.envs import EnvironmentConfig
-from myagents.core.configs.memories import VectorCollectionConfig
-from myagents.core.envs import ComplexQuery, EnvironmentType, Orchestrate
+from myagents.schemas.configs.agents import CounterConfig, AgentConfig
+from myagents.schemas.configs.llms import LLMConfig
+from myagents.schemas.configs.mcps import MCPConfig
+from myagents.schemas.configs.envs import EnvironmentConfig
+from myagents.schemas.configs.memories import VectorCollectionConfig
+from myagents.core.interface import (
+    LLM, 
+    StepCounter, 
+    Agent, 
+    Workflow, 
+    Environment, 
+    VectorMemoryCollection, CallStack, Workspace
+)
+from myagents.core.envs import (
+    ComplexQuery, 
+    EnvironmentType, 
+    Orchestrate,
+)
 from myagents.core.call_stack import BaseCallStack
 from myagents.core.workspace import BaseWorkspace
 from myagents.core.llms import OpenAiLLM

@@ -1,21 +1,13 @@
 import json
 import os
 
-from datasets import load_from_disk
-
 from myagents.core.envs.complex_query import ComplexQuery, OutputType
 from myagents.core.factory import AutoAgent, AutoAgentConfig
 
 
 def load_imo25_data() -> list[str]:
-    # 列出 datasets/IMO25 目录下的所有txt文件
-    files = os.listdir("datasets/IMO25")
-    files = [file for file in files if file.endswith(".txt")]
-    # 读取每个txt文件
-    data = []
-    for file in files:
-        with open(os.path.join("datasets/IMO25", file), "r") as f:
-            data.append(f.read())
+    ds = json.load(open("datasets/IMO25/data.json"))
+    data = [item["problem"] for item in ds]
     return data
 
 

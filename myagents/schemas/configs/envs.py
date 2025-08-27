@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from myagents.core.configs.agents import AgentConfig, CounterConfig
+from myagents.schemas.configs.agents import AgentConfig, CounterConfig
 
 
 class EnvironmentConfig(BaseModel):

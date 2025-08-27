@@ -6,11 +6,11 @@ from typing import Union
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
+from myagents.schemas.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
+from myagents.schemas.llms.config import BaseCompletionConfig
 from myagents.core.interface import Agent, TreeTaskNode, Workspace
 from myagents.core.agents import AgentType
 from myagents.core.tasks import BaseTreeTaskNode, ToDoTaskView, JsonTaskView
-from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.envs.base import BaseEnvironment, EnvironmentStatus
 from myagents.prompts.envs.query import (
     NAME, 

@@ -1,7 +1,7 @@
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.messages import UserMessage
+from myagents.schemas.messages import UserMessage
 from myagents.core.interface import Agent, Workspace, TreeTaskNode, ReActFlow, CompletionConfig, MemoryAgent, CallStack
 from myagents.core.workflows.react import TreeTaskReActFlow, MemoryTreeTaskReActFlow
 from myagents.core.workflows.orchestrate import OrchestrateFlow, MemoryOrchestrateFlow

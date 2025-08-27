@@ -2,7 +2,7 @@ from abc import abstractmethod, ABC
 from enum import Enum
 from typing import Any, Union
 
-from myagents.core.messages import ToolCallResult, AssistantMessage, UserMessage, SystemMessage
+from myagents.schemas.messages import ToolCallResult, AssistantMessage, UserMessage, SystemMessage
 
 
 class Queue(ABC):

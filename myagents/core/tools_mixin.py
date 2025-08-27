@@ -4,8 +4,8 @@ from fastmcp.tools import Tool as FastMcpTool
 from loguru import logger
 
 from myagents.core.interface import ToolsCaller, Stateful
-from myagents.core.messages import ToolCallRequest, ToolCallResult
 from myagents.core.interface import CallStack
+from myagents.schemas.messages import ToolCallRequest, ToolCallResult
 
 
 class ToolsMixin(ToolsCaller):

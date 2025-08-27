@@ -7,13 +7,13 @@ from typing import Union, Any, Callable
 
 from fastmcp.tools import Tool as FastMCPTool
 
+from myagents.schemas.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
+from myagents.schemas.llms.config import BaseCompletionConfig
 from myagents.core.interface import CallStack, Workspace
-from myagents.core.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult
 from myagents.core.interface import Agent, Environment, Stateful
 from myagents.core.agents import AgentType
 from myagents.core.state_mixin import StateMixin
 from myagents.core.tools_mixin import ToolsMixin
-from myagents.core.llms.config import BaseCompletionConfig
 
 
 class EnvironmentStatus(Enum):

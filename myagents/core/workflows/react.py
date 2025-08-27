@@ -3,12 +3,11 @@ import re
 from loguru import logger
 from fastmcp.tools import Tool as FastMcpTool
 
+from myagents.schemas.messages import SystemMessage, UserMessage, StopReason, ToolCallResult, ToolCallRequest, AssistantMessage
+from myagents.schemas.llms.config import BaseCompletionConfig
 from myagents.core.interface import Agent, Workflow, Stateful, Workspace, TreeTaskNode, CompletionConfig, MemoryAgent, CallStack
-from myagents.core.messages import SystemMessage, UserMessage, StopReason, ToolCallResult, ToolCallRequest
-from myagents.core.messages.message import AssistantMessage
 from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.tasks import DocumentTaskView
-from myagents.core.llms.config import BaseCompletionConfig
 from myagents.core.utils.extractor import extract_by_label
 from myagents.prompts.workflows.react import PROFILE
 
