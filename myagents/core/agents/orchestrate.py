@@ -4,20 +4,12 @@ from typing import Optional
 from fastmcp.client import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM, CallStack, Workspace
+from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM, CallStack, Workspace, PromptGroup
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
 from myagents.core.workflows import OrchestrateFlow, MemoryOrchestrateFlow
-from myagents.prompts.workflows.orchestrate import (
-    PROFILE, 
-    PLAN_SYSTEM_PROMPT, 
-    PLAN_THINK_PROMPT, 
-    PLAN_REFLECT_PROMPT, 
-    EXEC_SYSTEM_PROMPT, 
-    EXEC_THINK_PROMPT, 
-    EXEC_REFLECT_PROMPT, 
-)
+from myagents.prompts.workflows.orchestrate import OrchestratePromptGroup
 from myagents.prompts.memories.compress import (
     SYSTEM_PROMPT as MEMORY_COMPRESS_SYSTEM_PROMPT, 
     REASON_ACT_PROMPT as MEMORY_COMPRESS_REASON_ACT_PROMPT, 
@@ -30,14 +22,6 @@ from myagents.prompts.memories.episode import (
 from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE, SYSTEM_MEMORY_TEMPLATE
 
 
-AGENT_PROFILE = """
-我叫 {name} ，是一个会按照“编排-反思”的流程来编排任务总体目标的助手。
-
-以下是我的工作流信息：
-{workflow}
-"""
-
-
 class OrchestrateAgent(BaseAgent):
     """OrchestrateAgent is the agent that is used to orchestrate the environment.
     
@@ -48,9 +32,7 @@ class OrchestrateAgent(BaseAgent):
             The name of the agent.
         agent_type (AgentType):
             The type of the agent.
-        profile (str):
-            The profile of the agent.
-        llm (LLM):tee
+        llm (LLM):
             The LLM to use for the agent. 
         mcp_client (MCPClient):
             The MCP client to use for the agent.
@@ -63,8 +45,8 @@ class OrchestrateAgent(BaseAgent):
         lock (Lock):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
             If the agent is running concurrently, the global context may not be working properly.
-        prompts (dict[str, str]):
-            The prompts for running the workflow. 
+        prompt_group (PromptGroup):
+            The prompt group of the workflow.
         observe_formats (dict[str, str]):
             The format of the observation the target. 
     """
@@ -72,7 +54,6 @@ class OrchestrateAgent(BaseAgent):
     uid: int
     name: str
     agent_type: AgentType
-    profile: str
     # LLM and MCP client
     llms: dict[str, LLM]
     mcp_client: MCPClient
@@ -86,7 +67,7 @@ class OrchestrateAgent(BaseAgent):
     # Concurrency limit
     lock: Lock
     # Prompts and observe format
-    prompts: dict[str, str]
+    prompt_group: PromptGroup
     observe_formats: dict[str, str]
     
     def __init__(
@@ -98,12 +79,7 @@ class OrchestrateAgent(BaseAgent):
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
         need_user_check: bool = False, 
-        plan_system_prompt: str = PLAN_SYSTEM_PROMPT, 
-        plan_reason_act_prompt: str = PLAN_THINK_PROMPT, 
-        plan_reflect_prompt: str = PLAN_REFLECT_PROMPT, 
-        exec_system_prompt: str = EXEC_SYSTEM_PROMPT, 
-        exec_reason_act_prompt: str = EXEC_THINK_PROMPT, 
-        exec_reflect_prompt: str = EXEC_REFLECT_PROMPT, 
+        prompt_group: OrchestratePromptGroup = None, 
         plan_reason_act_format: str = "todo", 
         plan_reflect_format: str = "todo", 
         exec_reason_act_format: str = "json", 
@@ -125,18 +101,8 @@ class OrchestrateAgent(BaseAgent):
                 The MCP client to use for the agent.
             need_user_check (bool, optional, defaults to False):
                 Whether to need the user to check the orchestration blueprint.
-            plan_system_prompt (str, optional):
-                The system prompt of the orchestration plan reason stage.
-            plan_reason_act_prompt (str, optional):
-                The think prompt of the orchestration plan reason stage.
-            plan_reflect_prompt (str, optional):
-                The react system prompt of the orchestration plan reflect stage.
-            exec_system_prompt (str, optional):
-                The action prompt of the orchestration execution reason stage.
-            exec_reason_act_prompt (str, optional):
-                The reflect prompt of the orchestration execution reason stage.
-            exec_reflect_prompt (str, optional):
-                The reflect prompt of the orchestration execution reflect stage.
+            prompt_group (OrchestratePromptGroup):
+                The prompt group of the orchestration workflow.
             plan_reason_act_format (str, optional, defaults to "todo"):
                 The observation format of the orchestration execution reason stage.
             plan_reflect_format (str, optional, defaults to "todo"):
@@ -150,6 +116,12 @@ class OrchestrateAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # Check if the prompt group is a OrchestratePromptGroup
+        if prompt_group is None:
+            prompt_group = OrchestratePromptGroup()
+        elif not isinstance(prompt_group, OrchestratePromptGroup):
+            raise TypeError("prompt_group must be a OrchestratePromptGroup")
+        
         # Initialize the parent class
         super().__init__(
             call_stack=call_stack,
@@ -157,17 +129,9 @@ class OrchestrateAgent(BaseAgent):
             name=name, 
             llms=llms, 
             agent_type=AgentType.ORCHESTRATE, 
-            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE),
             step_counters=step_counters, 
             mcp_client=mcp_client, 
-            prompts={
-                "plan_system_prompt": plan_system_prompt, 
-                "plan_reason_act_prompt": plan_reason_act_prompt, 
-                "plan_reflect_prompt": plan_reflect_prompt, 
-                "exec_system_prompt": exec_system_prompt, 
-                "exec_reason_act_prompt": exec_reason_act_prompt, 
-                "exec_reflect_prompt": exec_reflect_prompt, 
-            }, 
+            prompt_group=prompt_group, 
             observe_formats={
                 "plan_reason_act_format": plan_reason_act_format, 
                 "plan_reflect_format": plan_reflect_format, 
@@ -182,7 +146,7 @@ class OrchestrateAgent(BaseAgent):
         self.workflow = OrchestrateFlow(
             call_stack=call_stack,
             workspace=workspace,
-            prompts=self.prompts, 
+            prompt_group=self.prompt_group, 
             observe_formats=self.observe_formats, 
             need_user_check=need_user_check, 
             **kwargs,
@@ -207,8 +171,6 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             The name of the agent.
         agent_type (AgentType):
             The type of the agent.
-        profile (str):
-            The profile of the agent.
         llms (dict[str, LLM]):
             The LLM to use for the agent. 
         mcp_client (MCPClient):
@@ -222,8 +184,8 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
         lock (Lock):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
             If the agent is running concurrently, the global context may not be working properly.
-        prompts (dict[str, str]):
-            The prompts for running the workflow. 
+        prompt_group (PromptGroup):
+            The prompt group of the workflow.
         observe_formats (dict[str, str]):
             The format of the observation the target. 
     """
@@ -231,7 +193,6 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
     uid: int
     name: str
     agent_type: AgentType
-    profile: str
     # LLM and MCP client
     llms: dict[str, LLM]
     mcp_client: MCPClient
@@ -245,7 +206,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
     # Concurrency limit
     lock: Lock
     # Prompts and observe format
-    prompts: dict[str, str]
+    prompt_group: PromptGroup
     observe_formats: dict[str, str]
     
     def __init__(
@@ -259,12 +220,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
         embedding_llm: EmbeddingLLM,
         mcp_client: Optional[MCPClient] = None, 
         need_user_check: bool = False, 
-        plan_system_prompt: str = PLAN_SYSTEM_PROMPT, 
-        plan_reason_act_prompt: str = PLAN_THINK_PROMPT, 
-        plan_reflect_prompt: str = PLAN_REFLECT_PROMPT, 
-        exec_system_prompt: str = EXEC_SYSTEM_PROMPT, 
-        exec_reason_act_prompt: str = EXEC_THINK_PROMPT, 
-        exec_reflect_prompt: str = EXEC_REFLECT_PROMPT, 
+        prompt_group: OrchestratePromptGroup = None, 
         plan_reason_act_format: str = "todo", 
         plan_reflect_format: str = "todo", 
         exec_reason_act_format: str = "json", 
@@ -300,18 +256,8 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
                 The MCP client to use for the agent.
             need_user_check (bool, optional, defaults to False):
                 Whether to need the user to check the orchestration blueprint.
-            plan_system_prompt (str, optional):
-                The system prompt of the orchestration plan reason stage.
-            plan_reason_act_prompt (str, optional):
-                The think prompt of the orchestration plan reason stage.
-            plan_reflect_prompt (str, optional):
-                The react system prompt of the orchestration plan reflect stage.
-            exec_system_prompt (str, optional):
-                The action prompt of the orchestration execution reason stage.
-            exec_reason_act_prompt (str, optional):
-                The reflect prompt of the orchestration execution reason stage.
-            exec_reflect_prompt (str, optional):
-                The reflect prompt of the orchestration execution reflect stage.
+            prompt_group (OrchestratePromptGroup):
+                The prompt group of the orchestration workflow.
             plan_reason_act_format (str, optional, defaults to "todo"):
                 The observation format of the orchestration execution reason stage.
             plan_reflect_format (str, optional, defaults to "todo"):
@@ -336,12 +282,7 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             step_counters=step_counters, 
             mcp_client=mcp_client, 
             need_user_check=need_user_check, 
-            plan_system_prompt=plan_system_prompt, 
-            plan_reason_act_prompt=plan_reason_act_prompt, 
-            plan_reflect_prompt=plan_reflect_prompt, 
-            exec_system_prompt=exec_system_prompt, 
-            exec_reason_act_prompt=exec_reason_act_prompt, 
-            exec_reflect_prompt=exec_reflect_prompt, 
+            prompt_group=prompt_group, 
             plan_reason_act_format=plan_reason_act_format, 
             plan_reflect_format=plan_reflect_format, 
             exec_reason_act_format=exec_reason_act_format, 
@@ -363,12 +304,11 @@ class MemoryOrchestrateAgent(OrchestrateAgent, BaseMemoryAgent):
             **kwargs,
         )
         
-        # Read the workflow profile
         # Initialize the workflow for the agent
         self.workflow = MemoryOrchestrateFlow(
             call_stack=call_stack,
             workspace=workspace,
-            prompts=self.prompts, 
+            prompt_group=self.prompt_group, 
             observe_formats=self.observe_formats, 
             need_user_check=need_user_check, 
             **kwargs,

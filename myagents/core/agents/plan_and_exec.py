@@ -9,25 +9,7 @@ from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
 from myagents.core.workflows import PlanAndExecFlow, MemoryPlanAndExecFlow
-from myagents.prompts.workflows.plan_and_exec import (
-    PROFILE, 
-    EXEC_SYSTEM_PROMPT, 
-    EXEC_THINK_PROMPT, 
-    ERROR_PROMPT, 
-)
-from myagents.prompts.workflows.orchestrate import (
-    PLAN_SYSTEM_PROMPT as ORCH_PLAN_SYSTEM_PROMPT, 
-    PLAN_THINK_PROMPT as ORCH_PLAN_THINK_PROMPT, 
-    PLAN_REFLECT_PROMPT as ORCH_PLAN_REFLECT_PROMPT, 
-    EXEC_SYSTEM_PROMPT as ORCH_EXEC_SYSTEM_PROMPT, 
-    EXEC_THINK_PROMPT as ORCH_EXEC_THINK_PROMPT, 
-    EXEC_REFLECT_PROMPT as ORCH_EXEC_REFLECT_PROMPT, 
-)
-from myagents.prompts.workflows.react import REFLECT_PROMPT
-from myagents.prompts.workflows.plan_and_exec import (
-    EXEC_SYSTEM_PROMPT, 
-    EXEC_THINK_PROMPT, 
-)
+from myagents.prompts.workflows.plan_and_exec import PlanAndExecPromptGroup
 from myagents.prompts.memories.compress import (
     SYSTEM_PROMPT as MEMORY_COMPRESS_SYSTEM_PROMPT, 
     REASON_ACT_PROMPT as MEMORY_COMPRESS_REASON_ACT_PROMPT, 
@@ -40,14 +22,6 @@ from myagents.prompts.memories.episode import (
 from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE, SYSTEM_MEMORY_TEMPLATE
 
 
-AGENT_PROFILE = """
-我叫 {name} ，是一个会按照“规划-执行-反思”的流程来执行任务的助手。
-
-以下是我的工作流信息：
-{workflow}
-"""
-
-
 class PlanAndExecAgent(BaseAgent):
     """PlanAndExecAgent is the agent that is used to plan and execute the environment.
     
@@ -58,8 +32,6 @@ class PlanAndExecAgent(BaseAgent):
             The name of the agent.
         agent_type (AgentType):
             The type of the agent.
-        profile (str):
-            The profile of the agent.
         llm (LLM):tee
             The LLM to use for the agent. 
         mcp_client (MCPClient):
@@ -82,7 +54,6 @@ class PlanAndExecAgent(BaseAgent):
     uid: int
     name: str
     agent_type: AgentType
-    profile: str
     # LLM and MCP client
     llms: dict[str, LLM]
     mcp_client: MCPClient
@@ -107,16 +78,7 @@ class PlanAndExecAgent(BaseAgent):
         llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
-        orch_plan_system_prompt: str = ORCH_PLAN_SYSTEM_PROMPT, 
-        orch_plan_think_prompt: str = ORCH_PLAN_THINK_PROMPT, 
-        orch_plan_reflect_prompt: str = ORCH_PLAN_REFLECT_PROMPT, 
-        orch_exec_system_prompt: str = ORCH_EXEC_SYSTEM_PROMPT, 
-        orch_exec_think_prompt: str = ORCH_EXEC_THINK_PROMPT, 
-        orch_exec_reflect_prompt: str = ORCH_EXEC_REFLECT_PROMPT, 
-        exec_system_prompt: str = EXEC_SYSTEM_PROMPT, 
-        exec_think_prompt: str = EXEC_THINK_PROMPT, 
-        exec_reflect_prompt: str = REFLECT_PROMPT, 
-        error_prompt: str = ERROR_PROMPT, 
+        prompt_group: PlanAndExecPromptGroup = None, 
         orch_plan_think_format: str = "todo", 
         orch_plan_reflect_format: str = "todo", 
         orch_exec_think_format: str = "todo", 
@@ -138,20 +100,8 @@ class PlanAndExecAgent(BaseAgent):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
-            plan_system_prompt (str, optional):
-                The system prompt of the plan stage.
-            plan_think_prompt (str, optional):
-                The think prompt of the plan stage.
-            plan_reflect_prompt (str, optional):
-                The reflect prompt of the plan stage. 
-            exec_system_prompt (str, optional):
-                The system prompt of the exec stage.
-            exec_think_prompt (str, optional):
-                The think prompt of the exec stage.
-            exec_reflect_prompt (str, optional):
-                The reflect prompt of the exec stage.
-            error_prompt (str, optional):
-                The error prompt of the workflow.
+            prompt_group (PlanAndExecPromptGroup, optional):
+                The prompt group of the plan and exec workflow.
             plan_think_format (str, optional):
                 The observation format of the plan think stage.
             plan_reflect_format (str, optional):
@@ -175,21 +125,9 @@ class PlanAndExecAgent(BaseAgent):
             llms=llms, 
             name=name, 
             agent_type=AgentType.PLAN_AND_EXECUTE, 
-            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE), 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
-            prompts={
-                "orch_plan_system_prompt": orch_plan_system_prompt, 
-                "orch_plan_reason_act_prompt": orch_plan_think_prompt, 
-                "orch_plan_reflect_prompt": orch_plan_reflect_prompt, 
-                "orch_exec_system_prompt": orch_exec_system_prompt, 
-                "orch_exec_reason_act_prompt": orch_exec_think_prompt, 
-                "orch_exec_reflect_prompt": orch_exec_reflect_prompt, 
-                "exec_system_prompt": exec_system_prompt, 
-                "exec_reason_act_prompt": exec_think_prompt, 
-                "exec_reflect_prompt": exec_reflect_prompt, 
-                "error_prompt": error_prompt, 
-            }, 
+            prompt_group=prompt_group, 
             observe_formats={
                 "orch_plan_reason_act_format": orch_plan_think_format, 
                 "orch_plan_reflect_format": orch_plan_reflect_format, 
@@ -207,7 +145,7 @@ class PlanAndExecAgent(BaseAgent):
         self.workflow = PlanAndExecFlow(
             call_stack=call_stack,
             workspace=workspace,
-            prompts=self.prompts, 
+            prompt_group=self.prompt_group, 
             observe_formats=self.observe_formats, 
             **kwargs,
         )
@@ -231,8 +169,6 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
             The name of the agent.
         agent_type (AgentType):
             The type of the agent.
-        profile (str):
-            The profile of the agent.
         llm (LLM):tee
             The LLM to use for the agent. 
         mcp_client (MCPClient):
@@ -255,7 +191,6 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
     uid: int
     name: str
     agent_type: AgentType
-    profile: str
     # LLM and MCP client
     llms: dict[str, LLM]
     mcp_client: MCPClient
@@ -282,16 +217,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
         step_counters: list[StepCounter], 
         episode_memory: VectorMemoryCollection, 
         mcp_client: Optional[MCPClient] = None, 
-        orch_plan_system_prompt: str = ORCH_PLAN_SYSTEM_PROMPT, 
-        orch_plan_think_prompt: str = ORCH_PLAN_THINK_PROMPT, 
-        orch_plan_reflect_prompt: str = ORCH_PLAN_REFLECT_PROMPT, 
-        orch_exec_system_prompt: str = ORCH_EXEC_SYSTEM_PROMPT, 
-        orch_exec_think_prompt: str = ORCH_EXEC_THINK_PROMPT, 
-        orch_exec_reflect_prompt: str = ORCH_EXEC_REFLECT_PROMPT, 
-        exec_system_prompt: str = EXEC_SYSTEM_PROMPT, 
-        exec_think_prompt: str = EXEC_THINK_PROMPT, 
-        exec_reflect_prompt: str = REFLECT_PROMPT, 
-        error_prompt: str = ERROR_PROMPT, 
+        prompt_group: PlanAndExecPromptGroup = None, 
         orch_plan_think_format: str = "todo", 
         orch_plan_reflect_format: str = "todo", 
         orch_exec_think_format: str = "todo", 
@@ -327,20 +253,8 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
                 The MCP client to use for the agent.
             episode_memory (VectorMemoryDB):
                 The vector memory to use for the agent.
-            plan_system_prompt (str, optional):
-                The system prompt of the plan stage.
-            plan_think_prompt (str, optional):
-                The think prompt of the plan stage.
-            plan_reflect_prompt (str, optional):
-                The reflect prompt of the plan stage. 
-            exec_system_prompt (str, optional):
-                The system prompt of the exec stage.
-            exec_think_prompt (str, optional):
-                The think prompt of the exec stage.
-            exec_reflect_prompt (str, optional):
-                The reflect prompt of the exec stage.
-            error_prompt (str, optional):
-                The error prompt of the workflow.
+            prompt_group (PlanAndExecPromptGroup, optional):
+                The prompt group of the plan and exec workflow.
             plan_think_format (str, optional):
                 The observation format of the plan think stage.
             plan_reflect_format (str, optional):
@@ -377,16 +291,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
             name=name, 
             mcp_client=mcp_client, 
             step_counters=step_counters, 
-            orch_plan_system_prompt=orch_plan_system_prompt, 
-            orch_plan_think_prompt=orch_plan_think_prompt, 
-            orch_plan_reflect_prompt=orch_plan_reflect_prompt, 
-            orch_exec_system_prompt=orch_exec_system_prompt, 
-            orch_exec_think_prompt=orch_exec_think_prompt, 
-            orch_exec_reflect_prompt=orch_exec_reflect_prompt, 
-            exec_system_prompt=exec_system_prompt, 
-            exec_think_prompt=exec_think_prompt, 
-            exec_reflect_prompt=exec_reflect_prompt, 
-            error_prompt=error_prompt, 
+            prompt_group=prompt_group, 
             orch_plan_think_format=orch_plan_think_format, 
             orch_plan_reflect_format=orch_plan_reflect_format, 
             orch_exec_think_format=orch_exec_think_format, 
@@ -415,7 +320,7 @@ class MemoryPlanAndExecAgent(PlanAndExecAgent, BaseMemoryAgent):
         self.workflow = MemoryPlanAndExecFlow(
             call_stack=call_stack,
             workspace=workspace,
-            prompts=self.prompts, 
+            prompt_group=self.prompt_group, 
             observe_formats=self.observe_formats, 
             **kwargs,
         )

@@ -8,7 +8,7 @@ from myagents.core.interface.core import MemoryAgent
 from myagents.core.workflows.react import BaseReActFlow
 from myagents.core.workflows.plan import PlanWorkflow, MemoryPlanWorkflow
 from myagents.core.utils.extractor import extract_by_label
-from myagents.prompts.workflows.orchestrate import PROFILE
+from myagents.prompts.workflows.orchestrate import OrchestratePromptGroup, BlueprintPromptGroup
 
 
 class BlueprintWorkflow(BaseReActFlow):
@@ -26,10 +26,27 @@ class BlueprintWorkflow(BaseReActFlow):
         self, 
         call_stack: CallStack,
         workspace: Workspace,
-        profile: str = PROFILE, 
+        prompt_group: BlueprintPromptGroup,
         **kwargs,
     ) -> None:
-        super().__init__(call_stack=call_stack, workspace=workspace, profile=profile, **kwargs)
+        """Initialize the BlueprintWorkflow.
+        
+        Args:
+            call_stack (CallStack):
+                The call stack of the workflow.
+            workspace (Workspace):
+                The workspace of the workflow.
+            prompt_group (BlueprintPromptGroup):
+                The prompt group of the workflow.
+            **kwargs:
+                The keyword arguments to be passed to the parent class.
+        """
+        # Check if the prompt group is a BlueprintPromptGroup
+        if not isinstance(prompt_group, BlueprintPromptGroup):
+            raise TypeError("prompt_group must be a BlueprintPromptGroup")
+        
+        # Initialize the parent class
+        super().__init__(call_stack=call_stack, workspace=workspace, prompt_group=prompt_group, **kwargs)
     
     async def run(
         self, 
@@ -446,12 +463,10 @@ class OrchestrateFlow(PlanWorkflow):
         tools (dict[str, FastMcpTool]):
             The tools can be used for the agent. 
         
-        profile (str):
-            The profile of the workflow.
         agent (Agent): 
             The agent that is used to orchestrate the task.
-        prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+        prompt_group (OrchestratePromptGroup):
+            The prompt group of the workflow.
         observe_formats (dict[str, str]):
             The formats of the observation. The key is the observation name and the value is the format method name. 
         sub_workflows (dict[str, ReActFlow]):
@@ -465,11 +480,10 @@ class OrchestrateFlow(PlanWorkflow):
     # Call stack
     call_stack: CallStack
     # Basic information
-    profile: str
     agent: Agent
-    prompts: dict[str, str]
+    prompt_group: OrchestratePromptGroup
     observe_formats: dict[str, str]
-    # Sub-worflows
+    # Sub-workflows
     sub_workflows: dict[str, ReActFlow]
     # Need user check
     need_user_check: bool
@@ -478,7 +492,7 @@ class OrchestrateFlow(PlanWorkflow):
         self, 
         call_stack: CallStack,
         workspace: Workspace,
-        prompts: dict[str, str] = {}, 
+        prompt_group: OrchestratePromptGroup, 
         observe_formats: dict[str, str] = {}, 
         need_user_check: bool = False, 
         **kwargs,
@@ -486,17 +500,12 @@ class OrchestrateFlow(PlanWorkflow):
         """Initialize the OrchestrateFlow.
 
         Args:
-            profile (str):
-                The profile of the workflow.
-            prompts (dict[str, str]):
-                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
-                The following keys are required:
-                    "plan_system_prompt": The system prompt of the plan workflow.
-                    "plan_reason_act_prompt": The reason and act prompt of the plan workflow.
-                    "plan_reflect_prompt": The reflect prompt of the plan workflow.
-                    "exec_system_prompt": The system prompt of the exec workflow.
-                    "exec_reason_act_prompt": The reason and act prompt of the exec workflow.
-                    "exec_reflect_prompt": The reflect prompt of the exec workflow.
+            call_stack (CallStack):
+                The call stack of the workflow.
+            workspace (Workspace):
+                The workspace of the workflow.
+            prompt_group (OrchestratePromptGroup):
+                The prompt group of the workflow.
             observe_formats (dict[str, str]):
                 The formats of the observation. The key is the observation name and the value is the format method name. 
                 The following keys are required:
@@ -504,21 +513,19 @@ class OrchestrateFlow(PlanWorkflow):
                     "plan_reflect_format": The format method name of the reflect observation of the plan workflow.
                     "exec_reason_act_format": The format method name of the reason and act observation of the exec workflow.
                     "exec_reflect_format": The format method name of the reflect observation of the exec workflow.
-            need_user_check (bool, optional, defaults to False):
-                Whether to need the user to check the orchestration blueprint.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # Check if the prompt group is a OrchestratePromptGroup
+        if not isinstance(prompt_group, OrchestratePromptGroup):
+            raise TypeError("prompt_group must be a OrchestratePromptGroup")
+
         # Create the sub-workflows
         sub_workflows = {
-            "plan": BlueprintWorkflow(
+            "blueprint": BlueprintWorkflow(
                 call_stack=call_stack,
                 workspace=workspace,
-                prompts={
-                    "system_prompt": prompts["plan_system_prompt"], 
-                    "reason_act_prompt": prompts["plan_reason_act_prompt"], 
-                    "reflect_prompt": prompts["plan_reflect_prompt"], 
-                }, 
+                prompt_group=prompt_group.get_sub_group("blueprint"), 
                 observe_formats={
                     "reason_act_format": observe_formats['plan_reason_act_format'], 
                     "reflect_format": observe_formats['plan_reflect_format'], 
@@ -527,23 +534,18 @@ class OrchestrateFlow(PlanWorkflow):
         }
         
         # Prepare the prompts and observe formats for the exec workflow
-        prompts = {
-            "system_prompt": prompts["exec_system_prompt"], 
-            "reason_act_prompt": prompts["exec_reason_act_prompt"], 
-            "reflect_prompt": prompts["exec_reflect_prompt"], 
-        }
         observe_formats = {
             "reason_act_format": observe_formats["exec_reason_act_format"], 
             "reflect_format": observe_formats["exec_reflect_format"], 
         }
+        # Set the need user check
         self.need_user_check = need_user_check
         
         # Initialize the parent class
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            profile=PROFILE, 
-            prompts=prompts, 
+            prompt_group=prompt_group, 
             observe_formats=observe_formats, 
             sub_workflows=sub_workflows, 
             **kwargs,
@@ -579,7 +581,7 @@ class OrchestrateFlow(PlanWorkflow):
                 The orchestration blueprint.
         """
         # Call the blueprint workflow
-        target = await self.sub_workflows["plan"].schedule(
+        target = await self.sub_workflows["blueprint"].schedule(
             target=target, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 
@@ -742,7 +744,7 @@ class MemoryOrchestrateFlow(MemoryPlanWorkflow):
         self, 
         call_stack: CallStack,
         workspace: Workspace,
-        prompts: dict[str, str] = {}, 
+        prompt_group: OrchestratePromptGroup, 
         observe_formats: dict[str, str] = {}, 
         need_user_check: bool = False, 
         **kwargs,
@@ -750,17 +752,12 @@ class MemoryOrchestrateFlow(MemoryPlanWorkflow):
         """Initialize the OrchestrateFlow.
 
         Args:
-            profile (str):
-                The profile of the workflow.
-            prompts (dict[str, str]):
-                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
-                The following keys are required:
-                    "plan_system_prompt": The system prompt of the plan workflow.
-                    "plan_reason_act_prompt": The reason and act prompt of the plan workflow.
-                    "plan_reflect_prompt": The reflect prompt of the plan workflow.
-                    "exec_system_prompt": The system prompt of the exec workflow.
-                    "exec_reason_act_prompt": The reason and act prompt of the exec workflow.
-                    "exec_reflect_prompt": The reflect prompt of the exec workflow.
+            call_stack (CallStack):
+                The call stack of the workflow.
+            workspace (Workspace):
+                The workspace of the workflow.
+            prompt_group (OrchestratePromptGroup):
+                The prompt group of the workflow.
             observe_formats (dict[str, str]):
                 The formats of the observation. The key is the observation name and the value is the format method name. 
                 The following keys are required:
@@ -768,21 +765,19 @@ class MemoryOrchestrateFlow(MemoryPlanWorkflow):
                     "plan_reflect_format": The format method name of the reflect observation of the plan workflow.
                     "exec_reason_act_format": The format method name of the reason and act observation of the exec workflow.
                     "exec_reflect_format": The format method name of the reflect observation of the exec workflow.
-            need_user_check (bool, optional, defaults to False):
-                Whether to need the user to check the orchestration blueprint.
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # Check if the prompt group is a OrchestratePromptGroup
+        if not isinstance(prompt_group, OrchestratePromptGroup):
+            raise TypeError("prompt_group must be a OrchestratePromptGroup")
+        
         # Create the sub-workflows
         sub_workflows = {
-            "plan": MemoryBlueprintWorkflow(
+            "blueprint": MemoryBlueprintWorkflow(
                 call_stack=call_stack,
                 workspace=workspace,
-                prompts={
-                    "system_prompt": prompts["plan_system_prompt"], 
-                    "reason_act_prompt": prompts["plan_reason_act_prompt"], 
-                    "reflect_prompt": prompts["plan_reflect_prompt"], 
-                }, 
+                prompt_group=prompt_group.get_sub_group("blueprint"), 
                 observe_formats={
                     "reason_act_format": observe_formats['plan_reason_act_format'], 
                     "reflect_format": observe_formats['plan_reflect_format'], 
@@ -791,23 +786,18 @@ class MemoryOrchestrateFlow(MemoryPlanWorkflow):
         }
         
         # Prepare the prompts and observe formats for the exec workflow
-        prompts = {
-            "system_prompt": prompts["exec_system_prompt"], 
-            "reason_act_prompt": prompts["exec_reason_act_prompt"], 
-            "reflect_prompt": prompts["exec_reflect_prompt"], 
-        }
         observe_formats = {
             "reason_act_format": observe_formats["exec_reason_act_format"], 
             "reflect_format": observe_formats["exec_reflect_format"], 
         }
+        # Set the need user check
         self.need_user_check = need_user_check
         
         # Initialize the parent class
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            profile=PROFILE, 
-            prompts=prompts, 
+            prompt_group=prompt_group, 
             observe_formats=observe_formats, 
             sub_workflows=sub_workflows, 
             **kwargs,
@@ -867,7 +857,7 @@ class MemoryOrchestrateFlow(MemoryPlanWorkflow):
                 The orchestration blueprint.
         """
         # Call the blueprint workflow
-        target = await self.sub_workflows["plan"].schedule(
+        target = await self.sub_workflows["blueprint"].schedule(
             target=target, 
             max_error_retry=max_error_retry, 
             max_idle_thinking=max_idle_thinking, 

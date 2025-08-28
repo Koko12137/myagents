@@ -4,6 +4,7 @@ from .base import Stateful, Workspace, ToolsCaller, Status, Scheduler, CallStack
 from .task import TaskStatus, Task, TreeTaskNode, GraphTaskNode, TaskView, MemoryTreeTaskNode
 from .memory import VectorMemoryItem, MemoryOperation, VectorMemoryCollection, TableMemoryDB
 from .core import StepCounter, Agent, Workflow, Environment, ReActFlow, MemoryAgent, MemoryWorkflow
+from .prompt import Prompt, PromptGroup
 
 
 __all__ = [
@@ -13,4 +14,5 @@ __all__ = [
     "VectorMemoryItem", "MemoryOperation", "VectorMemoryCollection", "TableMemoryDB", 
     "LLM", "EmbeddingLLM", "Provider", "CompletionConfig", 
     "Agent", "ReActFlow", "MemoryAgent", "Workflow", "MemoryWorkflow", "Environment", "StepCounter",
+    "Prompt", "PromptGroup",
 ]

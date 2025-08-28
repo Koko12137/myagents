@@ -10,7 +10,7 @@ from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.schemas.messages import AssistantMessage, ToolCallRequest, ToolCallResult, SystemMessage, UserMessage
 from myagents.schemas.llms.config import BaseCompletionConfig
-from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow, CallStack, Workspace
+from myagents.core.interface import LLM, Agent, StepCounter, Environment, Stateful, Workflow, CallStack, Workspace, PromptGroup
 from myagents.core.agents.types import AgentType
 from myagents.core.step_counters import MaxStepsError
 
@@ -29,8 +29,6 @@ class BaseAgent(Agent):
             智能体名称。
         type (AgentType):
             智能体类型。
-        profile (str):
-            智能体简介。
         llms (dict[str, LLM]):
             智能体使用的大语言模型。
         mcp_client (MCPClient):
@@ -55,7 +53,6 @@ class BaseAgent(Agent):
     uid: str
     name: str
     agent_type: AgentType
-    profile: str
     # LLM and MCP client
     llms: dict[str, LLM]
     mcp_client: MCPClient
@@ -69,7 +66,7 @@ class BaseAgent(Agent):
     # Concurrency limit
     lock: Lock
     # Prompts and observe format
-    prompts: dict[str, str]
+    prompt_group: PromptGroup
     observe_formats: dict[str, str]
     
     def __init__(
@@ -78,11 +75,10 @@ class BaseAgent(Agent):
         workspace: Workspace,
         name: str, 
         agent_type: AgentType, 
-        profile: str, 
         llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: MCPClient = None, 
-        prompts: dict[str, str] = None, 
+        prompt_group: PromptGroup = None, 
         observe_formats: dict[str, str] = None, 
         **kwargs, 
     ) -> None:
@@ -93,8 +89,6 @@ class BaseAgent(Agent):
                 智能体名称。
             agent_type (AgentType):
                 智能体类型。
-            profile (str):
-                智能体简介。
             llms (dict[str, LLM]):
                 智能体使用的大语言模型。
             step_counters (list[StepCounter]):
@@ -118,7 +112,6 @@ class BaseAgent(Agent):
         self.uid = uuid4().hex
         self.name = name
         self.agent_type = agent_type
-        self.profile = profile
         # Initialize the LLM
         self.llms = llms
         # Initialize the MCP client
@@ -132,8 +125,8 @@ class BaseAgent(Agent):
         # Initialize the synchronization lock
         self.lock = Lock()
         # Initialize the prompts and observe format
-        self.prompts = prompts
-        self.observe_formats = observe_formats
+        self.prompt_group = prompt_group
+        self.observe_formats = observe_formats if observe_formats is not None else {}
         
     async def prompt(
         self, 

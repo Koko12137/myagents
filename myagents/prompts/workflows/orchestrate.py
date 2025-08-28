@@ -1,239 +1,128 @@
-PROFILE = """
-“Orchestrate”工作流，用于规划任务的总体目标规划，但不会设计详细的执行计划。
-
-**总体目标规划示范**：
-```markdown
-1. 
-- 目标描述:
-    xxx （【注意】：不要直接回答问题，应该详细描述一些任务目标的具体内容）
-- 关键产出: 
-    1. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    2. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    ...（更多关键产出）
-2. 
-- 目标描述:
-    xxx （【注意】：不要直接回答问题，应该详细描述一些任务目标的具体内容）
-- 关键产出: 
-    1. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    2. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    ...（更多关键产出）
-...（更多目标）
-```
-【注意】：目标不需要是细节的步骤，而是关键点。任何细节的步骤你现在不需要考虑。
-"""
+from myagents.core.interface import Prompt, PromptGroup
+from myagents.prompts.workflows.plan import PlanPromptGroup
 
 
-PLAN_SYSTEM_PROMPT = """
-# Workflow 任务描述
-你当前处于 “Orchestrate” 工作流中，你需要根据用户的问题，规划任务的总体结构。
-【注意】：严令禁止直接回答任务，你只能思考这个问题的关键点是什么，每一个关键点的产出应该是什么。
+class BlueprintSystemPrompt(Prompt):
+    """BlueprintSystemPrompt is a prompt for Blueprint workflow."""
+    def __init__(self, file_path: str) -> None:
+        with open(file_path, "r", encoding="utf-8") as f:
+            self.prompt = f.read()
+    
+    def __str__(self) -> str:
+        return self.prompt
 
-## 工作流描述
-以下是你的工作流描述:
-{profile}
+    def get_name(self) -> str:
+        return "system_prompt"
 
-## 当前蓝图规划情况
-{blueprint}
+    def string(self) -> str:
+        return self.prompt
+    
 
-========
-请你根据用户的指令开始执行任务。
-"""
+class BlueprintReasonActPrompt(Prompt):
+    """BlueprintReasonActPrompt is a prompt for Blueprint workflow."""
+    def __init__(self, file_path: str) -> None:
+        with open(file_path, "r", encoding="utf-8") as f:
+            self.prompt = f.read()
 
+    def __str__(self) -> str:
+        return self.prompt
 
-PLAN_THINK_PROMPT = """
-# ORCHESTRATE —— PLAN —— 蓝图规划阶段
+    def get_name(self) -> str:
+        return "reason_act_prompt"
 
-## 语言要求
-- 你只能使用中文作答。
-
-## 任务要求
-1) 你要思考解决问题的关键点是哪些，应该如何一步步达成目标，每一步需要得到什么。
-2) 每一步的目标之间不能产生`循环依赖`，即不能出现A依赖B，B依赖C，C依赖A的情况。
-
-## 格式要求
-请你按照下面的格式进行思考和输出：
-<think>
-在思考的部分，你需要先反向思考用户的真实意图与需求，写出你每一步需要做什么，每一步需要得到什么，然后你需要在orchestration标签中整理出规划蓝图。
-【注意】：你的规划应该保证每一步之间不会产生`循环依赖`，即不能出现A依赖B，B依赖C，C依赖A的情况。
-【举例】：假设你现在需要完成一个任务，任务是“写一篇关于AI的文章”，那么你应该确定文章有哪些部分组成，每个部分之间的逻辑组织是什么顺序，每个部分需要得到什么，然后整理成规划蓝图。
-</think>
-<orchestration>
-你的规划蓝图写在这里
-【注意】：严令禁止直接回答任务，你只能思考和规划一步步应该怎么做
-【警告】：合法的蓝图标签只有’目标描述‘，’关键产出‘，不要出现其他标签，否则会被认为是严重错误。
-格式参考：
-```markdown
-1. 
-- 目标描述:
-    xxx （【注意】：不要直接回答问题，应该详细描述一些任务目标的具体内容）
-- 关键产出: 
-    1. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    2. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    ...（更多关键产出）
-2. 
-- 目标描述:
-    xxx （【注意】：不要直接回答问题，应该详细描述一些任务目标的具体内容）
-- 关键产出: 
-    1. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    2. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    ...（更多关键产出）
-...（更多目标）
-```
-【注意】：目标不需要是细节的步骤，而是关键点。任何细节的步骤你现在不需要考虑。
-【警告】：括号内的注意事项不要出现在你的输出中，否则会被认为是严重错误。
-</orchestration>
-"""
-
-PLAN_REFLECT_PROMPT = """
-# ORCHESTRATE —— PLAN —— 蓝图反思阶段
-
-## 语言要求
-- 你只能使用中文作答。
-
-## 任务描述
-你当前处于 “Orchestrate” 工作流中，你已经完成了任务的总体结构规划，现在需要根据规划的蓝图，检查是否存在错误。
-- 检查当前规划是否存在错误，如果有错误，请指出错误并给出修改建议，新的规划蓝图需要`完整的`输出修改后的规划蓝图。
-【警告】：如果修改的规划蓝图不完整，那将会被认为是严重错误，因为新的蓝图会直接覆盖掉之前的规划蓝图。
-
-## 示范
-### 正确示范
-```markdown
-1. 
-- 目标描述:
-    xxx （【注意】：不要直接回答问题，应该详细描述一些任务目标的具体内容）
-- 关键产出: 
-    1. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    2. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    ...（更多关键产出）
-2. 
-- 目标描述:
-    xxx （【注意】：不要直接回答问题，应该详细描述一些任务目标的具体内容）
-- 关键产出: 
-    1. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    2. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    ...（更多关键产出）
-...（更多目标）
-```
-
-## 格式要求
-请你按照下面的格式进行反思：
-<think>
-【警告】：你的思考会消耗你的token，请谨慎思考，不必要思考不相关的内容，否则就是给别人做嫁衣。
-</think>
-<reflect>
-你检查到的错误点和你认为的修改建议写在这里，不需要给出修改建议，只需要指出错误点。
-</reflect>
-<checklist>
-【重点注意】：人工审查点，你不需要关注checklist以外的任何内容，如若出错，你将会被惩罚。
-- [ ] 检查当前的规划是否存在直接回答问题等严重违反规定的行为（在思考中模拟回答是允许的，但不允许在蓝图上直接回答问题）
-- [ ] 检查当前规划是否能够保证每一步之间不会产生`循环依赖`，即不能出现A依赖B，B依赖C，C依赖A的情况
-- [ ] 检查规划的蓝图是否放到了<orchestration>标签中，如果没有，则会造成严重错误
-</checklist>
-<finish>
-你是否需要结束工作流？如果已经正确检查了规划，则返回 True，否则返回 False。
-- True：结束工作流。
-- False：继续工作流。
-【注意】：你只能填入 True 或 False，不能填入其他内容。
-【注意】：如果你没有输出这个标签，那么会被默认是False。
-【警告】：你发现蓝图有错误时，禁止输出True以结束工作流，否则会被认为是严重错误。
-</finish>
-【警告】：Reflect时禁止使用JSON格式输出，否则将无法结束工作流。
-"""
+    def string(self) -> str:
+        return self.prompt
 
 
-EXEC_SYSTEM_PROMPT = """
-# Workflow 任务描述
-你当前处于 “观察-思考-行动-反思” 工作流中，你需要仔细观察，认真思考，准确行动，并对结果进行反思。
-**阶段核心任务**：
-√ 基于蓝图与当前所处位置，调用工具创建子任务，完成当前层的全部子任务创建
-x 修改总体规划蓝图的任何内容，包括新增、删除、修改子目标的描述、关键产出等
+class BlueprintReflectPrompt(Prompt):
+    """BlueprintReflectPrompt is a prompt for Blueprint workflow."""
+    def __init__(self, file_path: str) -> None:
+        with open(file_path, "r", encoding="utf-8") as f:
+            self.prompt = f.read()
 
-## 工作流描述
-以下是你的工作流描述:
-{profile}
+    def __str__(self) -> str:
+        return self.prompt
 
-========
-请你根据用户的指令开始执行任务。
-"""
+    def get_name(self) -> str:
+        return "reflect_prompt"
 
-
-EXEC_THINK_PROMPT = """
-# ORCHESTRATE —— EXEC —— 任务创建阶段
-
-## 语言要求
-- 你只能使用中文作答。
-
-## 任务描述
-你当前处于 “Orchestrate” 工作流中，你已经完成了任务的总体结构规划，现在需要根据规划的蓝图，创建任务。
-【注意】：严令禁止修改总体规划，你只能根据总体规划，创建任务。
-【警告】：如果你上一次的子任务创建失败了，下一次依然需要给出“完整的”JSON，不要跳过没有错误的部分。
-
-## 格式要求
-按照以下JSON格式进行输出，不要有任何其他内容：
-```json
-[
-    {{
-        "目标描述": "任务1目标描述（【注意】：必须与蓝图规划中的目标描述一致）",
-        "关键产出": [
-            "关键产出1的描述（【注意】：必须与蓝图规划中的关键产出一致）",
-            ...
-            "关键产出n的描述（【注意】：必须与蓝图规划中的关键产出一致）",
-        ]
-    }},
-    {{
-        "目标描述": "任务2目标描述（【注意】：必须与蓝图规划中的目标描述一致）",
-        "关键产出": [
-            "关键产出1的描述（【注意】：必须与蓝图规划中的关键产出一致）",
-            ...
-            "关键产出n的描述（【注意】：必须与蓝图规划中的关键产出一致）",
-        ]
-    }}
-    ...
-    {{
-        "目标描述": "任务n目标描述（【注意】：必须与蓝图规划中的目标描述一致）",
-        "关键产出": [
-            "关键产出1的描述（【注意】：必须与蓝图规划中的关键产出一致）",
-            ...
-            "关键产出n的描述（【注意】：必须与蓝图规划中的关键产出一致）",
-        ]
-    }}
-]
-```
-【注意】：你不需要关心蓝图是否正确，你只需要确保成功创建子任务，并确保子任务的属性没有被修改。
-"""
+    def string(self) -> str:
+        return self.prompt
 
 
-EXEC_REFLECT_PROMPT = """
-# ORCHESTRATE —— EXEC —— 任务创建反思阶段
+class BlueprintPromptGroup(PromptGroup):
+    """BlueprintPromptGroup is a prompt group for Blueprint workflow."""
+    def __init__(
+        self, 
+        system_prompt: str = "prompts/blueprint/system.md", 
+        reason_act_prompt: str = "prompts/blueprint/reason_act.md", 
+        reflect_prompt: str = "prompts/blueprint/reflect.md",
+        sub_groups: dict[str, PromptGroup] = None,
+    ) -> None:
+        """Initialize the BlueprintPromptGroup.
+        
+        Args:
+            system_prompt (str): The path to the system prompt file.
+            reason_act_prompt (str): The path to the reason and act prompt file.
+            reflect_prompt (str): The path to the reflect prompt file.
+        """
+        # Initialize the prompts
+        self.prompts = {
+            "system_prompt": BlueprintSystemPrompt(system_prompt),
+            "reason_act_prompt": BlueprintReasonActPrompt(reason_act_prompt),
+            "reflect_prompt": BlueprintReflectPrompt(reflect_prompt),
+        }
+        # Initialize the sub-groups
+        self.sub_groups = sub_groups if sub_groups is not None else {}
 
-## 语言要求
-- 你只能使用中文作答。
+    def get_prompt(self, name: str) -> Prompt:
+        return self.prompts[name]
 
-## 任务描述
-- 检查当前任务是否已经按照蓝图进行了拆解，有没有多了或者少了子任务，或者有没有修改了子任务的属性
-【警告】：你不需要关心蓝图是否正确，你只需要确保成功创建子任务，并确保子任务的属性没有被修改。
+    def get_sub_group(self, group_name: str) -> PromptGroup:
+        return self.sub_groups[group_name]
 
-## 格式要求
-请你按照下面的格式进行反思：
-<think>
-【警告】：你不需要关心蓝图是否正确，你只需要确保成功创建子任务，并确保子任务的属性没有被修改。
-【警告】：你的思考会消耗你的token，请谨慎思考，不必要思考不相关的内容，否则就是给别人做嫁衣。
-</think>
-<reflect>
-你的反思内容写在这里，可以是为什么会出现错误，但不需要给出修改建议。
-【警告】：你不需要关心蓝图是否正确，你只需要确保成功创建子任务，并确保子任务的属性没有被修改。
-【警告】：这里是人工审查点，如果你对蓝图指指点点，你的执行记录会被人工审查从数据库抽出进行严厉惩罚。
-</reflect>
-<checklist>
-【重点注意】：人工审查点，如若出错，你将会被惩罚。
-- [ ] 检查当前任务是否已经按照蓝图进行了拆解，有没有多了或者少了子任务，或者有没有修改了子任务的属性
-- [ ] 如果前面存在错误，请指出错误并给出修改建议，新的规划蓝图需要`完整的`输出修改后的规划蓝图。
-</checklist>
-<finish>
-你是否需要结束工作流？如果已经正确拆解了任务，则返回 True，否则返回 False。
-- True：结束工作流，并返回最终结果。
-- False：继续工作流。
-【注意】：你只能填入 True 或 False，不能填入其他内容。
-</finish>
-【警告】：Reflect时禁止使用JSON格式输出，否则将无法结束工作流。
-"""
+    def has_prompts(self, names: list[str]) -> bool:
+        return all(name in self.prompts for name in names)
+
+    def has_sub_groups(self, group_names: list[str]) -> bool:
+        return all(group_name in self.sub_groups for group_name in group_names)
+
+
+class OrchestratePromptGroup(PlanPromptGroup):
+    """OrchestratePromptGroup is a prompt group for Orchestrate workflow."""
+    sub_groups: dict[str, PromptGroup]
+    
+    def __init__(
+        self, 
+        blueprint_system_prompt: str = "prompts/orchestrate/blueprint/system.md", 
+        blueprint_reason_act_prompt: str = "prompts/orchestrate/blueprint/reason_act.md", 
+        blueprint_reflect_prompt: str = "prompts/orchestrate/blueprint/reflect.md",
+        plan_system_prompt: str = "prompts/orchestrate/plan/system.md", 
+        plan_reason_act_prompt: str = "prompts/orchestrate/plan/reason_act.md", 
+        plan_reflect_prompt: str = "prompts/orchestrate/plan/reflect.md",
+    ) -> None:
+        """Initialize the OrchestratePromptGroup.
+        
+        Args:
+            blueprint_system_prompt (str): The path to the blueprint system prompt file.
+            blueprint_reason_act_prompt (str): The path to the blueprint reason and act prompt file.
+            blueprint_reflect_prompt (str): The path to the blueprint reflect prompt file.
+            plan_system_prompt (str): The path to the plan system prompt file.
+            plan_reason_act_prompt (str): The path to the plan reason and act prompt file.
+            plan_reflect_prompt (str): The path to the plan reflect prompt file.
+        """
+        # Initialize the blueprint prompt group
+        blueprint_prompt_group = BlueprintPromptGroup(
+            system_prompt=blueprint_system_prompt, 
+            reason_act_prompt=blueprint_reason_act_prompt, 
+            reflect_prompt=blueprint_reflect_prompt,
+        )
+        # Initialize the plan prompt group
+        super().__init__(
+            system_prompt=plan_system_prompt, 
+            reason_act_prompt=plan_reason_act_prompt, 
+            reflect_prompt=plan_reflect_prompt,
+            sub_groups={
+                "blueprint": blueprint_prompt_group,
+            },
+        )

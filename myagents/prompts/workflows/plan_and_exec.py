@@ -1,72 +1,51 @@
-PROFILE = """
-“PlanAndExec”工作流，用于规划任务的总体目标规划，但不会设计详细的执行计划。
-
-**总体目标规划示范**：
-```markdown
-1. 
-- 目标描述:
-    xxx （【注意】：不要直接回答问题，应该详细描述一些任务目标的具体内容）
-- 关键产出: 
-    1. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    2. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    ...（更多关键产出）
-2. 
-- 目标描述:
-    xxx （【注意】：不要直接回答问题，应该详细描述一些任务目标的具体内容）
-- 关键产出: 
-    1. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    2. xxx （【注意】：不要直接回答问题，而应该是你想要得到什么）
-    ...（更多关键产出）
-...（更多目标）
-```
-【注意】：目标不需要是细节的步骤，而是关键点。任何细节的步骤你现在不需要考虑。
-"""
-
-EXEC_SYSTEM_PROMPT = """
-# Workflow 任务描述
-你当前处于 “规划-执行-反思” 工作流中，目前子任务树已经创建完成，你需要根据子任务树，执行子任务，并对结果进行反思。
-
-## 任务目标
-- 你需要根据子任务的结果来总结当前任务的答案。这些总结最终会被拼接到子任务的答案前，形成“总-分”结构。
-- 你最终的回答或者总结需要衔接子任务的答案，不要直接出现“总结”或者“答案”两个字。
-- 你不能做无意义的重复思考，如果可以给出答案，你需要尽快给出答案，重复思考会消耗你的奖励，并且一旦没有最终答案，你将会被严厉惩罚。
-
-========
-请你根据用户的指令开始执行任务。
-"""
+from myagents.core.interface.prompt import PromptGroup
+from myagents.prompts.workflows.react import ReactPromptGroup
+from myagents.prompts.workflows.orchestrate import OrchestratePromptGroup
 
 
-EXEC_THINK_PROMPT = """
-# PLAN_AND_EXEC —— THINK_AND_ACTION —— 执行阶段思考阶段
-
-## 格式要求
-请你按照下面的格式进行输出，不要输出任何其他内容：
-<action>
-你的行动步骤写在这里，但是调用工具具体信息需要写在指定的标签中，不需要写在这里。
-</action>
-<final_output>
-你需要把你的 action 整理成结构化的推理过程，然后写在这里。
-【警告】：你的回答只会从 <final_output> 标签中获取，不会从 <action> 标签中获取。
-</final_output>
-"""
-
-
-ERROR_PROMPT = """
-# PLAN_AND_EXEC —— ERROR —— 错误提示
-你当前处于 “规划-执行-反思” 工作流中，你已经执行了 {error_retry} 次，你最多可以重试 {max_error_retry} 次，但是仍然没有完成任务。
-接下来你需要根据错误原因，总结错误原因，重新根据用户指令进行执行。
-
-## 任务要求
-- 你要参考当前已经完成的部分结果和错误原因，总结错误原因，重新根据用户指令进行执行。
-- 不要重复执行已完成的任务。
-
-## 错误提示
-### 错误原因
-{error_reason}
-
-### 当前结果
-{current_result}
-
-========
-请你根据用户的指令开始执行任务。
-"""
+class PlanAndExecPromptGroup(ReactPromptGroup):
+    """PlanAndExecPromptGroup is a prompt group for plan and exec workflow."""
+    sub_groups: dict[str, PromptGroup]
+    
+    def __init__(
+        self, 
+        blueprint_system_prompt: str = "prompts/blueprint/system.md", 
+        blueprint_reason_act_prompt: str = "prompts/blueprint/reason_act.md", 
+        blueprint_reflect_prompt: str = "prompts/blueprint/reflect.md",
+        plan_system_prompt: str = "prompts/plan/system.md", 
+        plan_reason_act_prompt: str = "prompts/plan/reason_act.md", 
+        plan_reflect_prompt: str = "prompts/plan/reflect.md",
+        exec_system_prompt: str = "prompts/execute/system.md", 
+        exec_reason_act_prompt: str = "prompts/execute/reason_act.md", 
+        exec_reflect_prompt: str = "prompts/execute/reflect.md",
+    ) -> None:
+        """Initialize the PlanAndExecPromptGroup.
+        
+        Args:
+            blueprint_system_prompt (str): The path to the blueprint system prompt file.
+            blueprint_reason_act_prompt (str): The path to the blueprint reason and act prompt file.
+            blueprint_reflect_prompt (str): The path to the blueprint reflect prompt file.
+            plan_system_prompt (str): The path to the plan system prompt file.
+            plan_reason_act_prompt (str): The path to the plan reason and act prompt file.
+            plan_reflect_prompt (str): The path to the plan reflect prompt file.
+            exec_system_prompt (str): The path to the execute system prompt file.
+            exec_reason_act_prompt (str): The path to the execute reason and act prompt file.
+            exec_reflect_prompt (str): The path to the execute reflect prompt file.
+        """
+        # Initialize the Orchestrate Prompt Group
+        orch_prompt_group = OrchestratePromptGroup(
+            blueprint_system_prompt=blueprint_system_prompt, 
+            blueprint_reason_act_prompt=blueprint_reason_act_prompt, 
+            blueprint_reflect_prompt=blueprint_reflect_prompt,
+            plan_system_prompt=plan_system_prompt, 
+            plan_reason_act_prompt=plan_reason_act_prompt, 
+            plan_reflect_prompt=plan_reflect_prompt,
+        )
+        super().__init__(
+            system_prompt=exec_system_prompt, 
+            reason_act_prompt=exec_reason_act_prompt, 
+            reflect_prompt=exec_reflect_prompt,
+            sub_groups={
+                "orchestrate": orch_prompt_group,
+            },
+        )

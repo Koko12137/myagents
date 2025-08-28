@@ -2,7 +2,7 @@ from enum import Enum
 
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import Agent, Workflow, Workspace, CallStack
+from myagents.core.interface import Agent, Workflow, Workspace, CallStack, PromptGroup
 from myagents.core.tools_mixin import ToolsMixin
 
 
@@ -17,12 +17,10 @@ class BaseWorkflow(Workflow, ToolsMixin):
         call_stack (CallStack):
             The call stack of the workflow.
         
-        profile (str):
-            The profile of the workflow.
         agent (Agent):
             The agent that is used to work with the workflow.
-        prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+        prompt_group (PromptGroup):
+            The prompt group of the workflow.
         observe_formats (dict[str, str]):
             The format of the observation. The key is the observation name and the value is the format content. 
         sub_workflows (dict[str, Workflow]):
@@ -38,10 +36,11 @@ class BaseWorkflow(Workflow, ToolsMixin):
     workspace: Workspace
     # Call stack information
     call_stack: CallStack
-    # Basic information
-    profile: str
+    # Agent
     agent: Agent
-    prompts: dict[str, str]
+    # Prompt group
+    prompt_group: PromptGroup
+    # Observe formats
     observe_formats: dict[str, str]
     # Sub-workflows
     sub_workflows: dict[str, Workflow]
@@ -52,10 +51,9 @@ class BaseWorkflow(Workflow, ToolsMixin):
         self, 
         call_stack: CallStack,
         workspace: Workspace,
-        profile: str, 
-        prompts: dict[str, str] = {}, 
-        observe_formats: dict[str, str] = {}, 
-        sub_workflows: dict[str, Workflow] = {}, 
+        prompt_group: PromptGroup, 
+        observe_formats: dict[str, str] = None, 
+        sub_workflows: dict[str, Workflow] = None, 
         **kwargs,
     ) -> None:
         """Initialize the BaseWorkflow.
@@ -65,10 +63,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
                 The call stack of the workflow.
             workspace (Workspace):
                 The workspace of the workflow.
-            profile (str):
-                The profile of the workflow.
-            prompts (dict[str, str], optional):
-                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+            prompt_group (PromptGroup, optional):
+                The prompt group of the workflow.
             observe_formats (dict[str, str], optional):
                 The formats of the observation. The key is the observation name and the value is the format method name. 
             sub_workflows (dict[str, Workflow], optional):
@@ -81,10 +77,9 @@ class BaseWorkflow(Workflow, ToolsMixin):
         super().__init__(call_stack=call_stack, **kwargs)
         
         # Initialize the workflow components
-        self.profile = profile
-        self.prompts = prompts
-        self.observe_formats = observe_formats
-        self.sub_workflows = sub_workflows
+        self.prompt_group = prompt_group
+        self.observe_formats = observe_formats if observe_formats is not None else {}
+        self.sub_workflows = sub_workflows if sub_workflows is not None else {}
 
         # Initialize the agent
         self.agent = None

@@ -6,7 +6,7 @@ from myagents.core.interface import Agent, Workspace, TreeTaskNode, ReActFlow, C
 from myagents.core.workflows.react import TreeTaskReActFlow, MemoryTreeTaskReActFlow
 from myagents.core.workflows.orchestrate import OrchestrateFlow, MemoryOrchestrateFlow
 from myagents.core.tasks import DocumentTaskView, ToDoTaskView
-from myagents.prompts.workflows.plan_and_exec import PROFILE
+from myagents.prompts.workflows.plan_and_exec import PlanAndExecPromptGroup
 
 
 class PlanAndExecFlow(TreeTaskReActFlow):
@@ -20,12 +20,10 @@ class PlanAndExecFlow(TreeTaskReActFlow):
         tools (dict[str, FastMcpTool]):
             The tools can be used for the agent. 
         
-        profile (str):
-            The profile of the workflow.
         agent (Agent): 
             The agent that is used to orchestrate the task.
-        prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+        prompt_group (PlanAndExecPromptGroup):
+            The prompt group of the workflow.
         observe_format (str):
             The format of the observation.
         sub_workflows (dict[str, ReActFlow]):
@@ -39,9 +37,8 @@ class PlanAndExecFlow(TreeTaskReActFlow):
     # Call stack
     call_stack: CallStack
     # Basic information
-    profile: str
     agent: Agent
-    prompts: dict[str, str]
+    prompt_group: PlanAndExecPromptGroup
     observe_format: str
     # Sub-workflows
     sub_workflows: dict[str, ReActFlow]
@@ -50,7 +47,7 @@ class PlanAndExecFlow(TreeTaskReActFlow):
         self, 
         call_stack: CallStack,
         workspace: Workspace,
-        prompts: dict[str, str], 
+        prompt_group: PlanAndExecPromptGroup, 
         observe_formats: dict[str, str], 
         sub_workflows: dict[str, ReActFlow], 
         **kwargs,
@@ -62,19 +59,8 @@ class PlanAndExecFlow(TreeTaskReActFlow):
                 The call stack of the workflow.
             workspace (Workspace):
                 The workspace of the workflow.
-            prompts (dict[str, str]:
-                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
-                The following prompts are required:
-                    "orch_plan_system_prompt": The system prompt for the plan workflow of the orchestrate workflow.
-                    "orch_plan_reason_act_prompt": The reason act prompt for the plan workflow of the orchestrate workflow.
-                    "orch_plan_reflect_prompt": The reflect prompt for the plan workflow of the orchestrate workflow.
-                    "orch_exec_system_prompt": The system prompt for the execute workflow of the orchestrate workflow.
-                    "orch_exec_reason_act_prompt": The reason act prompt for the execute workflow of the orchestrate workflow.
-                    "orch_exec_reflect_prompt": The reflect prompt for the execute workflow of the orchestrate workflow.
-                    "exec_system_prompt": The system prompt for the execute workflow.
-                    "exec_reason_act_prompt": The reason act prompt for the execute workflow.
-                    "exec_reflect_prompt": The reflect prompt for the execute workflow.
-                    "error_prompt": The error prompt for the workflow.
+            prompt_group (PlanAndExecPromptGroup):
+                The prompt group of the workflow.
             observe_formats (dict[str, str]):
                 The formats of the observation. The key is the observation name and the value is the format method name. 
                 The following observe formats are required:
@@ -87,20 +73,17 @@ class PlanAndExecFlow(TreeTaskReActFlow):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # Check if the prompt group is a PlanAndExecPromptGroup
+        if not isinstance(prompt_group, PlanAndExecPromptGroup):
+            raise ValueError("The prompt group must be a PlanAndExecPromptGroup")
+        
         # Create the sub-workflows
-        if "plan" not in sub_workflows:
+        if "orchestrate" not in sub_workflows:
             sub_workflows.update({
-                "plan": OrchestrateFlow(
+                "orchestrate": OrchestrateFlow(
                     call_stack=call_stack,
                     workspace=workspace,
-                    prompts={
-                        "plan_system_prompt": prompts["orch_plan_system_prompt"], 
-                        "plan_reason_act_prompt": prompts["orch_plan_reason_act_prompt"], 
-                        "plan_reflect_prompt": prompts["orch_plan_reflect_prompt"], 
-                        "exec_system_prompt": prompts["orch_exec_system_prompt"], 
-                        "exec_reason_act_prompt": prompts["orch_exec_reason_act_prompt"], 
-                        "exec_reflect_prompt": prompts["orch_exec_reflect_prompt"], 
-                    }, 
+                    prompt_group=prompt_group.get_prompt("orchestrate"), 
                     observe_formats={
                         "plan_reason_act_format": observe_formats['orch_plan_reason_act_format'], 
                         "plan_reflect_format": observe_formats['orch_plan_reflect_format'], 
@@ -111,12 +94,6 @@ class PlanAndExecFlow(TreeTaskReActFlow):
             })
         
         # Prepare the prompts and observe formats for the exec workflow
-        prompts = {
-            "system_prompt": prompts["exec_system_prompt"], 
-            "reason_act_prompt": prompts["exec_reason_act_prompt"], 
-            "reflect_prompt": prompts["exec_reflect_prompt"], 
-            "error_prompt": prompts["error_prompt"], 
-        }
         observe_formats = {
             "reason_act_format": observe_formats["exec_reason_act_format"], 
             "reflect_format": observe_formats["exec_reflect_format"], 
@@ -125,8 +102,7 @@ class PlanAndExecFlow(TreeTaskReActFlow):
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            profile=PROFILE, 
-            prompts=prompts, 
+            prompt_group=prompt_group, 
             observe_formats=observe_formats, 
             sub_workflows=sub_workflows, 
             **kwargs,
@@ -197,7 +173,7 @@ class PlanAndExecFlow(TreeTaskReActFlow):
                 If the target is not created.
         """
         # Get the error prompt from the agent
-        error_prompt = self.prompts["error_prompt"]
+        error_prompt = self.prompt_group.get_prompt("error_prompt").string()
         # Record the current error retry count
         current_error_retry = 0
         
@@ -436,7 +412,7 @@ class MemoryPlanAndExecFlow(MemoryTreeTaskReActFlow):
     
     def __init__(
         self, 
-        prompts: dict[str, str], 
+        prompt_group: PlanAndExecPromptGroup, 
         observe_formats: dict[str, str], 
         sub_workflows: dict[str, ReActFlow] = {}, 
         **kwargs,
@@ -444,19 +420,8 @@ class MemoryPlanAndExecFlow(MemoryTreeTaskReActFlow):
         """Initialize the OrchestrateFlow.
 
         Args:
-            prompts (dict[str, str]:
-                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
-                The following prompts are required:
-                    "orch_plan_system_prompt": The system prompt for the plan workflow of the orchestrate workflow.
-                    "orch_plan_reason_act_prompt": The reason act prompt for the plan workflow of the orchestrate workflow.
-                    "orch_plan_reflect_prompt": The reflect prompt for the plan workflow of the orchestrate workflow.
-                    "orch_exec_system_prompt": The system prompt for the execute workflow of the orchestrate workflow.
-                    "orch_exec_reason_act_prompt": The reason act prompt for the execute workflow of the orchestrate workflow.
-                    "orch_exec_reflect_prompt": The reflect prompt for the execute workflow of the orchestrate workflow.
-                    "exec_system_prompt": The system prompt for the execute workflow.
-                    "exec_reason_act_prompt": The reason act prompt for the execute workflow.
-                    "exec_reflect_prompt": The reflect prompt for the execute workflow.
-                    "error_prompt": The error prompt for the workflow.
+            prompt_group (PlanAndExecPromptGroup):
+                The prompt group of the workflow.
             observe_formats (dict[str, str]):
                 The formats of the observation. The key is the observation name and the value is the format method name. 
                 The following observe formats are required:
@@ -469,18 +434,15 @@ class MemoryPlanAndExecFlow(MemoryTreeTaskReActFlow):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
+        # Check if the prompt group is a PlanAndExecPromptGroup
+        if not isinstance(prompt_group, PlanAndExecPromptGroup):
+            raise ValueError("The prompt group must be a PlanAndExecPromptGroup")
+        
         # Create the sub-workflows
-        if "plan" not in sub_workflows:
+        if "orchestrate" not in sub_workflows:
             sub_workflows.update({
-                "plan": MemoryOrchestrateFlow(
-                    prompts={
-                        "plan_system_prompt": prompts["orch_plan_system_prompt"], 
-                        "plan_reason_act_prompt": prompts["orch_plan_reason_act_prompt"], 
-                        "plan_reflect_prompt": prompts["orch_plan_reflect_prompt"], 
-                        "exec_system_prompt": prompts["orch_exec_system_prompt"], 
-                        "exec_reason_act_prompt": prompts["orch_exec_reason_act_prompt"], 
-                        "exec_reflect_prompt": prompts["orch_exec_reflect_prompt"], 
-                    }, 
+                "orchestrate": MemoryOrchestrateFlow(
+                    prompt_group=prompt_group.get_prompt("orchestrate"), 
                     observe_formats={
                         "plan_reason_act_format": observe_formats['orch_plan_reason_act_format'], 
                         "plan_reflect_format": observe_formats['orch_plan_reflect_format'], 
@@ -491,8 +453,7 @@ class MemoryPlanAndExecFlow(MemoryTreeTaskReActFlow):
             })
         
         super().__init__(
-            profile=PROFILE, 
-            prompts=prompts, 
+            prompt_group=prompt_group, 
             observe_formats=observe_formats, 
             sub_workflows=sub_workflows, 
             **kwargs,

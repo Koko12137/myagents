@@ -10,7 +10,7 @@ from myagents.core.interface import TreeTaskNode, CompletionConfig, Workflow, Me
 from myagents.core.workflows.react import BaseReActFlow
 from myagents.core.tasks import ToDoTaskView, BaseTreeTaskNode, DocumentTaskView
 from myagents.core.utils.strings import normalize_string
-from myagents.prompts.workflows.plan import PROFILE
+from myagents.prompts.workflows.plan import PlanPromptGroup
 
 
 PLAN_LAYER_LIMIT = """
@@ -53,12 +53,10 @@ class PlanWorkflow(BaseReActFlow):
         tools (dict[str, FastMcpTool]):
             The tools can be used for the agent. 
         
-        profile (str):
-            The profile of the workflow.
         agent (Agent):
             The agent that is used to work with the workflow.
-        prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+        prompt_group (PromptGroup):
+            The prompt group of the workflow.
         observe_formats (dict[str, str]):
             The format of the observation. The key is the observation name and the value is the format content. 
     """
@@ -67,10 +65,9 @@ class PlanWorkflow(BaseReActFlow):
         self, 
         call_stack: CallStack,
         workspace: Workspace,
-        profile: str = PROFILE, 
-        prompts: dict[str, str] = {}, 
-        observe_formats: dict[str, str] = {}, 
-        sub_workflows: dict[str, Workflow] = {}, 
+        prompt_group: PlanPromptGroup = None, 
+        observe_formats: dict[str, str] = None, 
+        sub_workflows: dict[str, Workflow] = None, 
         **kwargs,
     ) -> None:
         """Initialize the PlanWorkflow.
@@ -80,14 +77,8 @@ class PlanWorkflow(BaseReActFlow):
                 The call stack of the workflow.
             workspace (Workspace):
                 The workspace of the workflow.
-            profile (str, optional):
-                The profile of the workflow.
-            prompts (dict[str, str], optional):
-                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
-                The following prompts are required:
-                    "system_prompt": The system prompt for the plan workflow.
-                    "reason_act_prompt": The reason act prompt for the plan workflow.
-                    "reflect_prompt": The reflect prompt for the plan workflow.
+            prompt_group (PlanPromptGroup, optional):
+                The prompt group of the workflow.
             observe_formats (dict[str, str], optional):
                 The formats of the observation. The key is the observation name and the value is the format method name. 
                 The following observe formats are required:
@@ -100,12 +91,8 @@ class PlanWorkflow(BaseReActFlow):
                 The additional keyword arguments to be passed to the parent class.
         """
         # Check the prompts
-        if "system_prompt" not in prompts:
-            raise ValueError("The system prompt is required.")
-        if "reason_act_prompt" not in prompts:
-            raise ValueError("The reason act prompt is required.")
-        if "reflect_prompt" not in prompts:
-            raise ValueError("The reflect prompt is required.")
+        if not isinstance(prompt_group, PlanPromptGroup):
+            raise ValueError("The prompt group must be a PlanPromptGroup")
         # Check the observe formats
         if "reason_act_format" not in observe_formats:
             raise ValueError("The reason act format is required.")
@@ -115,8 +102,7 @@ class PlanWorkflow(BaseReActFlow):
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            profile=profile, 
-            prompts=prompts, 
+            prompt_group=prompt_group, 
             observe_formats=observe_formats, 
             sub_workflows=sub_workflows, 
             **kwargs, 
@@ -279,7 +265,7 @@ class PlanWorkflow(BaseReActFlow):
         error_flag = False
         
         # === Thinking ===
-        reason_act_prompt = self.prompts["reason_act_prompt"]
+        reason_act_prompt = self.prompt_group.get_prompt("reason_act_prompt").string()
         # Append layer limit to the reason act prompt
         reason_act_prompt = f"{reason_act_prompt}\n\n{PLAN_LAYER_LIMIT.format(detail_level=sub_task_depth)}"
         # Prompt the agent
@@ -404,9 +390,7 @@ class PlanWorkflow(BaseReActFlow):
         # Check if the target has history
         if len(target.get_history()) == 0:
             # Get the system prompt from the workflow
-            if "system_prompt" not in self.prompts:
-                raise KeyError("system_prompt not found in workflow prompts")
-            system_prompt = self.prompts["system_prompt"]
+            system_prompt = self.prompt_group.get_prompt("system_prompt").string()
             # Update the system prompt to the history
             await self.agent.prompt(SystemMessage(content=system_prompt), target)
             # Create a UserMessage for the blueprint
@@ -623,9 +607,7 @@ class MemoryPlanWorkflow(PlanWorkflow):
         
             # === Prepare System Instruction ===
             # Get the system prompt from the workflow
-            if "system_prompt" not in self.prompts:
-                raise KeyError("system_prompt not found in workflow prompts")
-            system_prompt = self.prompts["system_prompt"]
+            system_prompt = self.prompt_group.get_prompt("system_prompt").string()
             # Update the system prompt to the history
             await self.agent.prompt(SystemMessage(content=system_prompt), target)
             # Create a UserMessage for the blueprint

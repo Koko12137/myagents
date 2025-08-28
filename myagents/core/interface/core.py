@@ -103,8 +103,6 @@ class Agent(Protocol):
             Agent的名称
         agent_type (Enum):
             Agent的类型
-        profile (str):
-            Agent的描述文件。描述Agent的行为和目标
         llms (dict[str, LLM]):
             Agent使用的语言模型
         mcp_client (MCPClient):
@@ -128,7 +126,6 @@ class Agent(Protocol):
     uid: str
     name: str
     agent_type: Enum
-    profile: str
     # 语言模型和MCP客户端
     llms: dict[str, LLM]
     mcp_client: MCPClient

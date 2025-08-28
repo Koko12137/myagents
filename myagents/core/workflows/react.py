@@ -9,7 +9,7 @@ from myagents.core.interface import Agent, Workflow, Stateful, Workspace, TreeTa
 from myagents.core.workflows.base import BaseWorkflow
 from myagents.core.tasks import DocumentTaskView
 from myagents.core.utils.extractor import extract_by_label
-from myagents.prompts.workflows.react import PROFILE
+from myagents.prompts.workflows.react import ReactPromptGroup
 
 
 class BaseReActFlow(BaseWorkflow):
@@ -21,12 +21,10 @@ class BaseReActFlow(BaseWorkflow):
         tools (dict[str, FastMcpTool]):
             The tools of the workflow.
         
-        profile (str):
-            The profile of the workflow.
         agent (Agent):
             The agent that is used to run the workflow. 
-        prompts (dict[str, str]):
-            The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+        prompt_group (ReactPromptGroup):
+            The prompt group of the workflow.
         observe_formats (dict[str, str]):
             The format of the observation. The key is the observation name and the value is the format content. 
         sub_workflows (dict[str, Workflow]):
@@ -38,9 +36,8 @@ class BaseReActFlow(BaseWorkflow):
     # Call stack
     call_stack: CallStack
     # Basic information
-    profile: str
     agent: Agent
-    prompts: dict[str, str]
+    prompt_group: ReactPromptGroup
     observe_formats: dict[str, str]
     # Sub-workflows
     sub_workflows: dict[str, Workflow]
@@ -51,10 +48,9 @@ class BaseReActFlow(BaseWorkflow):
         self, 
         call_stack: CallStack,
         workspace: Workspace,
-        profile: str = PROFILE, 
-        prompts: dict[str, str] = {}, 
-        observe_formats: dict[str, str] = {}, 
-        sub_workflows: dict[str, Workflow] = {}, 
+        prompt_group: ReactPromptGroup = None, 
+        observe_formats: dict[str, str] = None, 
+        sub_workflows: dict[str, Workflow] = None, 
         **kwargs,
     ) -> None:
         """Initialize the BaseReActFlow.
@@ -64,25 +60,19 @@ class BaseReActFlow(BaseWorkflow):
                 The call stack of the workflow.
             workspace (Workspace):
                 The workspace of the workflow.
-            profile (str):
-                The profile of the workflow.
-            prompts (dict[str, str]):
-                The prompts of the workflow. The key is the prompt name and the value is the prompt content. 
+            prompt_group (ReactPromptGroup, optional):
+                The prompt group of the workflow.
             observe_formats (dict[str, str]):
                 The formats of the observation. The key is the observation name and the value is the format method name. 
-            sub_workflows (dict[str, Workflow]):
+            sub_workflows (dict[str, Workflow], optional):
                 The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the 
                 sub-workflow instance. 
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
         # Check the prompts
-        if "system_prompt" not in prompts:
-            raise ValueError("The system prompt is required.")
-        if "reason_act_prompt" not in prompts:
-            raise ValueError("The reason act prompt is required.")
-        if "reflect_prompt" not in prompts:
-            raise ValueError("The reflect prompt is required.")
+        if not isinstance(prompt_group, ReactPromptGroup):
+            raise ValueError("The prompt group must be a ReactPromptGroup")
         
         # Check the observe formats
         if "reason_act_format" not in observe_formats:
@@ -94,8 +84,7 @@ class BaseReActFlow(BaseWorkflow):
         super().__init__(
             call_stack=call_stack,
             workspace=workspace,
-            profile=profile, 
-            prompts=prompts, 
+            prompt_group=prompt_group, 
             observe_formats=observe_formats, 
             sub_workflows=sub_workflows, 
             **kwargs,
@@ -225,7 +214,7 @@ class BaseReActFlow(BaseWorkflow):
             raise RuntimeError(f"ReAct workflow requires the target status to be running, but the target status is {target.get_status().value}.")
         
         # Get the system prompt from the workflow
-        system_prompt = self.prompts["system_prompt"]
+        system_prompt = self.prompt_group.get_prompt("system_prompt").string()
         # Update the system prompt to the history
         message = SystemMessage(content=system_prompt)
         await self.agent.prompt(message, target)
@@ -338,7 +327,7 @@ class BaseReActFlow(BaseWorkflow):
         
         # === Thinking ===
         # Prompt the agent
-        await self.agent.prompt(UserMessage(content=self.prompts["reason_act_prompt"]), target)
+        await self.agent.prompt(UserMessage(content=self.prompt_group.get_prompt("reason_act_prompt").string()), target)
         # Observe the target
         observe = await self.agent.observe(target, observe_format=self.observe_formats["reason_act_format"])
         # Log the observe
@@ -410,7 +399,7 @@ class BaseReActFlow(BaseWorkflow):
         
         # === Thinking ===
         # Prompt the agent
-        await self.agent.prompt(UserMessage(content=self.prompts["reflect_prompt"]), target)
+        await self.agent.prompt(UserMessage(content=self.prompt_group.get_prompt("reflect_prompt").string()), target)
         # Observe the target after acting
         observe = await self.agent.observe(target, observe_format=self.observe_formats["reflect_format"])
         # Log the observe
@@ -537,9 +526,7 @@ class MemoryReActFlow(BaseReActFlow):
             
             # === Prepare System Instruction ===
             # Get the system prompt from the workflow
-            if "system_prompt" not in self.prompts:
-                raise KeyError("system_prompt not found in workflow prompts")
-            system_prompt = self.prompts["system_prompt"]
+            system_prompt = self.prompt_group.get_prompt("system_prompt").string()
             # Append the system prompt to the history
             message = SystemMessage(content=system_prompt)
             # Update the system message to the history
@@ -655,9 +642,7 @@ class TreeTaskReActFlow(BaseReActFlow):
         if len(target.get_history()) == 0:
             # === Prepare System Instruction ===
             # Get the prompts from the agent
-            if "system_prompt" not in self.prompts:
-                raise KeyError("system_prompt not found in workflow prompts")
-            exec_system = self.prompts["system_prompt"]
+            exec_system = self.prompt_group.get_prompt("system_prompt").string()
             # Append the system prompt to the history
             message = SystemMessage(content=exec_system)
             # Update the system message to the history
@@ -838,9 +823,7 @@ class MemoryTreeTaskReActFlow(TreeTaskReActFlow):
             
             # === Prepare System Instruction ===
             # Get the prompts from the agent
-            if "system_prompt" not in self.prompts:
-                raise KeyError("system_prompt not found in workflow prompts")
-            system_prompt = self.prompts["system_prompt"]
+            system_prompt = self.prompt_group.get_prompt("system_prompt").string()
             # Append the system prompt to the history
             message = SystemMessage(content=system_prompt)
             # Update the system message to the history

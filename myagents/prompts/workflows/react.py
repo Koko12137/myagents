@@ -1,79 +1,91 @@
-PROFILE = """
-“观察-思考-行动-反思”工作流，用于解决需要多轮交互的复杂任务。
-
-**观察**：
-- 观察环境或任务的当前状态。
-- 观察历史交互记录。
-
-**思考**：
-- 根据观察到的信息，思考下一步行动。
-
-**行动**：
-- 根据思考的结果，采取行动。
-
-**反思**：
-- 根据行动的结果，反思行动的合理性。
-- 决定是否结束工作流。
-"""
+from myagents.core.interface.prompt import Prompt, PromptGroup
 
 
-SYSTEM_PROMPT = """
-# Workflow 任务描述
-你当前处于 “观察-思考-行动-反思” 工作流中，你需要仔细观察，认真思考，准确行动，并对结果进行反思。
-- 若发现先前上下文存在未修复的错误或失败，需分析原因并重试任务
-- 当任务不值得重试时，调用工具取消任务(如果有提供取消任务的工具)
-- 如果你认为信息充足，你可以直接回答问题，否则你需要调用工具获取更多信息
+class ReactSystemPrompt(Prompt):
+    """ReactSystemPrompt is a prompt for react workflow."""
+    def __init__(self, file_path: str) -> None:
+        with open(file_path, "r", encoding="utf-8") as f:
+            self.prompt = f.read()
 
-## 工作流描述
-以下是你的工作流描述:
-{profile}
+    def __str__(self) -> str:
+        return self.prompt
 
-========
-请你根据用户的指令开始执行任务。
-"""
+    def get_name(self) -> str:
+        return "system_prompt"
 
-THINK_PROMPT = """
-# REACT —— 思考行动阶段
+    def string(self) -> str:
+        return self.prompt
 
-## 语言要求
-- 你只能使用中文作答。
 
-## 格式要求
-请你按照下面的格式进行思考：
-<action>
-你的行动步骤写在这里，但是调用工具具体信息需要写在指定的标签中，不需要写在这里。
-</action>
+class ReactReasonActPrompt(Prompt):
 
-## 工具
-在你可以使用工具时，你会看到工具的描述，以及工具的参数。
-【注意】：如果你在可以使用工具而不使用时，会被认为是 `Idle Thinking`。
-"""
+    """ReactReasonActPrompt is a prompt for react workflow."""
+    def __init__(self, file_path: str) -> None:
+        with open(file_path, "r", encoding="utf-8") as f:
+            self.prompt = f.read()
 
-REFLECT_PROMPT = """
-# REACT —— 反思阶段
+    def __str__(self) -> str:
+        return self.prompt
 
-## 语言要求
-- 你只能使用中文作答。
+    def get_name(self) -> str:
+        return "reason_act_prompt"
 
-## 格式要求
-请你按照下面的格式进行反思：
-<think>
-你的思考内容写在这里
-【警告】：你的思考会消耗你的token，请谨慎思考，不必要思考不相关的内容，否则就是给别人做嫁衣。
-</think>
-<reflect>
-你的反思内容写在这里，比如你认为当前的思考结果是否合理，是否存在错误
-【注意】：你只能思考对或者错，及其理由，不能思考其他内容。
-【警告】：如果你发现行动的内容或者结果存在错误，务必继续工作流，直到你认为没有错误为止。
-</reflect>
-<finish>
-你是否需要结束工作流？
-- True：结束工作流，并返回最终结果。
-- False：继续工作流。
-【注意】：你只能填入 True 或 False，不能填入其他内容。
-</finish>
+    def string(self) -> str:
+        return self.prompt
 
-## 工具
-在你可以使用工具时，你会看到工具的描述，以及工具的参数。
-【注意】：如果你在可以使用工具而不使用时，会被认为是 `Idle Thinking`。
-"""
+
+class ReactReflectPrompt(Prompt):
+    """ReactReflectPrompt is a prompt for react workflow."""
+    def __init__(self, file_path: str) -> None:
+        with open(file_path, "r", encoding="utf-8") as f:
+            self.prompt = f.read()
+
+    def __str__(self) -> str:
+        return self.prompt
+
+    def get_name(self) -> str:
+        return "reflect_prompt"
+
+    def string(self) -> str:
+        return self.prompt
+
+
+class ReactPromptGroup(PromptGroup):
+    """ReactPromptGroup is a prompt group for react workflow."""
+    sub_groups: dict[str, PromptGroup]
+    
+    def __init__(
+        self, 
+        system_prompt: str = "prompts/execute/system.md", 
+        reason_act_prompt: str = "prompts/execute/reason_act.md", 
+        reflect_prompt: str = "prompts/execute/reflect.md",
+        sub_groups: dict[str, PromptGroup] = None,
+    ) -> None:
+        """Initialize the ReactPromptGroup.
+        
+        Args:
+            system_prompt (str): The path to the system prompt file.
+            reason_act_prompt (str): The path to the reason and act prompt file.
+            reflect_prompt (str): The path to the reflect prompt file.
+            sub_groups (dict[str, PromptGroup]): The sub-groups of the react workflow.
+        """
+        # Initialize the prompts
+        self.prompts = {
+            "system_prompt": ReactSystemPrompt(system_prompt),
+            "reason_act_prompt": ReactReasonActPrompt(reason_act_prompt),
+            "reflect_prompt": ReactReflectPrompt(reflect_prompt),
+        }
+        # Initialize the sub-groups
+        self.sub_groups = sub_groups if sub_groups is not None else {}
+
+    def get_prompt(self, name: str) -> Prompt:
+        return self.prompts[name]
+    
+    def get_sub_group(self, group_name: str) -> PromptGroup:
+        return self.sub_groups[group_name]
+    
+    def has_prompts(self, names: list[str]) -> bool:
+        return all(name in self.prompts for name in names)
+    
+    def has_sub_groups(self, group_names: list[str]) -> bool:
+        return all(group_name in self.sub_groups for group_name in group_names)

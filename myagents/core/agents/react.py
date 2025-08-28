@@ -4,16 +4,12 @@ from typing import Optional
 from fastmcp.client import Client as MCPClient
 from fastmcp.tools import Tool as FastMcpTool
 
-from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM, CallStack, Workspace
+from myagents.core.interface import LLM, Workflow, Environment, StepCounter, VectorMemoryCollection, EmbeddingLLM, CallStack, Workspace, PromptGroup
 from myagents.core.agents.base import BaseAgent
 from myagents.core.agents.memory import BaseMemoryAgent
 from myagents.core.agents.types import AgentType
 from myagents.core.workflows import BaseReActFlow, TreeTaskReActFlow, MemoryReActFlow, MemoryTreeTaskReActFlow
-from myagents.prompts.workflows.react import PROFILE, SYSTEM_PROMPT, THINK_PROMPT, REFLECT_PROMPT
-from myagents.prompts.workflows.plan_and_exec import (
-    EXEC_SYSTEM_PROMPT, 
-    EXEC_THINK_PROMPT, 
-)
+from myagents.prompts.workflows.react import ReactPromptGroup
 from myagents.prompts.memories.compress import (
     SYSTEM_PROMPT as MEMORY_COMPRESS_SYSTEM_PROMPT, 
     REASON_ACT_PROMPT as MEMORY_COMPRESS_REASON_ACT_PROMPT, 
@@ -26,13 +22,6 @@ from myagents.prompts.memories.episode import (
 from myagents.prompts.memories.template import MEMORY_PROMPT_TEMPLATE, SYSTEM_MEMORY_TEMPLATE
 
 
-AGENT_PROFILE = """
-我叫 {name} ，是一个会按照“观察-思考-行动-反思”的流程来执行任务的助手。
-
-以下是我的工作流信息：
-{workflow}
-"""
-
 
 class ReActAgent(BaseAgent):
     """ReActAgent is the agent that is used to react to the environment.
@@ -44,8 +33,6 @@ class ReActAgent(BaseAgent):
             The name of the agent.
         agent_type (AgentType):
             The type of the agent.
-        profile (str):
-            The profile of the agent.
         llm (LLM):
             The LLM to use for the agent. 
         mcp_client (MCPClient):
@@ -59,8 +46,8 @@ class ReActAgent(BaseAgent):
         lock (Lock):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
             If the agent is running concurrently, the global context may not be working properly.
-        prompts (dict[str, str]):
-            The prompts for running the workflow. 
+        prompt_group (PromptGroup):
+            The prompt group of the workflow.
         observe_formats (dict[str, str]):
             The format of the observation the target. 
     """
@@ -68,7 +55,6 @@ class ReActAgent(BaseAgent):
     uid: int
     name: str
     agent_type: AgentType
-    profile: str
     # LLM and MCP client
     llms: dict[str, LLM]
     mcp_client: MCPClient
@@ -82,7 +68,7 @@ class ReActAgent(BaseAgent):
     # Concurrency limit
     lock: Lock
     # Prompts and observe format
-    prompts: dict[str, str]
+    prompt_group: PromptGroup
     observe_formats: dict[str, str]
     
     def __init__(
@@ -93,9 +79,7 @@ class ReActAgent(BaseAgent):
         llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
-        system_prompt: str = SYSTEM_PROMPT, 
-        reason_act_prompt: str = THINK_PROMPT, 
-        reflect_prompt: str = REFLECT_PROMPT, 
+        prompt_group: ReactPromptGroup = None, 
         reason_act_format: str = "document", 
         reflect_format: str = "todo", 
         agent_format: str = "todo", 
@@ -113,12 +97,8 @@ class ReActAgent(BaseAgent):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
-            system_prompt (str):
-                The system prompt of the workflow.
-            reason_act_prompt (str):
-                The think prompt of the workflow.
-            reflect_prompt (str):
-                The reflect prompt of the workflow.
+            prompt_group (ReactPromptGroup):
+                The prompt group of the workflow.
             reason_act_format (str):
                 The observation format of the think stage.
             reflect_format (str):
@@ -130,11 +110,11 @@ class ReActAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
-        if "reason_act" not in llms:
-            raise ValueError("The reason act LLM is required.")
-        if "reflect" not in llms:
-            raise ValueError("The reflect LLM is required.")
+        # Check if the prompt group is a ReactPromptGroup
+        if prompt_group is None:
+            prompt_group = ReactPromptGroup()
+        elif not isinstance(prompt_group, ReactPromptGroup):
+            raise TypeError("prompt_group must be a ReactPromptGroup")
         
         # Initialize the parent class
         super().__init__(
@@ -142,15 +122,10 @@ class ReActAgent(BaseAgent):
             workspace=workspace,
             name=name, 
             agent_type=AgentType.REACT, 
-            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE),
             llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
-            prompts={
-                "system_prompt": system_prompt, 
-                "reason_act_prompt": reason_act_prompt, 
-                "reflect_prompt": reflect_prompt, 
-            }, 
+            prompt_group=prompt_group, 
             observe_formats={
                 "reason_act_format": reason_act_format, 
                 "reflect_format": reflect_format, 
@@ -163,7 +138,7 @@ class ReActAgent(BaseAgent):
         self.workflow = BaseReActFlow(
             call_stack=call_stack,
             workspace=workspace,
-            prompts=self.prompts, 
+            prompt_group=self.prompt_group, 
             observe_formats=self.observe_formats, 
             **kwargs,
         )
@@ -191,9 +166,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
         mcp_client: Optional[MCPClient] = None, 
-        system_prompt: str = SYSTEM_PROMPT, 
-        reason_act_prompt: str = THINK_PROMPT, 
-        reflect_prompt: str = REFLECT_PROMPT, 
+        prompt_group: ReactPromptGroup = None, 
         reason_act_format: str = "document", 
         reflect_format: str = "todo", 
         agent_format: str = "todo", 
@@ -225,12 +198,8 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
-            system_prompt (str):
-                The system prompt of the workflow.
-            reason_act_prompt (str):
-                The think prompt of the workflow.
-            reflect_prompt (str):
-                The reflect prompt of the workflow.
+            prompt_group (ReactPromptGroup):
+                The prompt group of the workflow.
             reason_act_format (str):
                 The observation format of the think stage.
             reflect_format (str):
@@ -240,11 +209,11 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
-        if "reason_act" not in llms:
-            raise ValueError("The reason act LLM is required.")
-        if "reflect" not in llms:
-            raise ValueError("The reflect LLM is required.")
+        # Check if the prompt group is a ReactPromptGroup
+        if prompt_group is None:
+            prompt_group = ReactPromptGroup()
+        elif not isinstance(prompt_group, ReactPromptGroup):
+            raise TypeError("prompt_group must be a ReactPromptGroup")
         
         # Initialize the parent class
         super().__init__(
@@ -254,9 +223,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
             llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
-            system_prompt=system_prompt, 
-            reason_act_prompt=reason_act_prompt, 
-            reflect_prompt=reflect_prompt, 
+            prompt_group=prompt_group, 
             reason_act_format=reason_act_format, 
             reflect_format=reflect_format, 
             agent_format=agent_format, 
@@ -280,7 +247,7 @@ class MemoryReActAgent(ReActAgent, BaseMemoryAgent):
         self.workflow = MemoryReActFlow(
             call_stack=call_stack,
             workspace=workspace,
-            prompts=self.prompts, 
+            prompt_group=self.prompt_group, 
             observe_formats=self.observe_formats, 
             **kwargs,
         )
@@ -304,8 +271,6 @@ class TreeReActAgent(BaseAgent):
             The name of the agent.
         agent_type (AgentType):
             The type of the agent.
-        profile (str):
-            The profile of the agent.
         llm (LLM):
             The LLM to use for the agent. 
         mcp_client (MCPClient):
@@ -319,8 +284,8 @@ class TreeReActAgent(BaseAgent):
         lock (Lock):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
             If the agent is running concurrently, the global context may not be working properly.
-        prompts (dict[str, str]):
-            The prompts for running the workflow. 
+        prompt_group (PromptGroup):
+            The prompt group of the workflow.
         observe_formats (dict[str, str]):
             The format of the observation the target. 
     """
@@ -328,7 +293,6 @@ class TreeReActAgent(BaseAgent):
     uid: int
     name: str
     agent_type: AgentType
-    profile: str
     # LLM and MCP client
     llms: dict[str, LLM]
     mcp_client: MCPClient
@@ -342,7 +306,7 @@ class TreeReActAgent(BaseAgent):
     # Concurrency limit
     lock: Lock
     # Prompts and observe format
-    prompts: dict[str, str]
+    prompt_group: PromptGroup
     observe_formats: dict[str, str]
     
     def __init__(
@@ -353,9 +317,7 @@ class TreeReActAgent(BaseAgent):
         llms: dict[str, LLM], 
         step_counters: list[StepCounter], 
         mcp_client: Optional[MCPClient] = None, 
-        system_prompt: str = EXEC_SYSTEM_PROMPT, 
-        reason_act_prompt: str = EXEC_THINK_PROMPT, 
-        reflect_prompt: str = REFLECT_PROMPT, 
+        prompt_group: ReactPromptGroup = None, 
         reason_act_format: str = "document", 
         reflect_format: str = "todo", 
         agent_format: str = "todo", 
@@ -373,12 +335,8 @@ class TreeReActAgent(BaseAgent):
                 The step counters to use for the agent. Any of one reach the limit, the agent will be stopped. 
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
-            system_prompt (str):
-                The system prompt of the workflow.
-            reason_act_prompt (str):
-                The think prompt of the workflow.
-            reflect_prompt (str):
-                The reflect prompt of the workflow.
+            prompt_group (ReactPromptGroup):
+                The prompt group of the workflow.
             reason_act_format (str):
                 The observation format of the think stage.
             reflect_format (str):
@@ -390,11 +348,11 @@ class TreeReActAgent(BaseAgent):
             **kwargs:
                 The keyword arguments to be passed to the parent class.
         """
-        # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
-        if "reason_act" not in llms:
-            raise ValueError("The reason act LLM is required.")
-        if "reflect" not in llms:
-            raise ValueError("The reflect LLM is required.")
+        # Check if the prompt group is a ReactPromptGroup
+        if prompt_group is None:
+            prompt_group = ReactPromptGroup()
+        elif not isinstance(prompt_group, ReactPromptGroup):
+            raise TypeError("prompt_group must be a ReactPromptGroup")
         
         # Initialize the parent class
         super().__init__(
@@ -402,15 +360,10 @@ class TreeReActAgent(BaseAgent):
             workspace=workspace,
             name=name, 
             agent_type=AgentType.TREE_REACT, 
-            profile=AGENT_PROFILE.format(name=name, workflow=PROFILE),
             llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
-            prompts={
-                "system_prompt": system_prompt, 
-                "reason_act_prompt": reason_act_prompt, 
-                "reflect_prompt": reflect_prompt, 
-            }, 
+            prompt_group=prompt_group, 
             observe_formats={
                 "reason_act_format": reason_act_format, 
                 "reflect_format": reflect_format, 
@@ -423,7 +376,7 @@ class TreeReActAgent(BaseAgent):
         self.workflow = TreeTaskReActFlow(
             call_stack=call_stack,
             workspace=workspace,
-            prompts=self.prompts, 
+            prompt_group=self.prompt_group, 
             observe_formats=self.observe_formats, 
             **kwargs,
         )
@@ -447,8 +400,6 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             The name of the agent.
         agent_type (AgentType):
             The type of the agent.
-        profile (str):
-            The profile of the agent.
         llm (LLM):
             The LLM to use for the agent. 
         mcp_client (MCPClient):
@@ -462,8 +413,8 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         lock (Lock):
             The synchronization lock of the agent. The agent can only work on one task at a time. 
             If the agent is running concurrently, the global context may not be working properly.
-        prompts (dict[str, str]):
-            The prompts for running the workflow. 
+        prompt_group (PromptGroup):
+            The prompt group of the workflow.
         observe_formats (dict[str, str]):
             The format of the observation the target. 
     """
@@ -471,7 +422,6 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
     uid: int
     name: str
     agent_type: AgentType
-    profile: str
     # LLM and MCP client
     llms: dict[str, LLM]
     mcp_client: MCPClient
@@ -485,7 +435,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
     # Concurrency limit
     lock: Lock
     # Prompts and observe format
-    prompts: dict[str, str]
+    prompt_group: PromptGroup
     observe_formats: dict[str, str]
     
     def __init__(
@@ -498,9 +448,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         episode_memory: VectorMemoryCollection, 
         embedding_llm: EmbeddingLLM, 
         mcp_client: Optional[MCPClient] = None, 
-        system_prompt: str = EXEC_SYSTEM_PROMPT, 
-        reason_act_prompt: str = EXEC_THINK_PROMPT, 
-        reflect_prompt: str = REFLECT_PROMPT, 
+        prompt_group: ReactPromptGroup = None, 
         reason_act_format: str = "document", 
         reflect_format: str = "todo", 
         agent_format: str = "todo", 
@@ -536,12 +484,8 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
                 The embedding LLM to use for the agent.
             mcp_client (MCPClient, optional):
                 The MCP client to use for the agent.
-            system_prompt (str):
-                The system prompt of the workflow.
-            reason_act_prompt (str):
-                The think prompt of the workflow.
-            reflect_prompt (str):
-                The reflect prompt of the workflow.
+            prompt_group (ReactPromptGroup):
+                The prompt group of the workflow.
             reason_act_format (str):
                 The observation format of the think stage.
             reflect_format (str):
@@ -554,10 +498,10 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
                 The keyword arguments to be passed to the parent class.
         """
         # 检查 llms 是否包含 reason_act_llm 和 reflect_llm
-        if "reason_act" not in llms:
-            raise ValueError("The reason act LLM is required.")
-        if "reflect" not in llms:
-            raise ValueError("The reflect LLM is required.")
+        if prompt_group is None:
+            prompt_group = ReactPromptGroup()
+        elif not isinstance(prompt_group, ReactPromptGroup):
+            raise TypeError("prompt_group must be a ReactPromptGroup")
         
         # Initialize the parent class
         super().__init__(
@@ -567,9 +511,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
             llms=llms, 
             step_counters=step_counters, 
             mcp_client=mcp_client, 
-            system_prompt=system_prompt, 
-            reason_act_prompt=reason_act_prompt, 
-            reflect_prompt=reflect_prompt, 
+            prompt_group=prompt_group, 
             reason_act_format=reason_act_format, 
             reflect_format=reflect_format, 
             agent_format=agent_format, 
@@ -593,7 +535,7 @@ class MemoryTreeReActAgent(TreeReActAgent, BaseMemoryAgent):
         self.workflow = MemoryTreeTaskReActFlow(
             call_stack=call_stack,
             workspace=workspace,
-            prompts=self.prompts, 
+            prompt_group=self.prompt_group, 
             observe_formats=self.observe_formats, 
             **kwargs,
         )
