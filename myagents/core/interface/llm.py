@@ -1,11 +1,12 @@
-from abc import abstractmethod, ABC
+from abc import abstractmethod
 from enum import Enum
-from typing import Any, Union
+from typing import Any, Union, Protocol, runtime_checkable
 
 from myagents.schemas.messages import ToolCallResult, AssistantMessage, UserMessage, SystemMessage
 
 
-class Queue(ABC):
+@runtime_checkable
+class Queue(Protocol):
     """队列的协议
     
     属性:
@@ -46,7 +47,8 @@ class Provider(Enum):
     OPENAI = "openai"
     
 
-class CompletionConfig(ABC):
+@runtime_checkable
+class CompletionConfig(Protocol):
     """语言模型配置的协议
     
     属性:
@@ -79,7 +81,8 @@ class CompletionConfig(ABC):
         pass
 
 
-class LLM(ABC):
+@runtime_checkable
+class LLM(Protocol):
     """语言模型的协议
     
     属性:

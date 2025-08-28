@@ -1,6 +1,6 @@
-from abc import abstractmethod, ABC
+from abc import abstractmethod
 from enum import Enum
-from typing import Protocol, runtime_checkable, Union, Any, Callable, Awaitable
+from typing import Union, Any, Callable, Awaitable, Protocol, runtime_checkable
 
 from mcp import Tool as MCPTool
 from fastmcp.tools import Tool as FastMcpTool
@@ -8,7 +8,8 @@ from fastmcp.tools import Tool as FastMcpTool
 from myagents.schemas.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallRequest, ToolCallResult
  
 
-class CallStack(ABC):
+@runtime_checkable
+class CallStack(Protocol):
     """调用栈
     
     方法：
@@ -54,7 +55,8 @@ class CallStack(ABC):
         """
 
 
-class Workspace(ABC):
+@runtime_checkable
+class Workspace(Protocol):
     """
     全局工作空间，用于记录全局可访问的变量
     

@@ -36,6 +36,7 @@ class StateMixin(Stateful):
                 The keyword arguments to be passed to the parent class.
         """
         super().__init__(*args, **kwargs)
+        
         # Initialize the uid
         self.uid = uuid4().hex
         # Initialize the status class

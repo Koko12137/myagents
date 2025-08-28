@@ -209,10 +209,10 @@ class PlanWorkflow(BaseReActFlow):
             orchestration: dict[str, dict[str, str]] = json.loads(orchestrate_json)
             
             # Traverse all the sub-tasks
-            for name, sub_task in orchestration.items():
+            for idx, sub_task in enumerate(orchestration):
                 # Create the sub-tasks
                 prev = dfs_create_task(
-                    name=name, 
+                    name=f"任务{idx + 1}", 
                     parent=parent, 
                     prev=prev, 
                     orchestration=sub_task, 

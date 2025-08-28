@@ -202,6 +202,33 @@ class BaseTreeTaskNode(TreeTaskNode, StateMixin):
         """Check if the task status is cancelled.
         """
         return self.status == TaskStatus.CANCELED
+    
+
+class RequirementTaskView(TaskView):
+    """RequirementTaskView is the view of the task requirement. This view is used to format the task requirement to a string.
+    
+    Attributes:
+        task (TreeTaskNode):
+            The task to be viewed.
+    """
+    task: TreeTaskNode
+    template: str = """{name} \n\t - 目标描述: {objective}\n\t - 关键产出: {key_results}"""
+    
+    def __init__(self, task: TreeTaskNode) -> None:
+        self.task = task
+        
+    def format(self) -> str:
+        res = []
+        
+        # 遍历关键目标，并格式化
+        for key_result in self.task.key_results:
+            res.append(self.template.format(
+                name=self.task.name,
+                objective=self.task.objective,
+                key_results=key_result
+            ))
+        
+        return "\n".join(res)
 
 
 class AnswerTaskView(TaskView):

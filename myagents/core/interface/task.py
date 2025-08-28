@@ -1,9 +1,10 @@
 from abc import abstractmethod
 from enum import Enum
 from collections import OrderedDict
-from typing import runtime_checkable, Protocol
+from typing import Protocol, runtime_checkable
 
 from myagents.core.interface.base import Stateful
+from myagents.core.interface.core import StepCounter
 from myagents.core.interface.memory import VectorMemoryCollection, TableMemoryDB
 
 
@@ -57,6 +58,8 @@ class Task(Stateful):
             The next task of the current task. If the task does not have a next task, the next is None.
         prev (Task):
             The previous task of the current task. If the task does not have a previous task, the prev is None.
+        step_counters (dict[str, StepCounter]):
+            The step counters of the task. The key is the step name, and the value is the step counter.
     """
     uid: str
     name: str
@@ -66,6 +69,8 @@ class Task(Stateful):
     # Link information
     next: 'Task'
     prev: 'Task'
+    # Step Counters
+    step_counters: dict[str, StepCounter]
 
 
 class TreeTaskNode(Task):

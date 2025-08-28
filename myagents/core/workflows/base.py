@@ -1,4 +1,5 @@
-from fastmcp.settings import logger
+from enum import Enum
+
 from fastmcp.tools import Tool as FastMcpTool
 
 from myagents.core.interface import Agent, Workflow, Workspace, CallStack
@@ -27,6 +28,8 @@ class BaseWorkflow(Workflow, ToolsMixin):
         sub_workflows (dict[str, Workflow]):
             The sub-workflows of the workflow. The key is the name of the sub-workflow and the value is the 
             sub-workflow instance. 
+        run_stage (Enum):
+            The run stage of the workflow.
     """
     
     # Tools
@@ -40,8 +43,10 @@ class BaseWorkflow(Workflow, ToolsMixin):
     agent: Agent
     prompts: dict[str, str]
     observe_formats: dict[str, str]
-    # Sub-worflows
+    # Sub-workflows
     sub_workflows: dict[str, Workflow]
+    # Run stage
+    run_stage: Enum
     
     def __init__(
         self, 
@@ -74,13 +79,13 @@ class BaseWorkflow(Workflow, ToolsMixin):
         """
         # Initialize the parent class
         super().__init__(call_stack=call_stack, **kwargs)
-                
+        
         # Initialize the workflow components
         self.profile = profile
         self.prompts = prompts
         self.observe_formats = observe_formats
         self.sub_workflows = sub_workflows
-        
+
         # Initialize the agent
         self.agent = None
         # Initialize the workspace
@@ -88,7 +93,56 @@ class BaseWorkflow(Workflow, ToolsMixin):
 
         # Post initialize
         self.post_init()
-            
+        
+    def get_run_stage(self) -> Enum:
+        """Get the run stage of the workflow.
+        
+        Returns:
+            Enum:
+                The run stage of the workflow.
+        """
+        return self.run_stage
+    
+    def set_run_stage(self, run_stage: Enum) -> None:
+        """Set the run stage of the workflow.
+        
+        Args:
+            run_stage (Enum):
+                The run stage to set.
+        """
+        self.run_stage = run_stage
+        
+    def get_prompt(self) -> str:
+        """Get the prompt of the workflow.
+        
+        Returns:
+            str:
+                The prompt of the workflow.
+        """
+        return self.prompts[self.run_stage]
+    
+    def get_observe_format(self) -> str:
+        """Get the observe format of the workflow.
+        
+        Returns:
+            str:
+                The observe format of the workflow.
+        """
+        return self.observe_formats[self.run_stage]
+    
+    def get_sub_workflow(self, sub_workflow_name: str) -> 'Workflow':
+        """Get the sub-workflow of the workflow.
+        
+        Args:
+            sub_workflow_name (str):
+                The name of the sub-workflow.
+                
+        Returns:
+            Workflow:
+                The sub-workflow of the workflow.
+        """
+        return self.sub_workflows[sub_workflow_name]
+    
     def register_agent(self, agent: Agent) -> None:
         """Register an agent to the workflow.
         

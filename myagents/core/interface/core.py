@@ -1,7 +1,7 @@
-from abc import ABC, abstractmethod
+from abc import  abstractmethod
 from asyncio import Semaphore, Lock
 from enum import Enum
-from typing import Any, Union
+from typing import Any, Union, Protocol, runtime_checkable
 
 from fastmcp.tools import Tool as FastMcpTool
 from fastmcp import Client as MCPClient
@@ -12,7 +12,8 @@ from myagents.core.interface.memory import MemoryOperation, VectorMemoryCollecti
 from myagents.schemas.messages import AssistantMessage, UserMessage, SystemMessage, ToolCallResult, ToolCallRequest
 
 
-class StepCounter(ABC):
+@runtime_checkable
+class StepCounter(Protocol):
     """步骤计数器的协议。限制可以是最大自动步骤或最大余额成本。最好为所有Agent使用相同的步骤计数器。
     
     属性:
@@ -91,7 +92,8 @@ class StepCounter(ABC):
         pass
 
 
-class Agent(ABC):
+@runtime_checkable
+class Agent(Protocol):
     """在环境中运行的Agent，根据工作流处理任务
     
     属性:
@@ -442,24 +444,66 @@ class Workflow(ToolsCaller, Scheduler):
     工作流不负责任务或环境的状态。
     
     属性:
-        profile (str):
-            工作流的描述文件。描述工作流的行为和目标
-        agent (Agent):
-            与工作流一起工作的Agent
-        prompts (dict[str, str]):
-            工作流的提示。键是提示名称，值是提示内容
-        observe_formats (dict[str, str]):
-            观察的格式。键是观察名称，值是格式方法名称
-        sub_workflows (dict[str, 'Workflow']):
-            工作流的子工作流。键是子工作流的名称，值是子工作流实例
+        get_run_stage (Enum):
+            获取工作流当前的运行阶段
+        set_run_stage (Enum):
+            设置工作流的运行阶段
+        get_prompt (str):
+            获取工作流当前状态的提示词
+        get_observe_format (str):
+            获取工作流当前状态的观察格式
+        get_sub_workflow (str):
+            获取工作流的子工作流
+        register_agent (Agent):
+            向工作流注册Agent
+        run (Stateful, int, int, CompletionConfig, **kwargs):
+            运行工作流以修改有状态实体
     """
-    # 基本信息
-    profile: str
-    agent: Agent
-    prompts: dict[str, str]
-    observe_formats: dict[str, str]
-    # 子工作流
-    sub_workflows: dict[str, 'Workflow']
+    
+    @abstractmethod
+    def get_run_stage(self) -> Enum:
+        """获取工作流当前的运行阶段
+        
+        返回:
+            Enum: 
+                工作流当前的运行阶段
+        """
+    
+    @abstractmethod
+    def set_run_stage(self, run_stage: Enum) -> None:
+        """设置工作流的运行阶段
+        
+        参数:
+            run_stage (Enum):
+                工作流的运行阶段
+        """
+        
+    @abstractmethod
+    def get_prompt(self) -> str:
+        """获取工作流当前状态的提示词
+        
+        返回:
+            str:
+                工作流当前状态的提示词
+        """
+        
+    @abstractmethod
+    def get_observe_format(self) -> str:
+        """获取工作流当前状态的观察格式
+        
+        返回:
+            str:
+                工作流当前状态的观察格式
+        """
+        
+    @abstractmethod
+    def get_sub_workflow(self, sub_workflow_name: str) -> 'Workflow':
+        """获取工作流的子工作流
+        
+        参数:
+            sub_workflow_name (str):
+                子工作流名称
+        """
     
     @abstractmethod
     def register_agent(self, agent: Agent) -> None:
@@ -631,6 +675,17 @@ class Environment(Stateful, ToolsCaller, Scheduler):
     agents: dict[str, Agent]
     agent_type_map: dict[Enum, list[str]]
     agent_type_semaphore: dict[Enum, Semaphore]
+    
+    def __init__(self, *args, **kwargs) -> None:
+        """Initialize the Environment.
+        
+        Args:
+            *args:
+                The arguments to be passed to the parent class.
+            **kwargs:
+                The keyword arguments to be passed to the parent class.
+        """
+        super().__init__(*args, **kwargs)
     
     @abstractmethod
     def register_agent(self, agent: Agent) -> None:

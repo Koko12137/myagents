@@ -398,7 +398,6 @@ class BaseAgent(Agent):
         """
         self.step_counters[counter.uid] = counter
 
-
     def register_workflow(self, workflow: Workflow) -> None:
         """为智能体注册工作流。
         
